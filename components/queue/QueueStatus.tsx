@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { WaitEstimate } from '@/lib/types/database.types'
 import { QueueStatusCard } from './QueueStatusCard'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 const DEBOUNCE_MS = 500
 
@@ -70,9 +71,19 @@ export function QueueStatus({ entryId, serviceId, initialEstimate }: QueueStatus
   }, [supabase, serviceId, scheduleRefresh, refresh])
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {!online && <OfflineBanner fullWidth />}
       <QueueStatusCard estimate={estimate} />
+
+      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+        <p className="text-xs font-semibold tracking-wide text-muted">RECENT UPDATES</p>
+        {/* Static placeholder — notifications land in Slice 6. */}
+        <EmptyState
+          headline="No updates yet"
+          body="Notifications aren't live yet — coming in a later slice."
+          fullWidth
+        />
+      </section>
     </div>
   )
 }

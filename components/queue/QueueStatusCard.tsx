@@ -43,7 +43,9 @@ export function QueueStatusCard({ estimate }: { estimate: WaitEstimate }) {
       {isInProgress ? null : isNotBeingServed ? (
         <p className="text-sm text-muted">Not currently being served</p>
       ) : (
-        estimated_wait_minutes !== null && (
+        // > 0, not just !== null: a 0-minute estimate (e.g. you're up next
+        // with nobody ahead) should show no number at all, never "~0 min".
+        estimated_wait_minutes !== null && estimated_wait_minutes > 0 && (
           <div className="flex items-center gap-2">
             <span className="font-mono text-2xl font-semibold tabular-nums text-ink">
               ~{estimated_wait_minutes} min

@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { QueueStatus } from '@/components/queue/QueueStatus'
+import { EmptyState } from '@/components/ui/EmptyState'
 
 /**
  * Patient Queue Status screen (Slice 2).
@@ -49,12 +50,11 @@ export default async function QueuePage() {
           initialEstimate={initialEstimate}
         />
       ) : (
-        <div className="rounded-lg border border-border bg-surface p-6 text-center">
-          <p className="text-sm font-semibold text-ink">No active queue entry</p>
-          <p className="mt-1 text-sm text-muted">
-            Check in at reception to join the queue.
-          </p>
-        </div>
+        <EmptyState
+          headline="No active queue entry"
+          body="Check in at reception to join the queue."
+          fullWidth
+        />
       )}
     </main>
   )
