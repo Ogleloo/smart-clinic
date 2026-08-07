@@ -8,6 +8,7 @@ interface AppointmentCardProps {
   scheduledAt: string
   status: AppointmentStatus
   action?: ReactNode
+  fullWidth?: boolean
 }
 
 // appointment_status has more states than the shared StatusChip's spec'd
@@ -32,10 +33,18 @@ function formatDateTime(scheduledAt: string) {
   return `${datePart} · ${timePart}`
 }
 
-/** Design System: Appointment summary card. Hugs its content — no fixed or min height. */
-export function AppointmentCard({ serviceName, scheduledAt, status, action }: AppointmentCardProps) {
+/** Design System: Appointment summary card. Hugs its content by default (no fixed width or height) — pass fullWidth to fill the parent. */
+export function AppointmentCard({
+  serviceName,
+  scheduledAt,
+  status,
+  action,
+  fullWidth = false,
+}: AppointmentCardProps) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
+    <div
+      className={`inline-flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 ${fullWidth ? 'w-full' : ''}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-display text-base font-semibold text-ink">{serviceName}</p>

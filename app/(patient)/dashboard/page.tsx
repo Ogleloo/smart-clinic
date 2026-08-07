@@ -1,12 +1,11 @@
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { logout } from '@/app/actions/auth'
 import { Button } from '@/components/ui/Button'
 import { LinkButton } from '@/components/ui/LinkButton'
 import { AppointmentCard } from '@/components/ui/AppointmentCard'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { QueueToken } from '@/components/ui/QueueToken'
+import { QueueSummaryCard } from '@/components/ui/QueueSummaryCard'
 
 /**
  * Patient dashboard — Milestone 8 Vertical Slice 1.
@@ -74,20 +73,7 @@ export default async function DashboardPage() {
         {queueError && (
           <p className="text-sm text-danger">Couldn&rsquo;t check your queue status. Try refreshing.</p>
         )}
-        {activeEntry && (
-          <Link
-            href="/queue"
-            className="flex items-center justify-between rounded-2xl border border-border bg-surface p-5"
-          >
-            <div>
-              <p className="text-xs font-semibold tracking-wide text-muted">YOUR QUEUE TOKEN</p>
-              <div className="mt-1">
-                <QueueToken token={activeEntry.token} size="sm" />
-              </div>
-            </div>
-            <span className="text-sm font-semibold text-primary-700">View status →</span>
-          </Link>
-        )}
+        {activeEntry && <QueueSummaryCard token={activeEntry.token} fullWidth />}
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
           <p className="text-xs font-semibold tracking-wide text-muted">NEXT APPOINTMENT</p>
@@ -98,6 +84,7 @@ export default async function DashboardPage() {
               serviceName={nextAppointment.service?.name ?? 'Appointment'}
               scheduledAt={nextAppointment.scheduled_time}
               status={nextAppointment.status}
+              fullWidth
             />
           ) : (
             <EmptyState
@@ -108,6 +95,7 @@ export default async function DashboardPage() {
                   Book appointment
                 </LinkButton>
               }
+              fullWidth
             />
           )}
         </section>

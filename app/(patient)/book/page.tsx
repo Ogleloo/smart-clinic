@@ -17,6 +17,7 @@ export default async function BookPage() {
         headline="Booking is coming soon"
         body="This flow isn&rsquo;t built yet — check back shortly."
         action={<LinkButton href="/dashboard" variant="secondary">Back to dashboard</LinkButton>}
+        fullWidth
       />
     </main>
   )

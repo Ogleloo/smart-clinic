@@ -71,7 +71,7 @@ export function QueueStatus({ entryId, serviceId, initialEstimate }: QueueStatus
 
   return (
     <div className="flex flex-col gap-3">
-      {!online && <OfflineBanner />}
+      {!online && <OfflineBanner fullWidth />}
       <QueueStatusCard estimate={estimate} />
     </div>
   )
