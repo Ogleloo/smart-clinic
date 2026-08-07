@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* Design System tokens — names match the Figma variables exactly,
+   so a component styled in Figma maps directly to Tailwind classes. */
+@theme {
+  --color-primary-50:  #E6F2EF;
+  --color-primary-100: #C3E0DA;
+  --color-primary-500: #16897A;
+  --color-primary-600: #0F766E;
+  --color-primary-700: #0B6B5E;
+  --color-primary-900: #06342D;
+
+  --color-paper:   #F6F8F7;
+  --color-surface: #FFFFFF;
+  --color-subtle:  #EEF2F0;
+  --color-border:  #DCE4E1;
+  --color-muted:   #566461;
+  --color-ink:     #14201E;
+
+  --color-success:    #1F7A4D;
+  --color-success-bg: #E4F2EA;
+  --color-warning:    #9A6700;
+  --color-warning-bg: #FBF0D9;
+  --color-danger:     #B42318;
+  --color-danger-bg:  #FBEAE8;
+  --color-info:       #566461;
+  --color-info-bg:    #EEF2F0;
+
+  --font-display: var(--font-hanken), system-ui, sans-serif;
+  --font-sans:    var(--font-inter), system-ui, sans-serif;
+  --font-mono:    var(--font-plex-mono), ui-monospace, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Numbers that change live must not jitter (Design System §4). */
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Accessibility: focus is always visible, never removed (§12). */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--color-primary-700);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
