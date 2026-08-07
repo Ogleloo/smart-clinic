@@ -22,14 +22,24 @@ const STATUS_TO_CHIP: Record<AppointmentStatus, StatusChipVariant> = {
   no_show: 'cancelled',
 }
 
+// Always the clinic's timezone, never the viewer's (ADR-020) — a patient
+// or server rendering this from outside Africa/Johannesburg must still
+// see the time the clinic means.
+const CLINIC_TIMEZONE = 'Africa/Johannesburg'
+
 function formatDateTime(scheduledAt: string) {
   const when = new Date(scheduledAt)
   const datePart = when.toLocaleDateString('en-GB', {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
+    timeZone: CLINIC_TIMEZONE,
   })
-  const timePart = when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const timePart = when.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: CLINIC_TIMEZONE,
+  })
   return `${datePart} · ${timePart}`
 }
 
