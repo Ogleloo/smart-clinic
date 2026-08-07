@@ -1,5 +1,3 @@
-// Generated from the live database (ADR-014).
-// Regenerate after every migration so the schema stays the single source of truth.
 export type Json =
   | string
   | number
