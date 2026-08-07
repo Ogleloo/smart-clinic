@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { StatusChip, type StatusChipVariant } from './StatusChip'
 import type { AppointmentStatus } from '@/lib/types/database.types'
+import { CLINIC_TIMEZONE } from '@/lib/clinicTime'
 
 interface AppointmentCardProps {
   serviceName: string
@@ -14,18 +15,13 @@ interface AppointmentCardProps {
 // appointment_status has more states than the shared StatusChip's spec'd
 // variant set — map the ones StatusChip doesn't name onto the closest
 // visual meaning rather than growing StatusChip's variants for one caller.
-const STATUS_TO_CHIP: Record<AppointmentStatus, StatusChipVariant> = {
+export const APPOINTMENT_STATUS_TO_CHIP: Record<AppointmentStatus, StatusChipVariant> = {
   booked: 'booked',
   checked_in: 'in-progress',
   completed: 'done',
   cancelled: 'cancelled',
   no_show: 'cancelled',
 }
-
-// Always the clinic's timezone, never the viewer's (ADR-020) — a patient
-// or server rendering this from outside Africa/Johannesburg must still
-// see the time the clinic means.
-const CLINIC_TIMEZONE = 'Africa/Johannesburg'
 
 function formatDateTime(scheduledAt: string) {
   const when = new Date(scheduledAt)
@@ -60,7 +56,7 @@ export function AppointmentCard({
           <p className="font-display text-base font-semibold text-ink">{serviceName}</p>
           <p className="mt-0.5 text-sm text-muted">{formatDateTime(scheduledAt)}</p>
         </div>
-        <StatusChip status={STATUS_TO_CHIP[status]} />
+        <StatusChip status={APPOINTMENT_STATUS_TO_CHIP[status]} />
       </div>
       {action}
     </div>

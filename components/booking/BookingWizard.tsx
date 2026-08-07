@@ -4,23 +4,12 @@ import { useActionState, useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { bookAppointment, type ActionState } from '@/app/actions/appointments'
 import { Button } from '@/components/ui/Button'
-
-interface Service {
-  id: string
-  name: string
-}
+import { ServicePicker, type Service } from '@/components/booking/ServicePicker'
+import { CLINIC_TIMEZONE, todayInClinicTimezone } from '@/lib/clinicTime'
 
 interface Slot {
   slot_time: string
   is_taken: boolean
-}
-
-// Times are always shown in the clinic's timezone, never the viewer's —
-// the backend derives scheduled_date the same way (ADR-020).
-const CLINIC_TIMEZONE = 'Africa/Johannesburg'
-
-function todayInClinicTimezone(): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: CLINIC_TIMEZONE }).format(new Date())
 }
 
 function formatSlotTime(iso: string): string {
@@ -103,23 +92,7 @@ export function BookingWizard({ services }: { services: Service[] }) {
     <div className="flex flex-col gap-5">
       <section className="flex flex-col gap-2">
         <p className="text-xs font-semibold tracking-wide text-muted">1. SERVICE</p>
-        <div className="flex flex-col gap-2">
-          {services.map((service) => (
-            <button
-              key={service.id}
-              type="button"
-              onClick={() => handleSelectService(service.id)}
-              aria-pressed={serviceId === service.id}
-              className={`min-h-11 rounded-lg border px-4 py-3 text-left text-sm font-semibold transition-colors ${
-                serviceId === service.id
-                  ? 'border-primary-700 bg-primary-50 text-primary-700'
-                  : 'border-border bg-surface text-ink hover:bg-subtle'
-              }`}
-            >
-              {service.name}
-            </button>
-          ))}
-        </div>
+        <ServicePicker services={services} selectedId={serviceId} onSelect={handleSelectService} />
       </section>
 
       {selectedService && (
