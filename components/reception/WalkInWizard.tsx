@@ -51,12 +51,17 @@ export function WalkInWizard({ services }: { services: Service[] }) {
 
   const trimmedQuery = query.trim()
 
-  // Debounced search — the trailing setState calls all happen inside the
-  // timeout callback, not synchronously in the effect body.
+  // Debounced search. `searching` is flipped on synchronously in
+  // handleQueryChange below (a plain event handler, not an effect) the
+  // moment a qualifying query exists — not here, 300ms later when the
+  // timer fires. Setting it only inside the timeout left a ~300ms
+  // window, on every qualifying keystroke, where searching was still
+  // false and results was still null from the previous query, which
+  // fell through to the "No matching patient" empty state before any
+  // search had actually run.
   useEffect(() => {
     if (trimmedQuery.length < MIN_QUERY_LENGTH) return
     const timer = setTimeout(async () => {
-      setSearching(true)
       setSearchError(null)
       const { data, error } = await supabase.rpc('search_patients', { p_query: trimmedQuery })
       if (error) {
@@ -69,6 +74,11 @@ export function WalkInWizard({ services }: { services: Service[] }) {
     }, SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [supabase, trimmedQuery])
+
+  function handleQueryChange(value: string) {
+    setQuery(value)
+    setSearching(value.trim().length >= MIN_QUERY_LENGTH)
+  }
 
   // A new walk-in patient was just created — select them and move on.
   // Reacting to the server action's result, not a user event, so an
@@ -133,7 +143,7 @@ export function WalkInWizard({ services }: { services: Service[] }) {
                 label="Search by name or phone"
                 placeholder="Type at least 2 characters…"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => handleQueryChange(e.target.value)}
               />
 
               {trimmedQuery.length < MIN_QUERY_LENGTH ? null : searching ? (
