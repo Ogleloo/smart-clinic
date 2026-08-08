@@ -46,6 +46,18 @@ export function CurrentPatientPanel({ initialEntry, initialStartedAt }: CurrentP
   const [skipState, skipFormAction, skipping] = useActionState<SkipState, FormData>(skipPatient, {})
 
   // Each of these reacts to a server action's result, not a user event.
+  // Deliberately depends on the whole state object from useActionState,
+  // not a field of it: callState.entry/endState.result are objects
+  // (safe either way, since a fresh object is returned every dispatch),
+  // but startState.startedAt (a string) and skipState.skipped (a
+  // boolean) are primitives that can repeat the exact same value across
+  // two separate, real dispatches — a second skip in the same mounted
+  // session would return {skipped: true} again, an unchanged value, so
+  // an effect keyed on that field alone would fire once, ever, and
+  // silently stop clearing the display on every skip after the first.
+  // useActionState gives every dispatch a fresh object reference
+  // regardless of field values, so keying on the object itself is the
+  // one pattern that's correct for all four.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (callState.entry) {
@@ -53,23 +65,23 @@ export function CurrentPatientPanel({ initialEntry, initialStartedAt }: CurrentP
       setStartedAt(null)
       setEndResult(null)
     }
-  }, [callState.entry])
+  }, [callState])
   useEffect(() => {
     if (startState.startedAt) setStartedAt(startState.startedAt)
-  }, [startState.startedAt])
+  }, [startState])
   useEffect(() => {
     if (endState.result) {
       setEndResult(endState.result)
       setEntry(null)
       setStartedAt(null)
     }
-  }, [endState.result])
+  }, [endState])
   useEffect(() => {
     if (skipState.skipped) {
       setEntry(null)
       setStartedAt(null)
     }
-  }, [skipState.skipped])
+  }, [skipState])
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Elapsed timer — ticks only while a consultation is actually running.

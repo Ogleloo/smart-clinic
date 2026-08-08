@@ -84,6 +84,7 @@ export type Database = {
           confidence_inconsistent_stddev_minutes: number
           confidence_min_count_floor: number
           max_plausible_consultation_minutes: number
+          min_booking_lead_minutes: number
           min_plausible_consultation_minutes: number
           no_show_grace_minutes: number
           updated_at: string
@@ -96,6 +97,7 @@ export type Database = {
           confidence_inconsistent_stddev_minutes?: number
           confidence_min_count_floor?: number
           max_plausible_consultation_minutes?: number
+          min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
           updated_at?: string
@@ -108,6 +110,7 @@ export type Database = {
           confidence_inconsistent_stddev_minutes?: number
           confidence_min_count_floor?: number
           max_plausible_consultation_minutes?: number
+          min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
           updated_at?: string
@@ -673,6 +676,22 @@ export type Database = {
           new_service_average: number
         }[]
       }
+      find_duplicate_patients: {
+        Args: never
+        Returns: {
+          profile_a: string
+          name_a: string
+          phone_a: string | null
+          has_login_a: boolean
+          history_a: number
+          profile_b: string
+          name_b: string
+          phone_b: string | null
+          has_login_b: boolean
+          history_b: number
+          match_reason: string
+        }[]
+      }
       get_available_slots: {
         Args: {
           p_close?: string
@@ -711,6 +730,15 @@ export type Database = {
         }[]
       }
       mark_notifications_read: { Args: { p_ids: string[] }; Returns: number }
+      merge_patient_profiles: {
+        Args: { p_keep_id: string; p_merge_id: string }
+        Returns: {
+          queue_entries_moved: number
+          appointments_moved: number
+          notifications_moved: number
+          audit_refs_moved: number
+        }[]
+      }
       prune_queue_events: { Args: never; Returns: undefined }
       search_patients: {
         Args: { p_query: string }

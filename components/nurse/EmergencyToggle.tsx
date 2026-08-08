@@ -20,13 +20,19 @@ export function EmergencyToggle({ queueEntryId, isEmergency }: EmergencyTogglePr
   // Reacting to the server action's own result, not the click itself —
   // an onClick that also flips `confirming` synchronously raced the
   // native form submission (the button unmounting mid-click silently
-  // dropped it; the RPC never fired). Waiting for state.success is the
-  // same pattern used elsewhere in this app for "did the action really
-  // complete" (e.g. WalkInWizard's createState.patient).
+  // dropped it; the RPC never fired).
+  //
+  // Depends on the whole `state` object, not state.success: a second
+  // toggle in the same mounted row would return {success: true} again,
+  // an unchanged boolean value, so an effect keyed on state.success
+  // alone would only fire once, ever, per row — every toggle after the
+  // first would leave the confirm form stuck open despite succeeding.
+  // useActionState gives every dispatch a fresh object reference, so
+  // keying on the object itself catches every one, not just the first.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (state.success) setConfirming(false)
-  }, [state.success])
+  }, [state])
 
   if (!confirming) {
     return (

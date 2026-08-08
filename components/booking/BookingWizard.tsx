@@ -82,11 +82,18 @@ export function BookingWizard({ services }: { services: Service[] }) {
     // effect is the correct place for this (react.dev/learn/you-might-not-need-an-effect#fetching-data).
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (state.error && serviceId) fetchSlots(serviceId, date)
-    // Deliberately only [state.error]: serviceId/date changes already
-    // trigger a fetch via the select/date handlers above, so reacting to
-    // them here too would double-fetch.
+    // Depends on the whole `state` object, not state.error: two
+    // separate failed bookings can produce the identical error string
+    // ("That slot was just taken." is plausible twice in a row on a
+    // busy day), and useActionState only guarantees a fresh object
+    // reference per dispatch, not a fresh error message — keying on
+    // the string would silently stop re-triggering the stale-grid
+    // refresh after the first time that exact message appeared.
+    // serviceId/date are deliberately excluded: those changes already
+    // trigger a fetch via the select/date handlers above, so reacting
+    // to them here too would double-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.error])
+  }, [state])
 
   return (
     <div className="flex flex-col gap-5">

@@ -12,6 +12,16 @@ export function todayInClinicTimezone(): string {
 }
 
 /**
+ * Date.now() called directly in a Server Component's render body trips
+ * react-hooks/purity (components must be idempotent) — wrapping it in
+ * a plain helper, called rather than inlined, keeps the same impure
+ * call out of the component function itself.
+ */
+export function isoNDaysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString()
+}
+
+/**
  * "4 min ago" is a duration (now minus created_at), so it reads the
  * same regardless of which zone it's computed in — only the absolute
  * fallback past a week needs an explicit timezone, and that one uses
