@@ -104,7 +104,9 @@ export function SettingsForm({ settings }: { settings: ClinicSettings }) {
       )}
       {showSaved && (
         <p role="status" className="text-sm font-semibold text-success">
-          Saved.
+          {state.changed && state.changed.length > 0
+            ? `Saved — updated ${state.changed.join(', ')}.`
+            : 'Saved — no changes.'}
         </p>
       )}
 

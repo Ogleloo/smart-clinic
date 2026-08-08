@@ -30,6 +30,22 @@ const SEARCH_DEBOUNCE_MS = 300
 const MIN_QUERY_LENGTH = 2
 
 export function WalkInWizard({ services }: { services: Service[] }) {
+  // Keying on a counter forces a full remount on reset, which is the only
+  // way to clear useActionState's internal state (createState.patient,
+  // checkInState.token) — there's no imperative reset for that hook, and
+  // without this the "Checked in" screen never goes away after the first
+  // walk-in of the day.
+  const [instanceKey, setInstanceKey] = useState(0)
+  return (
+    <WalkInWizardInner
+      key={instanceKey}
+      services={services}
+      onReset={() => setInstanceKey((k) => k + 1)}
+    />
+  )
+}
+
+function WalkInWizardInner({ services, onReset }: { services: Service[]; onReset: () => void }) {
   const [supabase] = useState(() => createClient())
   const [serviceId, setServiceId] = useState<string | null>(null)
 
@@ -92,21 +108,13 @@ export function WalkInWizard({ services }: { services: Service[] }) {
   }, [createState.patient])
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  function reset() {
-    setServiceId(null)
-    setQuery('')
-    setResults(null)
-    setShowAddForm(false)
-    setSelectedPatient(null)
-  }
-
   if (checkInState.token) {
     return (
       <div className="flex flex-col items-center gap-4 rounded-lg border border-border bg-surface p-8 text-center">
         <p className="text-sm font-semibold text-muted">Checked in</p>
         <QueueToken token={checkInState.token} size="lg" />
         <p className="text-sm text-ink">Tell the patient their number.</p>
-        <Button variant="primary" onClick={reset}>
+        <Button variant="primary" onClick={onReset}>
           Register another walk-in
         </Button>
       </div>

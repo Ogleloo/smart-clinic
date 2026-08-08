@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import type { Database } from '@/lib/types/database.types'
 
 async function requireAdminClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -76,7 +77,7 @@ export async function updateService(_prev: ServiceFormState, formData: FormData)
   return { success: true }
 }
 
-export type SettingsFormState = { error?: string; success?: boolean }
+export type SettingsFormState = { error?: string; success?: boolean; changed?: string[] }
 
 export async function updateClinicSettings(
   _prev: SettingsFormState,
@@ -130,24 +131,33 @@ export async function updateClinicSettings(
     return { error: 'The high-confidence sample size must be at least the minimum floor.' }
   }
 
-  const { error } = await supabase
+  const newValues = {
+    confidence_min_count_floor: confidenceMinCountFloor,
+    confidence_high_min_count: confidenceHighMinCount,
+    confidence_consistent_stddev_minutes: confidenceConsistentStddevMinutes,
+    confidence_inconsistent_stddev_minutes: confidenceInconsistentStddevMinutes,
+    capacity_threshold: capacityThreshold,
+    min_plausible_consultation_minutes: minPlausibleConsultationMinutes,
+    max_plausible_consultation_minutes: maxPlausibleConsultationMinutes,
+    no_show_grace_minutes: noShowGraceMinutes,
+    min_booking_lead_minutes: minBookingLeadMinutes,
+  } satisfies Database['public']['Tables']['clinic_settings']['Update']
+
+  const { data: previous } = await supabase
     .from('clinic_settings')
-    .update({
-      confidence_min_count_floor: confidenceMinCountFloor,
-      confidence_high_min_count: confidenceHighMinCount,
-      confidence_consistent_stddev_minutes: confidenceConsistentStddevMinutes,
-      confidence_inconsistent_stddev_minutes: confidenceInconsistentStddevMinutes,
-      capacity_threshold: capacityThreshold,
-      min_plausible_consultation_minutes: minPlausibleConsultationMinutes,
-      max_plausible_consultation_minutes: maxPlausibleConsultationMinutes,
-      no_show_grace_minutes: noShowGraceMinutes,
-      min_booking_lead_minutes: minBookingLeadMinutes,
-    })
+    .select('*')
     .eq('clinic_id', clinicId)
+    .single()
+
+  const { error } = await supabase.from('clinic_settings').update(newValues).eq('clinic_id', clinicId)
   if (error) return { error: error.message }
 
+  const changed = (Object.keys(newValues) as (keyof typeof newValues)[]).filter(
+    (key) => previous?.[key] !== newValues[key]
+  )
+
   revalidatePath('/admin/settings')
-  return { success: true }
+  return { success: true, changed: changed.map((key) => fieldLabels[key]) }
 }
 
 export type StaffFormState = { error?: string; success?: boolean }
@@ -164,20 +174,17 @@ export async function updateStaffMember(_prev: StaffFormState, formData: FormDat
 
   const supabase = await createClient()
 
-  // A staff member can't deactivate or demote themselves out of admin —
-  // that would leave the clinic with no one able to undo the change.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  const { data: self } = await supabase.from('profiles').select('id').eq('auth_user_id', user?.id ?? '').single()
-  if (self?.id === id && (!isActive || role !== 'admin')) {
-    return { error: 'You cannot deactivate or demote your own account.' }
-  }
-
-  const { error } = await supabase
-    .from('profiles')
-    .update({ role: role as (typeof STAFF_ROLES)[number], is_active: isActive })
-    .eq('id', id)
+  // profiles has no table-level UPDATE grant beyond (full_name, phone) —
+  // a blanket grant would let a patient set their own role to 'admin'
+  // via profiles_update_own. admin_set_staff_status is SECURITY DEFINER
+  // and enforces the self-lockout guard (an admin can't change their own
+  // role or active status) server-side, so it's used here instead of a
+  // direct table update.
+  const { error } = await supabase.rpc('admin_set_staff_status', {
+    p_profile_id: id,
+    p_is_active: isActive,
+    p_role: role as (typeof STAFF_ROLES)[number],
+  })
   if (error) return { error: error.message }
 
   revalidatePath('/admin/staff')

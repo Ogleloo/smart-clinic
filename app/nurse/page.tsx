@@ -3,6 +3,7 @@ import { todayInClinicTimezone } from '@/lib/clinicTime'
 import { DutyControl } from '@/components/nurse/DutyControl'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
+import { LogoutButton } from '@/components/ui/LogoutButton'
 import type { Database } from '@/lib/types/database.types'
 
 type QueueRow = Database['public']['Functions']['get_service_queue']['Returns'][number]
@@ -79,9 +80,12 @@ export default async function NursePage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-6 px-6 py-6">
-      <h1 className="font-display text-2xl font-bold text-ink">
-        Nurse{profile?.full_name ? ` — ${profile.full_name}` : ''}
-      </h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-display text-2xl font-bold text-ink">
+          Nurse{profile?.full_name ? ` — ${profile.full_name}` : ''}
+        </h1>
+        <LogoutButton />
+      </div>
 
       <DutyControl
         services={services ?? []}

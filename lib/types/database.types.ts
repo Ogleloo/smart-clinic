@@ -83,10 +83,12 @@ export type Database = {
           confidence_high_min_count: number
           confidence_inconsistent_stddev_minutes: number
           confidence_min_count_floor: number
+          long_consultation_multiplier: number
           max_plausible_consultation_minutes: number
           min_booking_lead_minutes: number
           min_plausible_consultation_minutes: number
           no_show_grace_minutes: number
+          undo_window_seconds: number
           updated_at: string
         }
         Insert: {
@@ -96,10 +98,12 @@ export type Database = {
           confidence_high_min_count?: number
           confidence_inconsistent_stddev_minutes?: number
           confidence_min_count_floor?: number
+          long_consultation_multiplier?: number
           max_plausible_consultation_minutes?: number
           min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
+          undo_window_seconds?: number
           updated_at?: string
         }
         Update: {
@@ -109,10 +113,12 @@ export type Database = {
           confidence_high_min_count?: number
           confidence_inconsistent_stddev_minutes?: number
           confidence_min_count_floor?: number
+          long_consultation_multiplier?: number
           max_plausible_consultation_minutes?: number
           min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
+          undo_window_seconds?: number
           updated_at?: string
         }
         Relationships: [
@@ -162,6 +168,8 @@ export type Database = {
         Row: {
           created_at: string
           ended_at: string | null
+          exclude_from_prediction: boolean
+          exclusion_reason: string | null
           id: string
           nurse_id: string
           queue_entry_id: string
@@ -171,6 +179,8 @@ export type Database = {
         Insert: {
           created_at?: string
           ended_at?: string | null
+          exclude_from_prediction?: boolean
+          exclusion_reason?: string | null
           id?: string
           nurse_id: string
           queue_entry_id: string
@@ -180,6 +190,8 @@ export type Database = {
         Update: {
           created_at?: string
           ended_at?: string | null
+          exclude_from_prediction?: boolean
+          exclusion_reason?: string | null
           id?: string
           nurse_id?: string
           queue_entry_id?: string
@@ -262,6 +274,41 @@ export type Database = {
           {
             foreignKeyName: "notifications_recipient_id_fkey"
             columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nurse_actions: {
+        Row: {
+          action_id: string
+          created_at: string
+          id: string
+          nurse_id: string
+          result: Json
+          undone_at: string | null
+        }
+        Insert: {
+          action_id: string
+          created_at?: string
+          id?: string
+          nurse_id: string
+          result: Json
+          undone_at?: string | null
+        }
+        Update: {
+          action_id?: string
+          created_at?: string
+          id?: string
+          nurse_id?: string
+          result?: Json
+          undone_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nurse_actions_nurse_id_fkey"
+            columns: ["nurse_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -503,6 +550,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      admin_set_staff_status: {
+        Args: {
+          p_is_active?: boolean
+          p_profile_id: string
+          p_role?: Database["public"]["Enums"]["user_role"]
+        }
+        Returns: {
+          auth_user_id: string | null
+          clinic_id: string | null
+          created_at: string
+          current_service_id: string | null
+          full_name: string
+          id: string
+          is_active: boolean
+          is_on_duty: boolean
+          phone: string | null
+          role: Database["public"]["Enums"]["user_role"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       auth_clinic_id: { Args: never; Returns: string }
       auth_profile_id: { Args: never; Returns: string }
       auth_role: {
@@ -679,17 +752,17 @@ export type Database = {
       find_duplicate_patients: {
         Args: never
         Returns: {
-          profile_a: string
-          name_a: string
-          phone_a: string | null
           has_login_a: boolean
-          history_a: number
-          profile_b: string
-          name_b: string
-          phone_b: string | null
           has_login_b: boolean
+          history_a: number
           history_b: number
           match_reason: string
+          name_a: string
+          name_b: string
+          phone_a: string
+          phone_b: string
+          profile_a: string
+          profile_b: string
         }[]
       }
       get_available_slots: {
@@ -730,14 +803,53 @@ export type Database = {
         }[]
       }
       mark_notifications_read: { Args: { p_ids: string[] }; Returns: number }
+      mark_overdue_no_shows: {
+        Args: never
+        Returns: {
+          marked_count: number
+          marked_ids: string[]
+        }[]
+      }
       merge_patient_profiles: {
         Args: { p_keep_id: string; p_merge_id: string }
         Returns: {
-          queue_entries_moved: number
           appointments_moved: number
-          notifications_moved: number
           audit_refs_moved: number
+          notifications_moved: number
+          queue_entries_moved: number
         }[]
+      }
+      next_patient: {
+        Args: { p_action_id: string; p_long_decision?: string }
+        Returns: Json
+      }
+      nth_waiting_entry: {
+        Args: { p_n: number; p_service_id: string }
+        Returns: {
+          appointment_id: string | null
+          called_at: string | null
+          checked_in_at: string
+          clinic_id: string
+          completed_at: string | null
+          created_at: string
+          id: string
+          patient_id: string
+          priority: number
+          priority_set_at: string | null
+          priority_set_by: string | null
+          queue_date: string
+          service_id: string
+          status: Database["public"]["Enums"]["queue_entry_status"]
+          token: string
+          token_number: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "queue_entries"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       prune_queue_events: { Args: never; Returns: undefined }
       search_patients: {
@@ -840,6 +952,8 @@ export type Database = {
         Returns: {
           created_at: string
           ended_at: string | null
+          exclude_from_prediction: boolean
+          exclusion_reason: string | null
           id: string
           nurse_id: string
           queue_entry_id: string
@@ -862,6 +976,7 @@ export type Database = {
           status: string
         }[]
       }
+      undo_next_patient: { Args: { p_action_id: string }; Returns: Json }
     }
     Enums: {
       appointment_status:
