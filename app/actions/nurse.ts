@@ -79,13 +79,28 @@ export async function startConsultation(_prev: StartState, formData: FormData): 
   return { startedAt: data.started_at }
 }
 
-export type EndResult = { durationMinutes: number; newServiceAverage: number; newConfidence: string }
+export type EndResult = {
+  durationMinutes: number
+  newServiceAverage: number
+  newConfidence: string
+  /** false when duration_minutes fell outside ADR-022's plausibility band and was excluded from the average. */
+  counted: boolean
+  notCountedReason?: string
+}
 export type EndState = { error?: string; result?: EndResult }
 
 /**
  * This is the feedback loop: the recorded duration feeds the running
  * service average end_consultation returns, which is what
  * get_wait_estimate's confidence label is ultimately built from.
+ *
+ * end_consultation itself doesn't say whether THIS duration was inside
+ * or outside ADR-022's plausibility band -- it just returns the raw
+ * duration alongside the (possibly unchanged) average. Reading the
+ * band's bounds from clinic_settings and comparing here is display-only
+ * (mirroring, not re-implementing, filtering the backend already did)
+ * so the nurse isn't told something was "recorded" when the engine
+ * actually discarded it.
  */
 export async function endConsultation(_prev: EndState, formData: FormData): Promise<EndState> {
   const queueEntryId = String(formData.get('queue_entry_id') ?? '')
@@ -97,12 +112,34 @@ export async function endConsultation(_prev: EndState, formData: FormData): Prom
     .single()
   if (error) return { error: error.message }
 
+  const { data: settings } = await supabase
+    .from('clinic_settings')
+    .select('min_plausible_consultation_minutes, max_plausible_consultation_minutes')
+    .maybeSingle()
+
+  let counted = true
+  let notCountedReason: string | undefined
+  if (settings) {
+    if (data.duration_minutes < settings.min_plausible_consultation_minutes) {
+      counted = false
+      notCountedReason = `below the ${settings.min_plausible_consultation_minutes}-minute minimum`
+    } else if (data.duration_minutes > settings.max_plausible_consultation_minutes) {
+      counted = false
+      notCountedReason = `above the ${settings.max_plausible_consultation_minutes}-minute maximum`
+    }
+  }
+  // If clinic_settings couldn't be read, default to counted: true rather
+  // than block on it -- the backend's own filtering already happened
+  // correctly regardless; this only affects how it's *displayed*.
+
   revalidatePath('/nurse')
   return {
     result: {
       durationMinutes: data.duration_minutes,
       newServiceAverage: data.new_service_average,
       newConfidence: data.new_confidence,
+      counted,
+      notCountedReason,
     },
   }
 }

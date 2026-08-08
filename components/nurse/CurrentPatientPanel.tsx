@@ -83,13 +83,28 @@ export function CurrentPatientPanel({ initialEntry, initialStartedAt }: CurrentP
     return (
       <section className="flex flex-col items-center gap-3 rounded-lg border border-border bg-surface p-6 text-center">
         <p className="text-xs font-semibold tracking-wide text-muted">CONSULTATION ENDED</p>
-        <p className="text-lg font-semibold text-ink">
-          {Math.round(endResult.durationMinutes)} min recorded
-        </p>
-        <p className="text-sm text-muted">
-          Service average now {Math.round(endResult.newServiceAverage)} min ({endResult.newConfidence}{' '}
-          confidence)
-        </p>
+        {endResult.counted ? (
+          <>
+            <p className="text-lg font-semibold text-ink">
+              {Math.round(endResult.durationMinutes)} min recorded
+            </p>
+            <p className="text-sm text-muted">
+              Service average now {Math.round(endResult.newServiceAverage)} min (
+              {endResult.newConfidence} confidence)
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-lg font-semibold text-warning">
+              {Math.round(endResult.durationMinutes)} min — not counted towards the average
+              {endResult.notCountedReason ? ` (${endResult.notCountedReason})` : ''}
+            </p>
+            <p className="text-sm text-muted">
+              Service average remains {Math.round(endResult.newServiceAverage)} min (
+              {endResult.newConfidence} confidence)
+            </p>
+          </>
+        )}
         <form action={callAction}>
           <Button type="submit" variant="primary" loading={calling}>
             Call next patient
