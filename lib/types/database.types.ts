@@ -207,6 +207,64 @@ export type Database = {
           },
         ]
       }
+      notifications: {
+        Row: {
+          appointment_id: string | null
+          body: string | null
+          created_at: string
+          id: string
+          kind: string
+          queue_entry_id: string | null
+          read_at: string | null
+          recipient_id: string
+          title: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          kind: string
+          queue_entry_id?: string | null
+          read_at?: string | null
+          recipient_id: string
+          title: string
+        }
+        Update: {
+          appointment_id?: string | null
+          body?: string | null
+          created_at?: string
+          id?: string
+          kind?: string
+          queue_entry_id?: string | null
+          read_at?: string | null
+          recipient_id?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_queue_entry_id_fkey"
+            columns: ["queue_entry_id"]
+            isOneToOne: false
+            referencedRelation: "queue_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           auth_user_id: string | null
@@ -652,6 +710,7 @@ export type Database = {
           token: string
         }[]
       }
+      mark_notifications_read: { Args: { p_ids: string[] }; Returns: number }
       prune_queue_events: { Args: never; Returns: undefined }
       search_patients: {
         Args: { p_query: string }
@@ -944,3 +1003,12 @@ export type QueueEntryStatus = Database["public"]["Enums"]["queue_entry_status"]
 export type WaitEstimate = Database["public"]["Functions"]["get_wait_estimate"]["Returns"][number]
 export type Appointment = Database["public"]["Tables"]["appointments"]["Row"]
 export type AppointmentStatus = Database["public"]["Enums"]["appointment_status"]
+export type Notification = Database["public"]["Tables"]["notifications"]["Row"]
+/** notifications.kind is a plain text column with a CHECK constraint, not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with migration 0023. */
+export type NotificationKind =
+  | "queue_position"
+  | "you_are_next"
+  | "called"
+  | "appointment_reminder"
+  | "appointment_cancelled"
+  | "emergency_ahead"

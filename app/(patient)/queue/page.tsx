@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { QueueStatus } from '@/components/queue/QueueStatus'
 import { EmptyState } from '@/components/ui/EmptyState'
+import type { Notification } from '@/lib/types/database.types'
 
 /**
  * Patient Queue Status screen (Slice 2).
@@ -31,12 +32,20 @@ export default async function QueuePage() {
   const entry = entries?.[0] ?? null
 
   let initialEstimate = null
+  let initialNotifications: Notification[] = []
   if (entry) {
-    const { data, error } = await supabase
-      .rpc('get_wait_estimate', { p_queue_entry_id: entry.id })
-      .single()
+    const [{ data, error }, { data: notifications }] = await Promise.all([
+      supabase.rpc('get_wait_estimate', { p_queue_entry_id: entry.id }).single(),
+      supabase
+        .from('notifications')
+        .select('*')
+        .eq('queue_entry_id', entry.id)
+        .order('created_at', { ascending: false })
+        .limit(3),
+    ])
     if (error) console.error('get_wait_estimate failed:', error.message)
     initialEstimate = data
+    initialNotifications = notifications ?? []
   }
 
   return (
@@ -48,6 +57,7 @@ export default async function QueuePage() {
           entryId={entry.id}
           serviceId={entry.service_id}
           initialEstimate={initialEstimate}
+          initialNotifications={initialNotifications}
         />
       ) : (
         <EmptyState
