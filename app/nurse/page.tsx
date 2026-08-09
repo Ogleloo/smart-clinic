@@ -1,5 +1,5 @@
 import { requireRole } from '@/lib/auth/requireRole'
-import { todayInClinicTimezone } from '@/lib/clinicTime'
+import { getNurseCurrentState } from '@/app/actions/nurse'
 import { DutyControl } from '@/components/nurse/DutyControl'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
@@ -8,27 +8,27 @@ import type { Database } from '@/lib/types/database.types'
 
 type QueueRow = Database['public']['Functions']['get_service_queue']['Returns'][number]
 
+const DEFAULT_UNDO_WINDOW_SECONDS = 60
+
 /**
- * Nurse working screen (Slice 5).
+ * Nurse working screen.
  *
- * queue_entries has no nurse_id column — only consultations does. A
- * "called" patient (call_next_patient sets status='in_progress'
- * immediately, before any consultation exists) can't be attributed to a
- * specific nurse until start_consultation creates that row. This app's
- * fixture data and RPC design (call_next_patient takes no service_id;
- * it's implied by the caller's own current_service_id) both assume one
- * active nurse workflow per service at a time, so "the in_progress
- * entry for my current_service_id" is treated as "mine" for recovering
- * state across a page reload. A real multi-nurse-per-service deployment
- * would need the backend to record who called each entry, which is out
- * of scope (backend is frozen this slice).
+ * The single-action workflow (next_patient/undo_next_patient/end_shift,
+ * migrations 0028-0031) replaced the old call/start/end three-button
+ * flow. "Current patient" is read directly off an open consultations
+ * row for this nurse — never inferred from queue_entries.status alone
+ * (which no longer distinguishes "called" from "consultation running":
+ * next_patient sets both atomically) and never by calling next_patient
+ * on mount. A crash mid-shift (browser closed, page reloaded) just
+ * means this same read finds the still-open consultation and displays
+ * it — no auto-advance.
  */
 export default async function NursePage() {
   const { supabase, user } = await requireRole('nurse')
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, is_on_duty, current_service_id')
+    .select('full_name, is_on_duty, current_service_id, clinic_id')
     .eq('auth_user_id', user.id)
     .single()
 
@@ -38,43 +38,23 @@ export default async function NursePage() {
     .eq('is_active', true)
     .order('name')
 
-  let currentEntry: { id: string; token: string; patientName: string } | null = null
-  let currentStartedAt: string | null = null
-  let initialQueue: QueueRow[] = []
+  const [{ entry: currentEntry }, { data: settings }] = await Promise.all([
+    getNurseCurrentState(),
+    profile?.clinic_id
+      ? supabase
+          .from('clinic_settings')
+          .select('undo_window_seconds')
+          .eq('clinic_id', profile.clinic_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
 
+  let initialQueue: QueueRow[] = []
   const onDuty = profile?.is_on_duty && profile.current_service_id
   if (onDuty) {
-    const today = todayInClinicTimezone()
-    const serviceId = profile.current_service_id as string
-
-    const { data: inProgress } = await supabase
-      .from('queue_entries')
-      .select('id, token, patient:profiles!queue_entries_patient_id_fkey(full_name)')
-      .eq('service_id', serviceId)
-      .eq('status', 'in_progress')
-      .eq('queue_date', today)
-      .order('called_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (inProgress) {
-      currentEntry = {
-        id: inProgress.id,
-        token: inProgress.token,
-        patientName: inProgress.patient?.full_name ?? 'Unknown patient',
-      }
-
-      const { data: activeConsultation } = await supabase
-        .from('consultations')
-        .select('started_at')
-        .eq('queue_entry_id', inProgress.id)
-        .is('ended_at', null)
-        .maybeSingle()
-
-      currentStartedAt = activeConsultation?.started_at ?? null
-    }
-
-    const { data: queueRows } = await supabase.rpc('get_service_queue', { p_service_id: serviceId })
+    const { data: queueRows } = await supabase.rpc('get_service_queue', {
+      p_service_id: profile.current_service_id as string,
+    })
     initialQueue = queueRows ?? []
   }
 
@@ -95,7 +75,10 @@ export default async function NursePage() {
 
       {onDuty ? (
         <>
-          <CurrentPatientPanel initialEntry={currentEntry} initialStartedAt={currentStartedAt} />
+          <CurrentPatientPanel
+            initialEntry={currentEntry}
+            undoWindowSeconds={settings?.undo_window_seconds ?? DEFAULT_UNDO_WINDOW_SECONDS}
+          />
           <WaitingList serviceId={profile.current_service_id as string} initialQueue={initialQueue} />
         </>
       ) : (

@@ -866,6 +866,15 @@ export type Database = {
         }
       }
       prune_queue_events: { Args: never; Returns: undefined }
+      reset_demo_state: {
+        Args: never
+        Returns: {
+          nurses: number
+          service: string
+          tokens: string
+          waiting: number
+        }[]
+      }
       search_patients: {
         Args: { p_query: string }
         Returns: {

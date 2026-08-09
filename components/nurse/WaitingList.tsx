@@ -8,6 +8,7 @@ import { StatusChip } from '@/components/ui/StatusChip'
 import { QueueToken } from '@/components/ui/QueueToken'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { EmergencyToggle } from './EmergencyToggle'
+import { SkipButton } from './SkipButton'
 
 interface QueueRow {
   queue_entry_id: string
@@ -133,7 +134,10 @@ export function WaitingList({ serviceId, initialQueue }: WaitingListProps) {
                     </div>
                   </td>
                   <td className="py-2 text-right">
-                    <EmergencyToggle queueEntryId={row.queue_entry_id} isEmergency={isEmergency} />
+                    <div className="flex justify-end gap-2">
+                      <SkipButton queueEntryId={row.queue_entry_id} patientName={row.patient_name} />
+                      <EmergencyToggle queueEntryId={row.queue_entry_id} isEmergency={isEmergency} />
+                    </div>
                   </td>
                 </tr>
               )
