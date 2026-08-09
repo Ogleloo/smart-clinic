@@ -11,9 +11,18 @@ import { QueueSummaryCard } from '@/components/ui/QueueSummaryCard'
  * Patient dashboard — Milestone 8 Vertical Slice 1.
  *
  * Server Component: profile, next appointment and active queue entry are
- * all fetched server-side under the caller's session. RLS scopes every
- * query to this patient (queue_select_own, appointments_select_own etc.),
- * so none of these queries filter by patient_id client-side (ADR-010).
+ * all fetched server-side under the caller's session. The appointments/
+ * queue_entries queries below don't filter by patient_id — RLS alone
+ * scopes those to exactly this patient's own rows (ADR-010).
+ *
+ * profiles is different: staff can read patient profiles relationally
+ * (ADR-021), so RLS returns many rows for a staff caller, not one. The
+ * .eq('auth_user_id', ...) filter below isn't redundant with RLS — it's
+ * what makes "exactly one row" this query's own invariant regardless of
+ * caller role, so .single() fails loudly instead of throwing PGRST116
+ * for a staff account that reaches this page. (This was the exact bug:
+ * a staff account landing here — see the role-guard fix in this area's
+ * layout — hit an unfiltered .single() against 25 visible rows.)
  */
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -26,6 +35,7 @@ export default async function DashboardPage() {
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name')
+    .eq('auth_user_id', user.id)
     .single()
 
   if (profileError || !profile) {

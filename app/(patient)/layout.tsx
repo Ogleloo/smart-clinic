@@ -1,32 +1,32 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireRole } from '@/lib/auth/requireRole'
 import { BottomNav } from '@/components/patient/BottomNav'
 
 /**
- * Shared shell for every patient screen. Each page still does its own
- * getUser() + redirect (unchanged from earlier slices) — this layout
- * only adds the bottom nav, so it fetches the unread count itself
- * rather than gating on auth: if there's no user, BottomNav simply
- * isn't rendered, and the page underneath handles the redirect.
+ * Shared shell for every patient screen.
+ *
+ * Until now this only checked "is there a user at all" — the same
+ * (weaker) check every page under here duplicated individually — never
+ * the role, unlike reception/nurse/admin, which each gate their whole
+ * area on requireRole() in their layout. A logged-in staff account is a
+ * valid user, so it sailed straight through every page's own check and
+ * into queries whose "exactly one row" invariant assumed a patient
+ * caller (see the dashboard profile query: RLS lets staff read many
+ * profile rows relationally, so .single() threw for them, never for an
+ * actual patient). requireRole('patient') here closes that off for the
+ * whole area at once, the same way the other three areas already work.
  */
 export default async function PatientLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { supabase } = await requireRole('patient')
 
-  let initialUnreadCount = 0
-  if (user) {
-    const { count } = await supabase
-      .from('notifications')
-      .select('*', { count: 'exact', head: true })
-      .is('read_at', null)
-    initialUnreadCount = count ?? 0
-  }
+  const { count } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .is('read_at', null)
 
   return (
-    <div className={user ? 'pb-16' : ''}>
+    <div className="pb-16">
       {children}
-      {user && <BottomNav initialUnreadCount={initialUnreadCount} />}
+      <BottomNav initialUnreadCount={count ?? 0} />
     </div>
   )
 }
