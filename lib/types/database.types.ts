@@ -749,6 +749,7 @@ export type Database = {
           new_service_average: number
         }[]
       }
+      end_shift: { Args: { p_long_decision?: string }; Returns: Json }
       find_duplicate_patients: {
         Args: never
         Returns: {
@@ -776,6 +777,19 @@ export type Database = {
         Returns: {
           is_taken: boolean
           slot_time: string
+        }[]
+      }
+      get_public_queue_display: {
+        Args: { p_service_id: string }
+        Returns: {
+          confidence: string
+          estimated_wait_minutes: number
+          is_being_served: boolean
+          next_token: string
+          now_serving_token: string
+          service_name: string
+          updated_at: string
+          waiting_count: number
         }[]
       }
       get_service_queue: {
@@ -1144,6 +1158,7 @@ export type UserRole = Database["public"]["Enums"]["user_role"]
 export type QueueEntry = Database["public"]["Tables"]["queue_entries"]["Row"]
 export type QueueEntryStatus = Database["public"]["Enums"]["queue_entry_status"]
 export type WaitEstimate = Database["public"]["Functions"]["get_wait_estimate"]["Returns"][number]
+export type PublicQueueDisplay = Database["public"]["Functions"]["get_public_queue_display"]["Returns"][number]
 export type Appointment = Database["public"]["Tables"]["appointments"]["Row"]
 export type AppointmentStatus = Database["public"]["Enums"]["appointment_status"]
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"]

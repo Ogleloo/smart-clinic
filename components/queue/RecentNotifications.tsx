@@ -8,12 +8,17 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import type { Notification } from '@/lib/types/database.types'
 
 interface RecentNotificationsProps {
-  queueEntryId: string
+  queueEntryIds: string[]
   initialNotifications: Notification[]
 }
 
-/** The real RECENT UPDATES section (Slice 6) — replaces the Slice 2 static placeholder. */
-export function RecentNotifications({ queueEntryId, initialNotifications }: RecentNotificationsProps) {
+/**
+ * The real RECENT UPDATES section (Slice 6) — replaces the Slice 2 static
+ * placeholder. Takes every active entry's id, not just one: a patient in
+ * two queues at once should see updates from either here, not just
+ * whichever entry happened to be "the" one.
+ */
+export function RecentNotifications({ queueEntryIds, initialNotifications }: RecentNotificationsProps) {
   const [supabase] = useState(() => createClient())
   const [notifications, setNotifications] = useState<Notification[]>(initialNotifications)
 
@@ -21,11 +26,11 @@ export function RecentNotifications({ queueEntryId, initialNotifications }: Rece
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
-      .eq('queue_entry_id', queueEntryId)
+      .in('queue_entry_id', queueEntryIds)
       .order('created_at', { ascending: false })
       .limit(3)
     if (!error && data) setNotifications(data)
-  }, [supabase, queueEntryId])
+  }, [supabase, queueEntryIds])
 
   useNotificationsRealtime(refresh)
 

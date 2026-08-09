@@ -41,7 +41,7 @@ export default async function DashboardPage() {
 
   const firstName = profile.full_name.split(' ')[0]
 
-  const [{ data: nextAppointment, error: appointmentError }, { data: activeEntry, error: queueError }] =
+  const [{ data: nextAppointment, error: appointmentError }, { data: activeEntries, error: queueError }] =
     await Promise.all([
       supabase
         .from('appointments')
@@ -56,8 +56,7 @@ export default async function DashboardPage() {
         .select('id, token, status')
         .eq('queue_date', 'today')
         .in('status', ['waiting', 'in_progress'])
-        .limit(1)
-        .maybeSingle(),
+        .order('checked_in_at', { ascending: true }),
     ])
 
   return (
@@ -73,7 +72,13 @@ export default async function DashboardPage() {
         {queueError && (
           <p className="text-sm text-danger">Couldn&rsquo;t check your queue status. Try refreshing.</p>
         )}
-        {activeEntry && <QueueSummaryCard token={activeEntry.token} fullWidth />}
+        {activeEntries && activeEntries.length > 0 && (
+          <QueueSummaryCard
+            token={(activeEntries.find((e) => e.status === 'in_progress') ?? activeEntries[0]).token}
+            otherCount={activeEntries.length - 1}
+            fullWidth
+          />
+        )}
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
           <p className="text-xs font-semibold tracking-wide text-muted">NEXT APPOINTMENT</p>

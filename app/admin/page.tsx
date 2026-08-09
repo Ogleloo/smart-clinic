@@ -38,7 +38,7 @@ export default async function AdminOverviewPage() {
       : null
 
   return (
-    <div className="grid grid-cols-5 gap-4">
+    <div className="flex flex-wrap gap-4">
       <StatTile label="Appointments today" value={appointmentsCount ?? 0} />
       <StatTile label="Walk-ins today" value={walkIns} />
       <StatTile label="Completed" value={completedConsultations} />
@@ -48,10 +48,14 @@ export default async function AdminOverviewPage() {
   )
 }
 
+// min-w keeps each tile from being squeezed narrower than its label can
+// comfortably hold; flex-wrap (on the row above) lets tiles drop to a new
+// line instead of forcing "Appointments today" to fit — and overflow —
+// an equal-width column sized for the shortest label in the row.
 function StatTile({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-xs font-semibold tracking-wide text-muted">{label.toUpperCase()}</p>
+      <p className="break-words text-xs font-semibold tracking-wide text-muted">{label.toUpperCase()}</p>
       <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{value}</p>
     </div>
   )

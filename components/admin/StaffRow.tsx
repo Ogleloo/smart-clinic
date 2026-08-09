@@ -16,31 +16,46 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function StaffRow({ staff, isSelf }: { staff: Profile; isSelf: boolean }) {
   const [editing, setEditing] = useState(false)
+  const [showSaved, setShowSaved] = useState(false)
   const [state, formAction, pending] = useActionState<StaffFormState, FormData>(updateStaffMember, {})
 
   // Depends on the whole `state` object, not state.success — see
   // ServiceRow for why keying on the boolean would miss every save
   // after the first.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (state.success) setEditing(false)
+    if (!state.success) return
+    setEditing(false)
+    setShowSaved(true)
+    const timer = setTimeout(() => setShowSaved(false), 3000)
+    return () => clearTimeout(timer)
   }, [state])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!editing) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4">
-        <div>
-          <p className="text-sm font-semibold text-ink">
-            {staff.full_name} {isSelf && <span className="text-xs font-normal text-muted">(you)</span>}
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              {staff.full_name} {isSelf && <span className="text-xs font-normal text-muted">(you)</span>}
+            </p>
+            <p className="text-xs text-muted">{ROLE_LABELS[staff.role] ?? staff.role}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusChip status={staff.is_active ? 'booked' : 'cancelled'} label={staff.is_active ? 'Active' : 'Inactive'} />
+            <Button variant="tertiary" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+          </div>
+        </div>
+        {showSaved && (
+          <p role="status" className="text-xs font-semibold text-success">
+            {state.changed && state.changed.length > 0
+              ? `Saved — updated ${state.changed.join(', ')}.`
+              : 'Saved — no changes.'}
           </p>
-          <p className="text-xs text-muted">{ROLE_LABELS[staff.role] ?? staff.role}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusChip status={staff.is_active ? 'booked' : 'cancelled'} label={staff.is_active ? 'Active' : 'Inactive'} />
-          <Button variant="tertiary" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-        </div>
+        )}
       </div>
     )
   }

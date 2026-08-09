@@ -11,6 +11,7 @@ type Service = Database['public']['Tables']['services']['Row']
 
 export function ServiceRow({ service }: { service: Service }) {
   const [editing, setEditing] = useState(false)
+  const [showSaved, setShowSaved] = useState(false)
   const [state, formAction, pending] = useActionState<ServiceFormState, FormData>(updateService, {})
 
   // Close the edit form once the action actually succeeds, not on the
@@ -26,26 +27,40 @@ export function ServiceRow({ service }: { service: Service }) {
   // would silently stop firing after the first save — the form would
   // never close again. Keying on the object itself catches every
   // dispatch, since its reference changes even when success stays true.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (state.success) setEditing(false)
+    if (!state.success) return
+    setEditing(false)
+    setShowSaved(true)
+    const timer = setTimeout(() => setShowSaved(false), 3000)
+    return () => clearTimeout(timer)
   }, [state])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!editing) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4">
-        <div>
-          <p className="text-sm font-semibold text-ink">
-            {service.name} <span className="font-mono text-xs text-muted">({service.token_prefix})</span>
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-ink">
+              {service.name} <span className="font-mono text-xs text-muted">({service.token_prefix})</span>
+            </p>
+            <p className="text-xs text-muted">{service.default_consultation_minutes} min default</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusChip status={service.is_active ? 'booked' : 'cancelled'} label={service.is_active ? 'Active' : 'Inactive'} />
+            <Button variant="tertiary" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+          </div>
+        </div>
+        {showSaved && (
+          <p role="status" className="text-xs font-semibold text-success">
+            {state.changed && state.changed.length > 0
+              ? `Saved — updated ${state.changed.join(', ')}.`
+              : 'Saved — no changes.'}
           </p>
-          <p className="text-xs text-muted">{service.default_consultation_minutes} min default</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <StatusChip status={service.is_active ? 'booked' : 'cancelled'} label={service.is_active ? 'Active' : 'Inactive'} />
-          <Button variant="tertiary" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-        </div>
+        )}
       </div>
     )
   }

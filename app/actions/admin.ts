@@ -13,7 +13,14 @@ async function requireAdminClinicId(supabase: Awaited<ReturnType<typeof createCl
   return data?.clinic_id ?? null
 }
 
-export type ServiceFormState = { error?: string; success?: boolean }
+export type ServiceFormState = { error?: string; success?: boolean; changed?: string[]; created?: string }
+
+const SERVICE_FIELD_LABELS: Record<string, string> = {
+  name: 'name',
+  token_prefix: 'token prefix',
+  default_consultation_minutes: 'default duration',
+  is_active: 'active status',
+}
 
 export async function createService(_prev: ServiceFormState, formData: FormData): Promise<ServiceFormState> {
   const name = String(formData.get('name') ?? '').trim()
@@ -41,7 +48,7 @@ export async function createService(_prev: ServiceFormState, formData: FormData)
   if (error) return { error: error.message }
 
   revalidatePath('/admin/services')
-  return { success: true }
+  return { success: true, created: name }
 }
 
 export async function updateService(_prev: ServiceFormState, formData: FormData): Promise<ServiceFormState> {
@@ -60,21 +67,27 @@ export async function updateService(_prev: ServiceFormState, formData: FormData)
     return { error: 'Enter a valid default duration in minutes.' }
   }
 
+  const newValues = {
+    name,
+    token_prefix: tokenPrefix,
+    default_consultation_minutes: defaultMinutes,
+    is_active: isActive,
+  } satisfies Database['public']['Tables']['services']['Update']
+
   const supabase = await createClient()
-  const { error } = await supabase
-    .from('services')
-    .update({
-      name,
-      token_prefix: tokenPrefix,
-      default_consultation_minutes: defaultMinutes,
-      is_active: isActive,
-    })
-    .eq('id', id)
+
+  const { data: previous } = await supabase.from('services').select('*').eq('id', id).single()
+
+  const { error } = await supabase.from('services').update(newValues).eq('id', id)
   if (error) return { error: error.message }
+
+  const changed = (Object.keys(newValues) as (keyof typeof newValues)[]).filter(
+    (key) => previous?.[key] !== newValues[key]
+  )
 
   revalidatePath('/admin/services')
   revalidatePath('/book')
-  return { success: true }
+  return { success: true, changed: changed.map((key) => SERVICE_FIELD_LABELS[key]) }
 }
 
 export type SettingsFormState = { error?: string; success?: boolean; changed?: string[] }
@@ -160,7 +173,7 @@ export async function updateClinicSettings(
   return { success: true, changed: changed.map((key) => fieldLabels[key]) }
 }
 
-export type StaffFormState = { error?: string; success?: boolean }
+export type StaffFormState = { error?: string; success?: boolean; changed?: string[] }
 
 const STAFF_ROLES = ['receptionist', 'nurse', 'admin'] as const
 
@@ -173,6 +186,8 @@ export async function updateStaffMember(_prev: StaffFormState, formData: FormDat
   if (!STAFF_ROLES.includes(role as (typeof STAFF_ROLES)[number])) return { error: 'Invalid role.' }
 
   const supabase = await createClient()
+
+  const { data: previous } = await supabase.from('profiles').select('role, is_active').eq('id', id).single()
 
   // profiles has no table-level UPDATE grant beyond (full_name, phone) —
   // a blanket grant would let a patient set their own role to 'admin'
@@ -187,8 +202,12 @@ export async function updateStaffMember(_prev: StaffFormState, formData: FormDat
   })
   if (error) return { error: error.message }
 
+  const changed: string[] = []
+  if (previous && previous.role !== role) changed.push('role')
+  if (previous && previous.is_active !== isActive) changed.push('active status')
+
   revalidatePath('/admin/staff')
-  return { success: true }
+  return { success: true, changed }
 }
 
 export type MergeState = { error?: string; result?: { queueEntriesMoved: number; appointmentsMoved: number; notificationsMoved: number; auditRefsMoved: number } }

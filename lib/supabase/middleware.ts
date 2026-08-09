@@ -43,7 +43,10 @@ export async function updateSession(request: NextRequest) {
     path.startsWith('/register') ||
     path.startsWith('/forgot-password') ||
     path.startsWith('/reset-password') ||
-    path.startsWith('/auth')
+    path.startsWith('/auth') ||
+    // Waiting-room display board (ADR-028): no login, meant to run
+    // unattended on a screen in the clinic with nobody signed in.
+    path.startsWith('/display')
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
