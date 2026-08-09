@@ -1,6 +1,7 @@
 import { requireRole } from '@/lib/auth/requireRole'
 import { getNurseCurrentState } from '@/app/actions/nurse'
 import { DutyControl } from '@/components/nurse/DutyControl'
+import { EndSessionControl } from '@/components/nurse/EndSessionControl'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
 import { LogoutButton } from '@/components/ui/LogoutButton'
@@ -69,6 +70,18 @@ export default async function NursePage() {
 
       <DutyControl
         services={services ?? []}
+        isOnDuty={profile?.is_on_duty ?? false}
+        currentServiceId={profile?.current_service_id ?? null}
+      />
+
+      {/*
+        Mounted unconditionally (not inside the onDuty branch below) so
+        its "Session ended" report survives is_on_duty flipping to
+        false — see EndSessionControl for why. It must be visible
+        wherever the nurse actually is while on duty, not buried in
+        DutyControl, which they only touch once at the start of the day.
+      */}
+      <EndSessionControl
         isOnDuty={profile?.is_on_duty ?? false}
         currentServiceId={profile?.current_service_id ?? null}
       />

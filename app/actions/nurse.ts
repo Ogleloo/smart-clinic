@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { todayInClinicTimezone } from '@/lib/clinicTime'
 
 export type LongDecision = 'record' | 'break'
 
@@ -157,6 +158,43 @@ export async function endShift(longDecision?: LongDecision): Promise<{ data?: En
 
   revalidatePath('/nurse')
   return { data: data as EndShiftResult }
+}
+
+export type EndSessionImpact = { serviceName: string; waitingCount: number } | null
+
+/**
+ * Checked before calling end_shift, not after: the nurse needs to know
+ * ending will drop coverage to zero BEFORE they commit to it, not
+ * discover it afterwards. Returns null when no warning is warranted
+ * (another nurse remains on duty for this service, or nobody's
+ * waiting) — including when the check itself fails, since this is an
+ * advisory read, not a safety gate end_shift itself enforces.
+ */
+export async function checkEndSessionImpact(serviceId: string): Promise<{ impact: EndSessionImpact; error?: string }> {
+  const supabase = await createClient()
+
+  const [{ data: availableNurses, error: nursesError }, { count: waitingCount, error: countError }, { data: service }] =
+    await Promise.all([
+      supabase.rpc('available_nurses', { p_service_id: serviceId }),
+      supabase
+        .from('queue_entries')
+        .select('*', { count: 'exact', head: true })
+        .eq('service_id', serviceId)
+        .eq('queue_date', todayInClinicTimezone())
+        .eq('status', 'waiting'),
+      supabase.from('services').select('name').eq('id', serviceId).single(),
+    ])
+
+  if (nursesError) return { impact: null, error: nursesError.message }
+  if (countError) return { impact: null, error: countError.message }
+
+  const nurses = availableNurses ?? 0
+  const waiting = waitingCount ?? 0
+
+  if (nurses <= 1 && waiting > 0) {
+    return { impact: { serviceName: service?.name ?? 'this service', waitingCount: waiting } }
+  }
+  return { impact: null }
 }
 
 export type DutyState = { error?: string }
