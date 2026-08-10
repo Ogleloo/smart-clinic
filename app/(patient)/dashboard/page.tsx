@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getActiveQueueEntries } from '@/lib/patientQueue'
 import { logout } from '@/app/actions/auth'
 import { Button } from '@/components/ui/Button'
 import { LinkButton } from '@/components/ui/LinkButton'
@@ -51,23 +52,17 @@ export default async function DashboardPage() {
 
   const firstName = profile.full_name.split(' ')[0]
 
-  const [{ data: nextAppointment, error: appointmentError }, { data: activeEntries, error: queueError }] =
-    await Promise.all([
-      supabase
-        .from('appointments')
-        .select('id, scheduled_time, status, service:services(name)')
-        .eq('status', 'booked')
-        .gte('scheduled_time', 'now')
-        .order('scheduled_time', { ascending: true })
-        .limit(1)
-        .maybeSingle(),
-      supabase
-        .from('queue_entries')
-        .select('id, token, status')
-        .eq('queue_date', 'today')
-        .in('status', ['waiting', 'in_progress'])
-        .order('checked_in_at', { ascending: true }),
-    ])
+  const [{ data: nextAppointment, error: appointmentError }, activeEntries] = await Promise.all([
+    supabase
+      .from('appointments')
+      .select('id, scheduled_time, status, service:services(name)')
+      .eq('status', 'booked')
+      .gte('scheduled_time', 'now')
+      .order('scheduled_time', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    getActiveQueueEntries(supabase),
+  ])
 
   return (
     <main className="mx-auto min-h-dvh max-w-md">
@@ -79,12 +74,9 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-4 px-4 py-5">
         <h1 className="font-display text-[26px] font-bold text-ink">Hello, {firstName}</h1>
 
-        {queueError && (
-          <p className="text-sm text-danger">Couldn&rsquo;t check your queue status. Try refreshing.</p>
-        )}
-        {activeEntries && activeEntries.length > 0 && (
+        {activeEntries.length > 0 && (
           <QueueSummaryCard
-            token={(activeEntries.find((e) => e.status === 'in_progress') ?? activeEntries[0]).token}
+            estimate={(activeEntries.find((e) => e.estimate.status === 'in_progress') ?? activeEntries[0]).estimate}
             otherCount={activeEntries.length - 1}
             fullWidth
           />
