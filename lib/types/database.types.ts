@@ -88,6 +88,7 @@ export type Database = {
           min_booking_lead_minutes: number
           min_plausible_consultation_minutes: number
           no_show_grace_minutes: number
+          staff_idle_timeout_minutes: number
           undo_window_seconds: number
           updated_at: string
         }
@@ -103,6 +104,7 @@ export type Database = {
           min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
+          staff_idle_timeout_minutes?: number
           undo_window_seconds?: number
           updated_at?: string
         }
@@ -118,6 +120,7 @@ export type Database = {
           min_booking_lead_minutes?: number
           min_plausible_consultation_minutes?: number
           no_show_grace_minutes?: number
+          staff_idle_timeout_minutes?: number
           undo_window_seconds?: number
           updated_at?: string
         }
@@ -509,7 +512,9 @@ export type Database = {
           clinic_id: string
           created_at: string
           default_consultation_minutes: number
+          description: string | null
           id: string
+          includes: string[] | null
           is_active: boolean
           name: string
           token_prefix: string
@@ -519,7 +524,9 @@ export type Database = {
           clinic_id: string
           created_at?: string
           default_consultation_minutes?: number
+          description?: string | null
           id?: string
+          includes?: string[] | null
           is_active?: boolean
           name: string
           token_prefix: string
@@ -529,7 +536,9 @@ export type Database = {
           clinic_id?: string
           created_at?: string
           default_consultation_minutes?: number
+          description?: string | null
           id?: string
+          includes?: string[] | null
           is_active?: boolean
           name?: string
           token_prefix?: string
@@ -717,6 +726,10 @@ export type Database = {
       confidence_label: {
         Args: { p_count: number; p_service_id: string; p_stddev: number }
         Returns: string
+      }
+      consultation_counts_towards_average: {
+        Args: { p_consultation_id: string }
+        Returns: boolean
       }
       create_walkin_patient: {
         Args: { p_full_name: string; p_phone?: string }
@@ -991,6 +1004,15 @@ export type Database = {
         }
       }
       system_health_check: {
+        Args: never
+        Returns: {
+          category: string
+          check_name: string
+          detail: string
+          status: string
+        }[]
+      }
+      system_health_check_v2: {
         Args: never
         Returns: {
           category: string

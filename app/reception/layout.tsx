@@ -1,13 +1,14 @@
 import { requireRole } from '@/lib/auth/requireRole'
 import { ReceptionNav } from '@/components/reception/ReceptionNav'
 import { LogoutButton } from '@/components/ui/LogoutButton'
+import { IdleTimeoutMonitor } from '@/components/auth/IdleTimeoutMonitor'
 
 /**
  * Reception area (Slice 4). Desktop-first (820px reference in Figma) —
  * unlike the mobile patient screens, so no bottom nav / max-w-md here.
  */
 export default async function ReceptionLayout({ children }: { children: React.ReactNode }) {
-  await requireRole('receptionist')
+  const { staffIdleTimeoutMinutes } = await requireRole('receptionist')
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-5 px-6 py-6">
@@ -17,6 +18,7 @@ export default async function ReceptionLayout({ children }: { children: React.Re
       </div>
       <ReceptionNav />
       {children}
+      <IdleTimeoutMonitor timeoutMinutes={staffIdleTimeoutMinutes ?? 30} />
     </main>
   )
 }

@@ -1,42 +1,64 @@
-'use client'
-
-import Link from 'next/link'
-import { useActionState } from 'react'
-import { login, type ActionState } from '@/app/actions/auth'
+import { createClient } from '@/lib/supabase/server'
+import { homeForRole } from '@/lib/auth/homeForRole'
+import { logout } from '@/app/actions/auth'
+import { LoginForm } from '@/components/auth/LoginForm'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { LinkButton } from '@/components/ui/LinkButton'
+import type { UserRole } from '@/lib/types/database.types'
 
-export default function LoginPage() {
-  const [state, formAction, pending] = useActionState<ActionState, FormData>(login, {})
+/**
+ * Staff use shared clinic devices; sessions effectively never expire
+ * (Supabase refresh tokens renew indefinitely) and nobody presses Log
+ * out. Walking up to /login while already signed in as someone else
+ * must never silently continue as them — this interstitial makes
+ * whoever is currently signed in explicit, and requires a deliberate
+ * choice before landing in their role home or switching accounts.
+ */
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reason?: string }>
+}) {
+  const { reason } = await searchParams
+  const supabase = await createClient()
 
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6">
-      <div className="h-14 w-14 rounded-full bg-primary-700" aria-hidden />
-      <h1 className="font-display text-[28px] font-bold text-ink">Riverside Clinic</h1>
-      <p className="text-center text-sm text-muted">
-        Log in to see your queue and appointments
-      </p>
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-      <form action={formAction} className="flex w-full flex-col gap-4">
-        <Input label="Email" name="email" type="email" autoComplete="email" required
-               placeholder="you@email.com" />
-        <Input label="Password" name="password" type="password"
-               autoComplete="current-password" required placeholder="••••••••" />
+  if (user) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name, role')
+      .eq('auth_user_id', user.id)
+      .single()
 
-        {state.error && (
-          <p role="alert" className="text-sm font-semibold text-danger">{state.error}</p>
-        )}
+    const role = (profile?.role ?? 'patient') as UserRole
+    const fullName = profile?.full_name ?? 'you'
+    const firstName = fullName.split(' ')[0]
+    const roleLabel = role.charAt(0).toUpperCase() + role.slice(1)
 
-        <Button type="submit" fullWidth loading={pending}>Log in</Button>
-      </form>
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="h-14 w-14 rounded-full bg-primary-700" aria-hidden />
+        <h1 className="font-display text-[22px] font-bold text-ink">
+          Signed in as {fullName} — {roleLabel}
+        </h1>
+        <p className="text-sm text-muted">
+          On a shared device, sign out before leaving it unattended.
+        </p>
 
-      <Link href="/forgot-password" className="text-sm font-semibold text-primary-700">
-        Forgot password?
-      </Link>
-      <p className="text-sm text-muted">
-        New here?{' '}
-        <Link href="/register" className="font-semibold text-primary-700">Create an account</Link>
-      </p>
-    </main>
-  )
+        <LinkButton href={homeForRole(role)} variant="primary" fullWidth>
+          Continue as {firstName}
+        </LinkButton>
+        <form action={logout} className="w-full">
+          <Button type="submit" variant="tertiary" fullWidth>
+            Sign out and use another account
+          </Button>
+        </form>
+      </main>
+    )
+  }
+
+  return <LoginForm reason={reason} />
 }

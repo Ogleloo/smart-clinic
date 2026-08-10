@@ -77,6 +77,26 @@ export async function logout() {
   redirect('/login')
 }
 
+/**
+ * Called by IdleTimeoutMonitor when a staff session's inactivity timer
+ * expires. Identical to logout() except for the destination — /login
+ * shows "you were signed out because this device was inactive" for
+ * ?reason=idle, distinct from a deliberate Log out click.
+ *
+ * This ONLY signs out. It must never call end_shift, next_patient, or
+ * any other mutation: a nurse can spend 40 minutes with a patient
+ * without touching the computer, and their open consultation must
+ * simply reappear (via getNurseCurrentState) once they sign back in.
+ * Authentication state may vanish; clinical state stays authoritative
+ * in the database.
+ */
+export async function idleLogout() {
+  const supabase = await createClient()
+  await supabase.auth.signOut()
+  revalidatePath('/', 'layout')
+  redirect('/login?reason=idle')
+}
+
 export async function requestPasswordReset(
   _prev: ActionState,
   formData: FormData

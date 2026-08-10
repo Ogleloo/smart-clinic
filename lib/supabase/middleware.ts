@@ -54,7 +54,14 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && (path.startsWith('/login') || path.startsWith('/register'))) {
+  // /login deliberately does NOT redirect an already-authenticated
+  // caller away — on a shared clinic device, silently dropping whoever
+  // opens /login into the previous session's role home is the exact
+  // shared-device security gap this closes. The login page itself
+  // checks auth and shows an interstitial ("Signed in as X — Role")
+  // instead. /register still redirects: there's no "already
+  // registering as someone else" state worth surfacing.
+  if (user && path.startsWith('/register')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)

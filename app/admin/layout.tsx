@@ -1,10 +1,11 @@
 import { requireRole } from '@/lib/auth/requireRole'
 import { AdminNav } from '@/components/admin/AdminNav'
 import { LogoutButton } from '@/components/ui/LogoutButton'
+import { IdleTimeoutMonitor } from '@/components/auth/IdleTimeoutMonitor'
 
 /** Admin area (Slice 7). Desktop-first, same shell pattern as reception/nurse. */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  await requireRole('admin')
+  const { staffIdleTimeoutMinutes } = await requireRole('admin')
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-5 px-6 py-6">
@@ -14,6 +15,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </div>
       <AdminNav />
       {children}
+      <IdleTimeoutMonitor timeoutMinutes={staffIdleTimeoutMinutes ?? 30} />
     </main>
   )
 }

@@ -5,6 +5,7 @@ import { EndSessionControl } from '@/components/nurse/EndSessionControl'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
 import { LogoutButton } from '@/components/ui/LogoutButton'
+import { IdleTimeoutMonitor } from '@/components/auth/IdleTimeoutMonitor'
 import type { Database } from '@/lib/types/database.types'
 
 type QueueRow = Database['public']['Functions']['get_service_queue']['Returns'][number]
@@ -25,7 +26,7 @@ const DEFAULT_UNDO_WINDOW_SECONDS = 60
  * it — no auto-advance.
  */
 export default async function NursePage() {
-  const { supabase, user } = await requireRole('nurse')
+  const { supabase, user, staffIdleTimeoutMinutes } = await requireRole('nurse')
 
   const { data: profile } = await supabase
     .from('profiles')
@@ -97,6 +98,8 @@ export default async function NursePage() {
       ) : (
         <p className="text-sm text-muted">Go on duty to see your current patient and the waiting list.</p>
       )}
+
+      <IdleTimeoutMonitor timeoutMinutes={staffIdleTimeoutMinutes ?? 30} />
     </main>
   )
 }
