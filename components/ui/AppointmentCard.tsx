@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
-import { StatusChip, type StatusChipVariant } from './StatusChip'
+import Link from 'next/link'
+import { StatusChip, unexpectedStatusChip, type StatusChipVariant } from './StatusChip'
 import type { AppointmentStatus } from '@/lib/types/database.types'
 import { CLINIC_TIMEZONE } from '@/lib/clinicTime'
 
@@ -10,17 +11,35 @@ interface AppointmentCardProps {
   status: AppointmentStatus
   action?: ReactNode
   fullWidth?: boolean
+  /** Wraps the card in a Link to that appointment's details. Omit when already on that appointment's own page. */
+  href?: string
 }
 
 // appointment_status has more states than the shared StatusChip's spec'd
 // variant set — map the ones StatusChip doesn't name onto the closest
 // visual meaning rather than growing StatusChip's variants for one caller.
-export const APPOINTMENT_STATUS_TO_CHIP: Record<AppointmentStatus, StatusChipVariant> = {
-  booked: 'booked',
-  checked_in: 'in-progress',
-  completed: 'done',
-  cancelled: 'cancelled',
-  no_show: 'cancelled',
+// A previous version of this map used a plain Record and mapped no_show
+// onto the same 'cancelled' variant as an actual cancellation — visually
+// indistinguishable, even though a no-show is not a cancellation. This
+// switch form gets the same compile-time exhaustiveness a Record gave,
+// but degrades to the raw value (see unexpectedStatusChip) instead of a
+// silently-wrong label if a status shows up that isn't one of these.
+export function appointmentStatusToChip(status: AppointmentStatus): { variant: StatusChipVariant; label?: string } {
+  switch (status) {
+    case 'booked':
+      return { variant: 'booked' }
+    case 'checked_in':
+      return { variant: 'in-progress' }
+    case 'completed':
+      return { variant: 'done' }
+    case 'cancelled':
+      return { variant: 'cancelled' }
+    case 'no_show':
+      // Distinct from cancelled — the patient didn't cancel this, they missed it.
+      return { variant: 'no-show' }
+    default:
+      return unexpectedStatusChip(status)
+  }
 }
 
 function formatDateTime(scheduledAt: string) {
@@ -46,19 +65,30 @@ export function AppointmentCard({
   status,
   action,
   fullWidth = false,
+  href,
 }: AppointmentCardProps) {
-  return (
-    <div
-      className={`inline-flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 ${fullWidth ? 'w-full' : ''}`}
-    >
+  const chip = appointmentStatusToChip(status)
+  const className = `flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 ${fullWidth ? 'w-full' : 'inline-flex'} ${href ? 'hover:bg-subtle' : ''}`
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-display text-base font-semibold text-ink">{serviceName}</p>
           <p className="mt-0.5 text-sm text-muted">{formatDateTime(scheduledAt)}</p>
         </div>
-        <StatusChip status={APPOINTMENT_STATUS_TO_CHIP[status]} />
+        <StatusChip status={chip.variant} label={chip.label} />
       </div>
       {action}
-    </div>
+    </>
   )
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {body}
+      </Link>
+    )
+  }
+
+  return <div className={className}>{body}</div>
 }

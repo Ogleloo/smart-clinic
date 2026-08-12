@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { CLINIC_TIMEZONE, todayInClinicTimezone } from '@/lib/clinicTime'
 import { StatusChip } from '@/components/ui/StatusChip'
-import { APPOINTMENT_STATUS_TO_CHIP } from '@/components/ui/AppointmentCard'
+import { appointmentStatusToChip } from '@/components/ui/AppointmentCard'
 import { CheckInAppointmentButton } from '@/components/reception/CheckInAppointmentButton'
 import { EmptyState } from '@/components/ui/EmptyState'
 
@@ -50,25 +50,28 @@ export default async function ReceptionAppointmentsPage() {
             </tr>
           </thead>
           <tbody>
-            {appointments.map((appointment) => (
-              <tr key={appointment.id} className="border-b border-border">
-                <td className="py-3 font-semibold text-ink">
-                  {appointment.patient?.full_name ?? 'Unknown patient'}
-                </td>
-                <td className="py-3 text-ink">{appointment.service?.name ?? '—'}</td>
-                <td className="py-3 font-mono tabular-nums text-ink">
-                  {formatTime(appointment.scheduled_time)}
-                </td>
-                <td className="py-3">
-                  <StatusChip status={APPOINTMENT_STATUS_TO_CHIP[appointment.status]} />
-                </td>
-                <td className="py-3 text-right">
-                  {appointment.status === 'booked' && (
-                    <CheckInAppointmentButton appointmentId={appointment.id} />
-                  )}
-                </td>
-              </tr>
-            ))}
+            {appointments.map((appointment) => {
+              const chip = appointmentStatusToChip(appointment.status)
+              return (
+                <tr key={appointment.id} className="border-b border-border">
+                  <td className="py-3 font-semibold text-ink">
+                    {appointment.patient?.full_name ?? 'Unknown patient'}
+                  </td>
+                  <td className="py-3 text-ink">{appointment.service?.name ?? '—'}</td>
+                  <td className="py-3 font-mono tabular-nums text-ink">
+                    {formatTime(appointment.scheduled_time)}
+                  </td>
+                  <td className="py-3">
+                    <StatusChip status={chip.variant} label={chip.label} />
+                  </td>
+                  <td className="py-3 text-right">
+                    {appointment.status === 'booked' && (
+                      <CheckInAppointmentButton appointmentId={appointment.id} />
+                    )}
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       )}

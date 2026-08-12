@@ -1,7 +1,6 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import {
   createWalkinPatient,
   checkInPatient,
@@ -9,27 +8,25 @@ import {
   type CheckInState,
 } from '@/app/actions/reception'
 import { ServicePicker, type Service } from '@/components/booking/ServicePicker'
+import { PatientSearchBox, type PatientSearchResult } from '@/components/reception/PatientSearchBox'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { QueueToken } from '@/components/ui/QueueToken'
-import { EmptyState } from '@/components/ui/EmptyState'
-
-interface SearchResult {
-  id: string
-  full_name: string
-  phone: string
-  has_account: boolean
-}
 
 interface SelectedPatient {
   id: string
   full_name: string
 }
 
-const SEARCH_DEBOUNCE_MS = 300
-const MIN_QUERY_LENGTH = 2
+interface WalkInWizardProps {
+  services: Service[]
+  /** Handed off from a search on /reception itself — skips re-searching here. */
+  initialSelectedPatient?: SelectedPatient
+  /** Handed off when that search came back empty and reception chose "Add new patient". */
+  initialNewPatientName?: string
+}
 
-export function WalkInWizard({ services }: { services: Service[] }) {
+export function WalkInWizard({ services, initialSelectedPatient, initialNewPatientName }: WalkInWizardProps) {
   // Keying on a counter forces a full remount on reset, which is the only
   // way to clear useActionState's internal state (createState.patient,
   // checkInState.token) — there's no imperative reset for that hook, and
@@ -40,21 +37,26 @@ export function WalkInWizard({ services }: { services: Service[] }) {
     <WalkInWizardInner
       key={instanceKey}
       services={services}
+      initialSelectedPatient={instanceKey === 0 ? initialSelectedPatient : undefined}
+      initialNewPatientName={instanceKey === 0 ? initialNewPatientName : undefined}
       onReset={() => setInstanceKey((k) => k + 1)}
     />
   )
 }
 
-function WalkInWizardInner({ services, onReset }: { services: Service[]; onReset: () => void }) {
-  const [supabase] = useState(() => createClient())
+function WalkInWizardInner({
+  services,
+  initialSelectedPatient,
+  initialNewPatientName,
+  onReset,
+}: WalkInWizardProps & { onReset: () => void }) {
   const [serviceId, setServiceId] = useState<string | null>(null)
 
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[] | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [searchError, setSearchError] = useState<string | null>(null)
-  const [showAddForm, setShowAddForm] = useState(false)
-  const [selectedPatient, setSelectedPatient] = useState<SelectedPatient | null>(null)
+  const [showAddForm, setShowAddForm] = useState(!!initialNewPatientName)
+  const [newPatientNamePrefill] = useState(initialNewPatientName ?? '')
+  const [selectedPatient, setSelectedPatient] = useState<SelectedPatient | null>(
+    initialSelectedPatient ?? null
+  )
 
   const [createState, createAction, creating] = useActionState<CreatePatientState, FormData>(
     createWalkinPatient,
@@ -65,35 +67,12 @@ function WalkInWizardInner({ services, onReset }: { services: Service[]; onReset
     {}
   )
 
-  const trimmedQuery = query.trim()
+  function handlePatientSelected(patient: PatientSearchResult) {
+    setSelectedPatient(patient)
+  }
 
-  // Debounced search. `searching` is flipped on synchronously in
-  // handleQueryChange below (a plain event handler, not an effect) the
-  // moment a qualifying query exists — not here, 300ms later when the
-  // timer fires. Setting it only inside the timeout left a ~300ms
-  // window, on every qualifying keystroke, where searching was still
-  // false and results was still null from the previous query, which
-  // fell through to the "No matching patient" empty state before any
-  // search had actually run.
-  useEffect(() => {
-    if (trimmedQuery.length < MIN_QUERY_LENGTH) return
-    const timer = setTimeout(async () => {
-      setSearchError(null)
-      const { data, error } = await supabase.rpc('search_patients', { p_query: trimmedQuery })
-      if (error) {
-        setSearchError(error.message)
-        setResults(null)
-      } else {
-        setResults(data)
-      }
-      setSearching(false)
-    }, SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [supabase, trimmedQuery])
-
-  function handleQueryChange(value: string) {
-    setQuery(value)
-    setSearching(value.trim().length >= MIN_QUERY_LENGTH)
+  function handleAddNew() {
+    setShowAddForm(true)
   }
 
   // A new walk-in patient was just created — select them and move on.
@@ -147,72 +126,14 @@ function WalkInWizardInner({ services, onReset }: { services: Service[]; onReset
             </div>
           ) : (
             <>
-              <Input
-                label="Search by name or phone"
-                placeholder="Type at least 2 characters…"
-                value={query}
-                onChange={(e) => handleQueryChange(e.target.value)}
-              />
-
-              {trimmedQuery.length < MIN_QUERY_LENGTH ? null : searching ? (
-                <p className="text-sm text-muted">Searching…</p>
-              ) : searchError ? (
-                <p className="text-sm text-danger">Couldn&rsquo;t search patients. Try again.</p>
-              ) : results && results.length > 0 ? (
-                <ul className="flex flex-col gap-2">
-                  {results.map((result) => (
-                    <li key={result.id}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedPatient(result)}
-                        className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 text-left hover:bg-subtle"
-                      >
-                        <span>
-                          <span className="block text-sm font-semibold text-ink">
-                            {result.full_name}
-                          </span>
-                          <span className="block text-xs text-muted">{result.phone}</span>
-                        </span>
-                        <span className="text-xs text-muted">
-                          {result.has_account ? 'Registered account' : 'No account'}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                // A receptionist can only see patients who already have an
-                // appointment or queue entry at this clinic (ADR-021) — a
-                // genuinely new walk-in is correctly absent here, not an
-                // error, so this offers "add", not "not found".
-                <EmptyState
-                  headline="No matching patient"
-                  body="They may be new to the clinic."
-                  action={
-                    <Button variant="secondary" onClick={() => setShowAddForm(true)}>
-                      Add new patient
-                    </Button>
-                  }
-                  fullWidth
-                />
-              )}
-
-              {!showAddForm && trimmedQuery.length >= MIN_QUERY_LENGTH && results && results.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(true)}
-                  className="self-start text-sm font-semibold text-primary-700 underline"
-                >
-                  None of these — add new patient
-                </button>
-              )}
+              <PatientSearchBox onSelect={handlePatientSelected} onAddNew={handleAddNew} />
 
               {showAddForm && (
                 <form
                   action={createAction}
                   className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4"
                 >
-                  <Input label="Full name" name="full_name" required />
+                  <Input label="Full name" name="full_name" defaultValue={newPatientNamePrefill} required />
                   <Input label="Phone (optional)" name="phone" type="tel" />
                   {createState.error && (
                     <p role="alert" className="text-sm text-danger">

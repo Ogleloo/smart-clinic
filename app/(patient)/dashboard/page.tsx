@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { getActiveQueueEntries } from '@/lib/patientQueue'
 import { logout } from '@/app/actions/auth'
@@ -83,7 +84,12 @@ export default async function DashboardPage() {
         )}
 
         <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
-          <p className="text-xs font-semibold tracking-wide text-muted">NEXT APPOINTMENT</p>
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold tracking-wide text-muted">NEXT APPOINTMENT</p>
+            <Link href="/appointments" className="text-xs font-semibold text-primary-700">
+              View all appointments
+            </Link>
+          </div>
           {appointmentError ? (
             <p className="text-sm text-danger">Couldn&rsquo;t load your appointment. Try refreshing.</p>
           ) : nextAppointment ? (
@@ -91,6 +97,7 @@ export default async function DashboardPage() {
               serviceName={nextAppointment.service?.name ?? 'Appointment'}
               scheduledAt={nextAppointment.scheduled_time}
               status={nextAppointment.status}
+              href={`/appointments/${nextAppointment.id}`}
               fullWidth
             />
           ) : (
