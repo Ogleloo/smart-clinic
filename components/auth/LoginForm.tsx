@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 interface LoginFormProps {
-  /** Set when middleware/idleLogout sent someone here for a specific reason, e.g. "idle". */
+  /** Set when middleware/idleLogout/the auth callback sent someone here for a specific reason. */
   reason?: string
 }
 
@@ -25,6 +25,16 @@ export function LoginForm({ reason }: LoginFormProps) {
       {reason === 'idle' && (
         <p role="status" className="text-center text-sm font-semibold text-warning">
           You were signed out because this device was inactive.
+        </p>
+      )}
+      {reason === 'link_invalid' && (
+        <p role="alert" className="text-center text-sm font-semibold text-danger">
+          That link is invalid or has expired. Request a new one below.
+        </p>
+      )}
+      {reason === 'password_updated' && (
+        <p role="status" className="text-center text-sm font-semibold text-success">
+          Password updated. Log in with your new password.
         </p>
       )}
 

@@ -19,6 +19,7 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
   if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
 
   const supabase = await createClient()
+  const origin = (await headers()).get('origin') ?? ''
 
   // NOTE: the profile row is created by the database trigger
   // (handle_new_user), which forces role = 'patient'. Nothing sent
@@ -26,7 +27,13 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
   const { error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName, phone } },
+    options: {
+      data: { full_name: fullName, phone },
+      // Without this, the confirmation link falls back to the Supabase
+      // Site URL directly instead of routing through /auth/callback,
+      // so the confirmation is never actually verified by this app.
+      emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
+    },
   })
 
   if (error) return { error: error.message }
@@ -130,5 +137,10 @@ export async function updatePassword(
   const { error } = await supabase.auth.updateUser({ password })
   if (error) return { error: error.message }
 
-  redirect('/dashboard')
+  // The session here is the temporary one Supabase created from the
+  // recovery link, not necessarily one this person meant to leave open
+  // (shared device). Require a fresh, deliberate login with the new
+  // password rather than continuing straight into it.
+  await supabase.auth.signOut()
+  redirect('/login?reason=password_updated')
 }

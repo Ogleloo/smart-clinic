@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
 import { logout } from '@/app/actions/auth'
@@ -13,20 +14,37 @@ import type { UserRole } from '@/lib/types/database.types'
  * must never silently continue as them — this interstitial makes
  * whoever is currently signed in explicit, and requires a deliberate
  * choice before landing in their role home or switching accounts.
+ *
+ * It must equally never fire in place of a recovery or confirmation
+ * flow: those carry their own explicit intent, which overrides
+ * whichever account happens to already be signed in on this device. A
+ * recovery/confirmation link that points at /login instead of
+ * /auth/callback (stale bookmark, template drift) is forwarded there
+ * rather than verified twice. Any other non-empty `reason` — an
+ * invalid link, a just-updated password, an idle timeout — means this
+ * isn't a plain visit either, so the interstitial stays off.
  */
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ reason?: string }>
+  searchParams: Promise<{ reason?: string; token_hash?: string; type?: string; code?: string }>
 }) {
-  const { reason } = await searchParams
+  const { reason, token_hash: tokenHash, type, code } = await searchParams
+
+  if (tokenHash && type) {
+    redirect(`/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=${encodeURIComponent(type)}`)
+  }
+  if (code) {
+    redirect(`/auth/callback?code=${encodeURIComponent(code)}`)
+  }
+
   const supabase = await createClient()
 
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
-  if (user) {
+  if (user && !reason) {
     const { data: profile } = await supabase
       .from('profiles')
       .select('full_name, role')
