@@ -114,12 +114,18 @@ export async function requestPasswordReset(
   const supabase = await createClient()
   const origin = (await headers()).get('origin') ?? ''
 
-  await supabase.auth.resetPasswordForEmail(email, {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/callback?next=/reset-password`,
   })
 
-  // Always report success, even if no such account exists — otherwise
-  // this endpoint becomes an account-enumeration oracle.
+  // Rate limiting is safe to report plainly: it reveals only that the
+  // SMTP send cap was hit, nothing about whether the account exists.
+  // Everything else (including "no such account") stays generic —
+  // otherwise this becomes an account-enumeration oracle.
+  if (error?.code === 'over_email_send_rate_limit' || error?.status === 429) {
+    return { error: 'Too many requests. Please wait a few minutes and try again.' }
+  }
+
   return { success: 'If that email is registered, a reset link is on its way.' }
 }
 
