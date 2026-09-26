@@ -50,6 +50,7 @@ export default async function QueuePage() {
     entryId: e.entryId,
     serviceId: e.serviceId,
     initialEstimate: e.estimate,
+    initialNowServingToken: e.nowServingToken,
   }))
 
   return (

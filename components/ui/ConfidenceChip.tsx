@@ -1,7 +1,18 @@
+'use client'
+
+import { useState } from 'react'
+
 export type ConfidenceLevel = 'high' | 'medium' | 'low'
 
 interface ConfidenceChipProps {
   level: ConfidenceLevel
+  /**
+   * When provided, the chip becomes an expandable disclosure explaining
+   * its own basis (sample_count, from the same get_wait_estimate call
+   * that produced everything else on screen — never recomputed). Omit
+   * it to keep the plain, non-interactive chip used elsewhere.
+   */
+  sampleCount?: number
 }
 
 /**
@@ -33,13 +44,51 @@ export function toConfidenceLevel(value: string | null | undefined): ConfidenceL
   return value === 'high' || value === 'medium' || value === 'low' ? value : 'low'
 }
 
-export function ConfidenceChip({ level }: ConfidenceChipProps) {
+function consultationsPhrase(sampleCount: number): string {
+  return `${sampleCount} completed consultation${sampleCount === 1 ? '' : 's'}`
+}
+
+/**
+ * Low must not read as a fault — it's the system being honest about a
+ * thin sample, not an error state. That's why its expanded text omits
+ * the "Low confidence —" lead-in that medium/high use: the word "Low"
+ * doesn't need repeating right next to its own explanation.
+ */
+function expandedText(level: ConfidenceLevel, sampleCount: number): string {
+  if (level === 'low') {
+    return `Based on ${consultationsPhrase(sampleCount)} — not yet enough history for a reliable estimate.`
+  }
+  return `${LABELS[level]} — based on ${consultationsPhrase(sampleCount)}. Times vary moderately.`
+}
+
+export function ConfidenceChip({ level, sampleCount }: ConfidenceChipProps) {
+  const [open, setOpen] = useState(false)
+
+  if (sampleCount === undefined) {
+    return (
+      <span
+        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[level]}`}
+        title={EXPLANATIONS[level]}
+      >
+        {LABELS[level]}
+      </span>
+    )
+  }
+
   return (
-    <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[level]}`}
-      title={EXPLANATIONS[level]}
-    >
-      {LABELS[level]}
-    </span>
+    <div className="inline-flex flex-col items-start gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[level]}`}
+      >
+        {LABELS[level]}
+        <span aria-hidden>{open ? '−' : '+'}</span>
+      </button>
+      {open && (
+        <p className="max-w-[220px] text-left text-xs text-muted">{expandedText(level, sampleCount)}</p>
+      )}
+    </div>
   )
 }

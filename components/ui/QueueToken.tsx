@@ -1,4 +1,4 @@
-type Size = 'lg' | 'sm'
+type Size = 'xl' | 'lg' | 'sm'
 
 interface QueueTokenProps {
   token: string
@@ -10,6 +10,7 @@ interface QueueTokenProps {
  * Purely presentational — callers own layout, labelling and context.
  */
 const SIZE_STYLE: Record<Size, string> = {
+  xl: 'text-[46px]',
   lg: 'text-[40px]',
   sm: 'text-lg',
 }

@@ -1,58 +1,128 @@
 import type { WaitEstimate } from '@/lib/types/database.types'
 import { QueueToken } from '@/components/ui/QueueToken'
+import { StatusChip } from '@/components/ui/StatusChip'
 import { ConfidenceChip, toConfidenceLevel } from '@/components/ui/ConfidenceChip'
+import { WaitBreakdown } from './WaitBreakdown'
 
-function ordinal(n: number): string {
-  const last = n % 10
-  const lastTwo = n % 100
-  if (last === 1 && lastTwo !== 11) return `${n}st`
-  if (last === 2 && lastTwo !== 12) return `${n}nd`
-  if (last === 3 && lastTwo !== 13) return `${n}rd`
-  return `${n}th`
+interface QueueStatusCardProps {
+  estimate: WaitEstimate
+  /** get_public_queue_display's now_serving_token for this entry's service — anchors "position 3" to something concrete. */
+  nowServingToken: string | null
 }
 
 /**
- * Composes the shared QueueToken/ConfidenceChip primitives into the full
- * queue-status card. Pure rendering of a wait estimate — no queue logic
- * here. Position, wait minutes and confidence all come straight from
- * get_wait_estimate() (ADR-009).
+ * V2 patient queue card (Figma "04 · Screens V2" — "Queue Status —
+ * Patient V2" / "Explainability — multiple nurses"). Pure rendering of
+ * a wait estimate — no queue logic here. Position, wait minutes,
+ * confidence and every figure in the breakdown all come straight from
+ * get_wait_estimate() (ADR-009); nothing is recomputed in React.
  */
-export function QueueStatusCard({ estimate }: { estimate: WaitEstimate }) {
-  const { status, queue_position, estimated_wait_minutes, confidence, token, service_name } =
-    estimate
+export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardProps) {
+  const {
+    status,
+    queue_position,
+    estimated_wait_minutes,
+    confidence,
+    token,
+    service_name,
+    patients_ahead,
+    nurses_serving,
+    average_minutes,
+    soonest_free_minutes,
+    sample_count,
+  } = estimate
 
   const isInProgress = status === 'in_progress'
   const isNotBeingServed = status === 'not_being_served'
-  const isNext = status === 'waiting' && queue_position === 1
+  const isWaiting = status === 'waiting'
+  const isNext = isWaiting && queue_position === 1
+
+  // > 0, not just !== null: a 0-minute estimate should show no number at
+  // all, never "~0 min" — the honesty rule migration 0048 fixed.
+  const hasWaitNumber = isWaiting && estimated_wait_minutes !== null && estimated_wait_minutes > 0
+
+  const canShowBreakdown =
+    isWaiting &&
+    nurses_serving !== null &&
+    nurses_serving > 0 &&
+    patients_ahead !== null &&
+    average_minutes !== null &&
+    soonest_free_minutes !== null &&
+    estimated_wait_minutes !== null
+
+  if (isNotBeingServed) {
+    return (
+      <div className="flex flex-col items-center gap-3 rounded-2xl bg-primary-700 p-6 text-center text-white">
+        <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">{service_name}</p>
+        <QueueToken token={token} size="xl" />
+        <p className="text-base font-semibold">Not currently being served</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-center">
-      <p className="text-xs font-semibold tracking-wide text-muted">{service_name}</p>
-      <QueueToken token={token} size="lg" />
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-4 rounded-2xl bg-primary-700 p-6 text-white">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">{service_name}</p>
+          {isWaiting && <StatusChip status="waiting" label="Waiting" />}
+          {isInProgress && <StatusChip status="in-progress" label="In progress" />}
+        </div>
 
-      {isInProgress ? (
-        <p className="text-lg font-bold text-primary-700">Please proceed</p>
-      ) : isNext ? (
-        <p className="text-lg font-bold text-primary-700">You&rsquo;re next</p>
-      ) : status === 'waiting' ? (
-        <p className="text-base font-semibold text-ink">
-          You are {ordinal(queue_position)} in line
-        </p>
-      ) : null}
+        <div className="text-center">
+          <QueueToken token={token} size="xl" />
+        </div>
 
-      {isInProgress ? null : isNotBeingServed ? (
-        <p className="text-sm text-muted">Not currently being served</p>
-      ) : (
-        // > 0, not just !== null: a 0-minute estimate (e.g. you're up next
-        // with nobody ahead) should show no number at all, never "~0 min".
-        estimated_wait_minutes !== null && estimated_wait_minutes > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-2xl font-semibold tabular-nums text-ink">
-              ~{estimated_wait_minutes} min
-            </span>
-            {confidence && <ConfidenceChip level={toConfidenceLevel(confidence)} />}
+        {isInProgress ? (
+          <p className="text-center text-lg font-bold">Please proceed</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-primary-600 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">Your position</p>
+              {isNext ? (
+                <p className="mt-1 font-display text-xl font-bold">You&rsquo;re next</p>
+              ) : (
+                <>
+                  <p className="mt-1 font-mono text-2xl font-bold tabular-nums">{queue_position}</p>
+                  {patients_ahead !== null && (
+                    <p className="text-xs text-primary-100">
+                      {patients_ahead} patient{patients_ahead === 1 ? '' : 's'} ahead
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="rounded-xl bg-primary-600 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">Estimated wait</p>
+              {hasWaitNumber ? (
+                <>
+                  <p className="mt-1 font-mono text-2xl font-bold tabular-nums">~{estimated_wait_minutes} min</p>
+                  {confidence && (
+                    <div className="mt-1">
+                      <ConfidenceChip level={toConfidenceLevel(confidence)} sampleCount={sample_count ?? undefined} />
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
           </div>
-        )
+        )}
+      </div>
+
+      {isWaiting && nowServingToken && (
+        <p className="text-sm text-muted">
+          Now serving <span className="font-mono font-semibold text-ink">{nowServingToken}</span>
+        </p>
+      )}
+
+      {canShowBreakdown && (
+        <WaitBreakdown
+          nursesServing={nurses_serving!}
+          patientsAhead={patients_ahead!}
+          averageMinutes={average_minutes!}
+          soonestFreeMinutes={soonest_free_minutes!}
+          estimatedWaitMinutes={estimated_wait_minutes!}
+        />
       )}
     </div>
   )
