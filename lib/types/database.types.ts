@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -77,6 +77,7 @@ export type Database = {
       }
       clinic_settings: {
         Row: {
+          appointment_reminder_lead_minutes: number
           capacity_threshold: number
           clinic_id: string
           confidence_consistent_stddev_minutes: number
@@ -93,6 +94,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          appointment_reminder_lead_minutes?: number
           capacity_threshold?: number
           clinic_id: string
           confidence_consistent_stddev_minutes?: number
@@ -109,6 +111,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          appointment_reminder_lead_minutes?: number
           capacity_threshold?: number
           clinic_id?: string
           confidence_consistent_stddev_minutes?: number
@@ -585,6 +588,13 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      assert_no_zero_estimate_when_busy: {
+        Args: never
+        Returns: {
+          services_all_busy: number
+          violations: number
+        }[]
+      }
       auth_clinic_id: { Args: never; Returns: string }
       auth_profile_id: { Args: never; Returns: string }
       auth_role: {
@@ -793,13 +803,14 @@ export type Database = {
         }[]
       }
       get_public_queue_display: {
-        Args: { p_service_id: string }
+        Args: { p_service_id?: string }
         Returns: {
           confidence: string
           estimated_wait_minutes: number
           is_being_served: boolean
           next_token: string
           now_serving_token: string
+          service_id: string
           service_name: string
           updated_at: string
           waiting_count: number
@@ -821,10 +832,15 @@ export type Database = {
       get_wait_estimate: {
         Args: { p_queue_entry_id: string }
         Returns: {
+          average_minutes: number
           confidence: string
           estimated_wait_minutes: number
+          nurses_serving: number
+          patients_ahead: number
           queue_position: number
+          sample_count: number
           service_name: string
+          soonest_free_minutes: number
           status: string
           token: string
         }[]
@@ -897,6 +913,7 @@ export type Database = {
           phone: string
         }[]
       }
+      send_appointment_reminders: { Args: never; Returns: number }
       service_consultation_stats: {
         Args: { p_service_id: string }
         Returns: {
@@ -904,6 +921,10 @@ export type Database = {
           sample_count: number
           stddev_minutes: number
         }[]
+      }
+      service_wait_minutes: {
+        Args: { p_ahead: number; p_avg: number; p_service_id: string }
+        Returns: number
       }
       set_duty: {
         Args: { p_on_duty: boolean; p_service_id?: string }
@@ -1052,12 +1073,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1081,11 +1102,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1106,11 +1127,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1131,11 +1152,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1148,11 +1169,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
