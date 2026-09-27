@@ -51,9 +51,7 @@ export default async function AppointmentDetailsPage({
         fullWidth
       />
 
-      {appointment.status === 'booked' && (
-        <CancelAppointmentButton appointmentId={appointment.id} />
-      )}
+      <CancelAppointmentButton appointmentId={appointment.id} status={appointment.status} />
 
       <LinkButton href="/dashboard" variant="tertiary" fullWidth>
         Back to dashboard

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
 import { LinkButton } from '@/components/ui/LinkButton'
+import { ReceptionPatientSearch } from '@/components/reception/ReceptionPatientSearch'
 
 /**
  * Reception dashboard. Three distinct counts, not one:
@@ -35,6 +36,11 @@ export default async function ReceptionDashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+        <p className="text-xs font-semibold tracking-wide text-muted">FIND A PATIENT</p>
+        <ReceptionPatientSearch />
+      </section>
+
       <section className="grid grid-cols-3 gap-4">
         <StatTile label="Booked today" value={bookedCount ?? 0} />
         <StatTile label="Checked in today" value={checkedInCount ?? 0} />

@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useQueueBroadcast } from '@/lib/hooks/useQueueBroadcast'
-import { StatusChip, type StatusChipVariant } from '@/components/ui/StatusChip'
+import { StatusChip, unexpectedStatusChip, type StatusChipVariant } from '@/components/ui/StatusChip'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { QueueToken } from '@/components/ui/QueueToken'
 import type { QueueEntryStatus } from '@/lib/types/database.types'
@@ -22,12 +22,28 @@ interface QueueRow {
 // queue_entry_status has more states than StatusChip's spec'd variant
 // set — same approach as AppointmentCard: map the extras onto the
 // closest visual meaning rather than growing StatusChip for one caller.
-const STATUS_TO_CHIP: Record<QueueEntryStatus, StatusChipVariant> = {
-  waiting: 'waiting',
-  in_progress: 'in-progress',
-  done: 'done',
-  skipped: 'cancelled',
-  no_show: 'cancelled',
+// A previous version of this map used a plain Record and mapped no_show
+// onto the same 'cancelled' variant as skipped — a patient who never
+// showed up is not the same as one staff actively skipped. This switch
+// form keeps the same compile-time exhaustiveness a Record gave, but
+// degrades to the raw value (see unexpectedStatusChip) instead of a
+// silently-wrong label for a status that isn't one of these.
+function queueEntryStatusToChip(status: QueueEntryStatus): { variant: StatusChipVariant; label?: string } {
+  switch (status) {
+    case 'waiting':
+      return { variant: 'waiting' }
+    case 'in_progress':
+      return { variant: 'in-progress' }
+    case 'done':
+      return { variant: 'done' }
+    case 'skipped':
+      return { variant: 'cancelled' }
+    case 'no_show':
+      // Distinct from skipped/cancelled — this patient never showed up.
+      return { variant: 'no-show' }
+    default:
+      return unexpectedStatusChip(status)
+  }
 }
 
 interface ServiceQueuePanelProps {
@@ -71,22 +87,25 @@ export function ServiceQueuePanel({ serviceId, serviceName, initialQueue }: Serv
             </tr>
           </thead>
           <tbody>
-            {queue.map((row) => (
-              <tr key={row.queue_entry_id} className="border-b border-border">
-                <td className="py-2 font-mono tabular-nums text-ink">{row.queue_position}</td>
-                <td className="py-2">
-                  <QueueToken token={row.token} size="sm" />
-                </td>
-                <td className="py-2 text-ink">{row.patient_name}</td>
-                <td className="py-2 font-mono tabular-nums text-ink">{row.waiting_minutes} min</td>
-                <td className="py-2">
-                  <div className="flex items-center gap-1.5">
-                    <StatusChip status={STATUS_TO_CHIP[row.status]} />
-                    {row.priority > 0 && <StatusChip status="emergency" />}
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {queue.map((row) => {
+              const chip = queueEntryStatusToChip(row.status)
+              return (
+                <tr key={row.queue_entry_id} className="border-b border-border">
+                  <td className="py-2 font-mono tabular-nums text-ink">{row.queue_position}</td>
+                  <td className="py-2">
+                    <QueueToken token={row.token} size="sm" />
+                  </td>
+                  <td className="py-2 text-ink">{row.patient_name}</td>
+                  <td className="py-2 font-mono tabular-nums text-ink">{row.waiting_minutes} min</td>
+                  <td className="py-2">
+                    <div className="flex items-center gap-1.5">
+                      <StatusChip status={chip.variant} label={chip.label} />
+                      {row.priority > 0 && <StatusChip status="emergency" />}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       )}
