@@ -16,14 +16,18 @@ interface ConfidenceChipProps {
 
 /**
  * Design System: Confidence pill.
- * Low confidence means uncertainty, not an error — it's neutral grey,
- * never red, so patients don't read a thin data sample as something
- * having gone wrong.
+ * Medium and High are both normal, unremarkable states — a smaller or
+ * less consistent sample is not a problem, so neither gets an alerting
+ * colour. Amber is reserved for Low alone: this codebase's own warning
+ * tokens already carry "worth noting, not a fault" rather than "error"
+ * (the same pairing marks a missed appointment, not a red danger
+ * colour) — consistent with Low's own copy never reading as a fault,
+ * just an honest, visible flag that the sample is thin.
  */
 const STYLES: Record<ConfidenceLevel, string> = {
-  high: 'bg-success-bg text-success',
-  medium: 'bg-warning-bg text-warning',
-  low: 'bg-subtle text-muted',
+  high: 'bg-primary-50 text-primary-700',
+  medium: 'bg-subtle text-muted',
+  low: 'bg-warning-bg text-warning',
 }
 
 const LABELS: Record<ConfidenceLevel, string> = {

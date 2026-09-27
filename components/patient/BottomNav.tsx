@@ -3,14 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useCallback, useState } from 'react'
+import { Home, Users, Bell, User } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNotificationsRealtime } from '@/lib/hooks/useNotificationsRealtime'
 
 const TABS = [
-  { href: '/dashboard', label: 'Home' },
-  { href: '/queue', label: 'Queue' },
-  { href: '/notifications', label: 'Alerts' },
-  { href: '/profile', label: 'Profile' },
+  { href: '/dashboard', label: 'Home', icon: Home },
+  { href: '/queue', label: 'Queue', icon: Users },
+  { href: '/notifications', label: 'Alerts', icon: Bell },
+  { href: '/profile', label: 'Profile', icon: User },
 ]
 
 /** Deferred from Slice 1 (no /notifications or /profile to link to yet) — built now that both exist. */
@@ -34,6 +35,7 @@ export function BottomNav({ initialUnreadCount }: { initialUnreadCount: number }
       <div className="mx-auto flex max-w-md items-center justify-around px-2 py-2">
         {TABS.map((tab) => {
           const isActive = pathname === tab.href
+          const Icon = tab.icon
           return (
             <Link
               key={tab.href}
@@ -42,6 +44,8 @@ export function BottomNav({ initialUnreadCount }: { initialUnreadCount: number }
                 isActive ? 'text-primary-700' : 'text-muted'
               }`}
             >
+              {/* Icon above the label, not replacing it — icons aid recognition for users with limited literacy, labels keep it unambiguous. */}
+              <Icon size={20} aria-hidden />
               {tab.label}
               {tab.label === 'Alerts' && unreadCount > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">

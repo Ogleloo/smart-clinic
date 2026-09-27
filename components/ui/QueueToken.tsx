@@ -1,8 +1,11 @@
 type Size = 'xl' | 'lg' | 'sm'
+type Tone = 'ink' | 'white'
 
 interface QueueTokenProps {
   token: string
   size?: Size
+  /** 'ink' (default) for light surfaces; 'white' for a caller placing this on a dark/teal card — the token is the most important element on those cards and must stay readable. */
+  tone?: Tone
 }
 
 /**
@@ -15,9 +18,14 @@ const SIZE_STYLE: Record<Size, string> = {
   sm: 'text-lg',
 }
 
-export function QueueToken({ token, size = 'lg' }: QueueTokenProps) {
+const TONE_STYLE: Record<Tone, string> = {
+  ink: 'text-ink',
+  white: 'text-white',
+}
+
+export function QueueToken({ token, size = 'lg', tone = 'ink' }: QueueTokenProps) {
   return (
-    <span className={`font-mono font-semibold tabular-nums text-ink ${SIZE_STYLE[size]}`}>
+    <span className={`font-mono font-semibold tabular-nums ${TONE_STYLE[tone]} ${SIZE_STYLE[size]}`}>
       {token}
     </span>
   )
