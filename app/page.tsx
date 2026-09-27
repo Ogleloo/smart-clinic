@@ -20,13 +20,32 @@ const HOW_IT_WORKS = [
   },
 ] as const
 
+type QueueCardVariant = 'active' | 'warning' | 'closed'
+
 /**
- * get_public_queue_display(), called with no argument, now returns one row
+ * Three states, not two — a service with no nurse and nobody waiting is
+ * just quiet, not broken. Only "people waiting, nobody serving them"
+ * earns the warning colour; painting every uncovered service amber made
+ * an ordinary clinic look like something was wrong everywhere at once.
+ */
+function queueCardVariant(row: PublicQueueDisplay): QueueCardVariant {
+  if (row.is_being_served) return 'active'
+  return row.waiting_count > 0 ? 'warning' : 'closed'
+}
+
+const CARD_STYLES: Record<QueueCardVariant, string> = {
+  active: 'bg-surface border border-border',
+  warning: 'bg-warning-bg',
+  closed: 'bg-subtle',
+}
+
+/**
+ * get_public_queue_display(), called with no argument, returns one row
  * per active service directly (migration 0051) — no need to enumerate
  * services first, which anon couldn't do anyway (services_read is
- * authenticated-only). Anything that fails here degrades to an empty strip
- * rather than blocking the page: this section is the point of the page,
- * but it is not load-bearing for the rest of it.
+ * authenticated-only). Anything that fails here degrades to an empty
+ * strip rather than blocking the page: this section is the point of the
+ * page, but it is not load-bearing for the rest of it.
  */
 async function getQueueStrip(): Promise<PublicQueueDisplay[]> {
   try {
@@ -54,19 +73,23 @@ export default async function LandingPage() {
   }
 
   const queueStrip = await getQueueStrip()
+  const displayServiceId = queueStrip[0]?.service_id ?? null
 
   return (
     <main className="flex min-h-dvh flex-col">
+      <nav className="flex items-center px-6 py-4">
+        <span className="font-display text-base font-bold text-ink">Riverside Clinic</span>
+      </nav>
+
       {/* 1. Hero */}
-      <section className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-6 py-12 text-center">
-        <div className="h-16 w-16 rounded-full bg-primary-700" aria-hidden />
-        <h1 className="font-display text-[34px] font-bold leading-tight text-ink">
-          Riverside Clinic
+      <section className="flex flex-col items-center gap-4 bg-primary-900 px-6 py-12 text-center">
+        <h1 className="font-display text-[34px] font-bold leading-tight text-white">
+          Know how long you&rsquo;ll wait.
         </h1>
-        <p className="text-[15px] text-muted">
-          Book, check in, and see how long you&rsquo;ll wait.
+        <p className="text-[15px] text-primary-100">
+          Book ahead, or walk in and join the queue.
         </p>
-        <div className="flex w-full flex-col gap-2.5">
+        <div className="mt-2 flex w-full max-w-md flex-col gap-2.5">
           <LinkButton href="/register" variant="primary" fullWidth>
             Book an appointment
           </LinkButton>
@@ -78,37 +101,52 @@ export default async function LandingPage() {
 
       {/* 2. Live queue strip — the point of the page */}
       {queueStrip.length > 0 && (
-        <section className="mx-auto w-full max-w-md px-6 pb-10">
+        <section className="mx-auto w-full max-w-md px-6 py-8">
           <p className="mb-3 text-xs font-semibold tracking-wide text-muted">
             RIGHT NOW AT THE CLINIC
           </p>
           <div className="flex flex-col gap-2">
-            {queueStrip.map((row) => (
-              <div
-                key={row.service_id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3"
-              >
-                <div>
-                  <p className="font-semibold text-ink">{row.service_name}</p>
-                  <p className="text-sm text-muted">{row.waiting_count} waiting</p>
+            {queueStrip.map((row) => {
+              const variant = queueCardVariant(row)
+              return (
+                <div
+                  key={row.service_id}
+                  className={`flex items-center justify-between gap-3 rounded-lg px-4 py-3 ${CARD_STYLES[variant]}`}
+                >
+                  <div>
+                    <p className="font-semibold text-ink">{row.service_name}</p>
+                    <p className="text-sm text-muted">{row.waiting_count} waiting</p>
+                  </div>
+                  {variant === 'active' ? (
+                    row.waiting_count > 0 ? (
+                      <p className="shrink-0 font-mono text-lg font-semibold tabular-nums text-primary-700">
+                        ~{row.estimated_wait_minutes} min
+                      </p>
+                    ) : (
+                      <div className="shrink-0 text-right">
+                        <p className="font-semibold text-primary-700">No wait</p>
+                        <p className="text-xs text-muted">walk straight in</p>
+                      </div>
+                    )
+                  ) : variant === 'warning' ? (
+                    <p className="shrink-0 text-sm font-semibold text-warning">
+                      Not currently being served
+                    </p>
+                  ) : (
+                    <p className="shrink-0 text-sm font-semibold text-muted">Closed today</p>
+                  )}
                 </div>
-                {row.is_being_served && row.estimated_wait_minutes !== null ? (
-                  <p className="shrink-0 font-mono text-lg font-semibold tabular-nums text-primary-700">
-                    ~{row.estimated_wait_minutes} min
-                  </p>
-                ) : (
-                  <p className="shrink-0 text-sm font-semibold text-muted">
-                    Not currently being served
-                  </p>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
+          <p className="mt-3 text-xs text-muted">
+            Where no nurse is on duty we show no estimate rather than a guess.
+          </p>
         </section>
       )}
 
       {/* 3. How it works */}
-      <section className="mx-auto w-full max-w-md px-6 pb-10">
+      <section className="mx-auto w-full max-w-md px-6 pb-8">
         <h2 className="mb-4 font-display text-xl font-bold text-ink">How it works</h2>
         <ol className="flex flex-col gap-4">
           {HOW_IT_WORKS.map((step, i) => (
@@ -125,26 +163,21 @@ export default async function LandingPage() {
         </ol>
       </section>
 
-      {/* 4. No smartphone? — an accessibility feature of the system, not a footnote */}
-      <section className="mx-auto w-full max-w-md px-6 pb-10">
-        <div className="rounded-lg border border-border bg-surface p-5">
-          <h2 className="mb-2 font-display text-lg font-bold text-ink">No smartphone?</h2>
-          <p className="text-sm text-muted">
+      {/* 4. No smartphone? — prominent, not a footnote */}
+      <section className="mx-auto w-full max-w-md px-6 pb-8">
+        <div className="rounded-lg bg-primary-700 p-5 text-white">
+          <h2 className="mb-2 font-display text-lg font-bold">No smartphone? No problem.</h2>
+          <p className="text-sm text-primary-100">
             Walk-in patients are registered at reception and can follow their position on the
             waiting-room screen &mdash; no phone or app needed.
           </p>
-          {queueStrip.length > 0 && (
-            <div className="mt-3 flex flex-col gap-1.5">
-              {queueStrip.map((row) => (
-                <Link
-                  key={row.service_id}
-                  href={`/display/${row.service_id}`}
-                  className="text-sm font-semibold text-primary-700"
-                >
-                  {row.service_name} waiting-room display &rarr;
-                </Link>
-              ))}
-            </div>
+          {displayServiceId && (
+            <Link
+              href={`/display/${displayServiceId}`}
+              className="mt-3 inline-block text-sm font-semibold text-white underline"
+            >
+              View the waiting-room display &rarr;
+            </Link>
           )}
         </div>
       </section>
