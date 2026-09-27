@@ -3,9 +3,10 @@
 import { useCallback, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useQueueBroadcast } from '@/lib/hooks/useQueueBroadcast'
-import { StatusChip, unexpectedStatusChip, type StatusChipVariant } from '@/components/ui/StatusChip'
+import { StatusChip } from '@/components/ui/StatusChip'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { QueueToken } from '@/components/ui/QueueToken'
+import { queueEntryStatusToChip } from '@/lib/queueEntryStatus'
 import type { QueueEntryStatus } from '@/lib/types/database.types'
 
 interface QueueRow {
@@ -17,33 +18,6 @@ interface QueueRow {
   status: QueueEntryStatus
   checked_in_at: string
   waiting_minutes: number
-}
-
-// queue_entry_status has more states than StatusChip's spec'd variant
-// set — same approach as AppointmentCard: map the extras onto the
-// closest visual meaning rather than growing StatusChip for one caller.
-// A previous version of this map used a plain Record and mapped no_show
-// onto the same 'cancelled' variant as skipped — a patient who never
-// showed up is not the same as one staff actively skipped. This switch
-// form keeps the same compile-time exhaustiveness a Record gave, but
-// degrades to the raw value (see unexpectedStatusChip) instead of a
-// silently-wrong label for a status that isn't one of these.
-function queueEntryStatusToChip(status: QueueEntryStatus): { variant: StatusChipVariant; label?: string } {
-  switch (status) {
-    case 'waiting':
-      return { variant: 'waiting' }
-    case 'in_progress':
-      return { variant: 'in-progress' }
-    case 'done':
-      return { variant: 'done' }
-    case 'skipped':
-      return { variant: 'cancelled' }
-    case 'no_show':
-      // Distinct from skipped/cancelled — this patient never showed up.
-      return { variant: 'no-show' }
-    default:
-      return unexpectedStatusChip(status)
-  }
 }
 
 interface ServiceQueuePanelProps {

@@ -112,10 +112,10 @@ export function PatientSearchBox({
         // so this offers "add", not "not found".
         <EmptyState
           headline="No matching patient"
-          body="They may be new to the clinic."
+          body="Staff can only see patients with an existing appointment or queue entry — a first-time patient won't be found here. That's expected, not a failure."
           action={
             <Button variant="secondary" onClick={() => onAddNew(trimmedQuery)}>
-              Add new patient
+              Register walk-in patient
             </Button>
           }
           fullWidth
