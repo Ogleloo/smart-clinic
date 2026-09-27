@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { PublicQueueDisplay } from '@/lib/types/database.types'
-import { ConfidenceChip, toConfidenceLevel } from '@/components/ui/ConfidenceChip'
+import { ConfidenceChip } from '@/components/ui/ConfidenceChip'
+import { toConfidenceLevel } from '@/lib/confidence'
 
 const POLL_MS = 15_000
 

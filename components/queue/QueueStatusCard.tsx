@@ -1,7 +1,8 @@
 import type { WaitEstimate } from '@/lib/types/database.types'
 import { QueueToken } from '@/components/ui/QueueToken'
 import { StatusChip } from '@/components/ui/StatusChip'
-import { ConfidenceChip, toConfidenceLevel } from '@/components/ui/ConfidenceChip'
+import { ConfidenceChip } from '@/components/ui/ConfidenceChip'
+import { toConfidenceLevel } from '@/lib/confidence'
 import { WaitBreakdown } from './WaitBreakdown'
 
 interface QueueStatusCardProps {

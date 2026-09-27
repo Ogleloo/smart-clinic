@@ -1,8 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-
-export type ConfidenceLevel = 'high' | 'medium' | 'low'
+import type { ConfidenceLevel } from '@/lib/confidence'
 
 interface ConfidenceChipProps {
   level: ConfidenceLevel
@@ -37,11 +36,6 @@ const EXPLANATIONS: Record<ConfidenceLevel, string> = {
   high: 'Based on many consistent recent visits for this service.',
   medium: 'Based on a smaller or less consistent set of recent visits.',
   low: 'Not enough recent data yet — treat this estimate loosely.',
-}
-
-/** get_wait_estimate() returns confidence as a plain string; unrecognised values fall back to low rather than erroring. */
-export function toConfidenceLevel(value: string | null | undefined): ConfidenceLevel {
-  return value === 'high' || value === 'medium' || value === 'low' ? value : 'low'
 }
 
 function consultationsPhrase(sampleCount: number): string {
