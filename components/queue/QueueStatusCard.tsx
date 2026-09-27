@@ -55,7 +55,7 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
     return (
       <div className="flex flex-col items-center gap-3 rounded-2xl bg-primary-700 p-6 text-center text-white">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">{service_name}</p>
-        <QueueToken token={token} size="xl" />
+        <QueueToken token={token} size="xl" tone="white" />
         <p className="text-base font-semibold">Not currently being served</p>
       </div>
     )
@@ -71,7 +71,7 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
         </div>
 
         <div className="text-center">
-          <QueueToken token={token} size="xl" />
+          <QueueToken token={token} size="xl" tone="white" />
         </div>
 
         {isInProgress ? (
