@@ -5,6 +5,8 @@ export type ActiveQueueEntry = {
   entryId: string
   serviceId: string
   estimate: WaitEstimate
+  /** get_public_queue_display's now_serving_token for this entry's own service — gives "position 3" a concrete anchor. Null whenever nobody's being served. */
+  nowServingToken: string | null
 }
 
 /**
@@ -35,11 +37,18 @@ export async function getActiveQueueEntries(
   const activeEntries = entries ?? []
   if (activeEntries.length === 0) return []
 
-  const estimateResults = await Promise.all(
-    activeEntries.map((entry) =>
-      supabase.rpc('get_wait_estimate', { p_queue_entry_id: entry.id }).single()
-    )
-  )
+  const [estimateResults, displayResults] = await Promise.all([
+    Promise.all(
+      activeEntries.map((entry) =>
+        supabase.rpc('get_wait_estimate', { p_queue_entry_id: entry.id }).single()
+      )
+    ),
+    Promise.all(
+      activeEntries.map((entry) =>
+        supabase.rpc('get_public_queue_display', { p_service_id: entry.service_id }).single()
+      )
+    ),
+  ])
 
   return activeEntries.flatMap((entry, i) => {
     const { data, error } = estimateResults[i]
@@ -47,6 +56,7 @@ export async function getActiveQueueEntries(
       console.error('get_wait_estimate failed:', error?.message)
       return []
     }
-    return [{ entryId: entry.id, serviceId: entry.service_id, estimate: data }]
+    const nowServingToken = displayResults[i].data?.now_serving_token ?? null
+    return [{ entryId: entry.id, serviceId: entry.service_id, estimate: data, nowServingToken }]
   })
 }

@@ -7,6 +7,31 @@ import { LinkButton } from '@/components/ui/LinkButton'
 import { AppointmentCard } from '@/components/ui/AppointmentCard'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { QueueSummaryCard } from '@/components/ui/QueueSummaryCard'
+import { CLINIC_TIMEZONE, todayInClinicTimezone } from '@/lib/clinicTime'
+
+function formatAppointmentTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: CLINIC_TIMEZONE,
+  })
+}
+
+function formatAppointmentDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    timeZone: CLINIC_TIMEZONE,
+  })
+}
+
+function isAppointmentToday(iso: string): boolean {
+  const appointmentDate = new Intl.DateTimeFormat('en-CA', { timeZone: CLINIC_TIMEZONE }).format(
+    new Date(iso)
+  )
+  return appointmentDate === todayInClinicTimezone()
+}
 
 /**
  * Patient dashboard — Milestone 8 Vertical Slice 1.
@@ -74,10 +99,30 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-4 px-4 py-5">
         <h1 className="font-display text-[26px] font-bold text-ink">Hello, {firstName}</h1>
 
-        {activeEntries.length > 0 && (
+        {activeEntries.length > 0 ? (
           <QueueSummaryCard
             estimate={(activeEntries.find((e) => e.estimate.status === 'in_progress') ?? activeEntries[0]).estimate}
             otherCount={activeEntries.length - 1}
+            fullWidth
+          />
+        ) : nextAppointment && !appointmentError ? (
+          isAppointmentToday(nextAppointment.scheduled_time) ? (
+            <EmptyState
+              headline={`Your appointment is today at ${formatAppointmentTime(nextAppointment.scheduled_time)}.`}
+              body="Check in at reception when you arrive and your queue token, position and estimated wait will appear here."
+              fullWidth
+            />
+          ) : (
+            <EmptyState
+              headline={`Your appointment is on ${formatAppointmentDate(nextAppointment.scheduled_time)} at ${formatAppointmentTime(nextAppointment.scheduled_time)}.`}
+              body="Check in at reception when you arrive to join the queue."
+              fullWidth
+            />
+          )
+        ) : (
+          <EmptyState
+            headline="No active queue entry"
+            body="Book an appointment, or visit the clinic and reception will add you to the walk-in queue."
             fullWidth
           />
         )}

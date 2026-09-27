@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import type { WaitEstimate } from '@/lib/types/database.types'
 import { QueueToken } from './QueueToken'
-import { ConfidenceChip, toConfidenceLevel } from './ConfidenceChip'
+import { ConfidenceChip } from './ConfidenceChip'
+import { toConfidenceLevel } from '@/lib/confidence'
 
 interface QueueSummaryCardProps {
   estimate: WaitEstimate
