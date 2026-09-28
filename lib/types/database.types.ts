@@ -75,6 +75,38 @@ export type Database = {
           },
         ]
       }
+      clinic_hours: {
+        Row: {
+          clinic_id: string
+          closes_at: string | null
+          day_of_week: number
+          is_closed: boolean
+          opens_at: string | null
+        }
+        Insert: {
+          clinic_id: string
+          closes_at?: string | null
+          day_of_week: number
+          is_closed?: boolean
+          opens_at?: string | null
+        }
+        Update: {
+          clinic_id?: string
+          closes_at?: string | null
+          day_of_week?: number
+          is_closed?: boolean
+          opens_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clinic_hours_clinic_id_fkey"
+            columns: ["clinic_id"]
+            isOneToOne: false
+            referencedRelation: "clinics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clinic_settings: {
         Row: {
           appointment_reminder_lead_minutes: number
@@ -1214,6 +1246,7 @@ export type PublicQueueDisplay = Database["public"]["Functions"]["get_public_que
 export type Appointment = Database["public"]["Tables"]["appointments"]["Row"]
 export type AppointmentStatus = Database["public"]["Enums"]["appointment_status"]
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"]
+export type ClinicHours = Database["public"]["Tables"]["clinic_hours"]["Row"]
 /** notifications.kind is a plain text column with a CHECK constraint, not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with migration 0023. */
 export type NotificationKind =
   | "queue_position"

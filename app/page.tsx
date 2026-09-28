@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
 import { LinkButton } from '@/components/ui/LinkButton'
 import { ServiceCoverageCard } from '@/components/ui/ServiceCoverageCard'
+import { formatOpeningHours } from '@/lib/clinicHours'
 import type { PublicQueueDisplay, UserRole } from '@/lib/types/database.types'
 
 const HOW_IT_WORKS = [
@@ -39,6 +40,25 @@ async function getQueueStrip(): Promise<PublicQueueDisplay[]> {
   }
 }
 
+/**
+ * clinic_hours is public information (on the door of the clinic, on
+ * this same page) and anon-readable by grant, not through a second
+ * anon-callable function — ADR-028's "exactly one" assertion covers
+ * functions, not table grants. Degrades to a plain "—" rather than a
+ * stale hardcoded fallback: showing old hours as if they were current
+ * would be exactly the kind of guess this feature exists to remove.
+ */
+async function getOpeningHoursLine(): Promise<string> {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase.from('clinic_hours').select('*').order('day_of_week')
+    if (error || !data || data.length === 0) return '—'
+    return formatOpeningHours(data)
+  } catch {
+    return '—'
+  }
+}
+
 export default async function LandingPage() {
   const supabase = await createClient()
   const {
@@ -54,7 +74,7 @@ export default async function LandingPage() {
     redirect(homeForRole((profile?.role ?? 'patient') as UserRole))
   }
 
-  const queueStrip = await getQueueStrip()
+  const [queueStrip, openingHoursLine] = await Promise.all([getQueueStrip(), getOpeningHoursLine()])
   const displayServiceId = queueStrip[0]?.service_id ?? null
 
   return (
@@ -138,7 +158,7 @@ export default async function LandingPage() {
       {/* 5. Footer */}
       <footer className="mt-auto border-t border-border px-6 py-6 text-center text-xs text-muted">
         <p className="font-semibold text-ink">Riverside Clinic</p>
-        <p>123 Main Road, Riverside &middot; Mon&ndash;Fri 08:00&ndash;17:00</p>
+        <p>123 Main Road, Riverside &middot; {openingHoursLine}</p>
       </footer>
     </main>
   )

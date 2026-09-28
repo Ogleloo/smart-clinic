@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { SettingsForm } from '@/components/admin/SettingsForm'
+import { OpeningHoursForm } from '@/components/admin/OpeningHoursForm'
 
 export default async function AdminSettingsPage() {
   const supabase = await createClient()
@@ -19,25 +20,40 @@ export default async function AdminSettingsPage() {
   // only "works" today because this system has exactly one clinic. The
   // filter is this query's own invariant ("my clinic's settings"), not
   // a duplicate of RLS — same fix as the dashboard profile query.
-  const { data: settings, error } = await supabase
-    .from('clinic_settings')
-    .select('*')
-    .eq('clinic_id', profile?.clinic_id ?? '')
-    .maybeSingle()
+  const [{ data: settings, error }, { data: clinicHours, error: hoursError }] = await Promise.all([
+    supabase.from('clinic_settings').select('*').eq('clinic_id', profile?.clinic_id ?? '').maybeSingle(),
+    supabase.from('clinic_hours').select('*').eq('clinic_id', profile?.clinic_id ?? ''),
+  ])
 
   return (
-    <div className="flex max-w-md flex-col gap-4">
-      <h2 className="font-display text-lg font-semibold text-ink">Settings</h2>
-      <p className="text-sm text-muted">
-        These tune the wait-time prediction engine directly. Each field explains what it does — read it
-        before changing the number.
-      </p>
+    <div className="flex max-w-md flex-col gap-8">
+      <div className="flex flex-col gap-4">
+        <h2 className="font-display text-lg font-semibold text-ink">Settings</h2>
+        <p className="text-sm text-muted">
+          These tune the wait-time prediction engine directly. Each field explains what it does — read it
+          before changing the number.
+        </p>
 
-      {error || !settings ? (
-        <p className="text-sm text-danger">Couldn&rsquo;t load clinic settings. Try refreshing.</p>
-      ) : (
-        <SettingsForm settings={settings} />
-      )}
+        {error || !settings ? (
+          <p className="text-sm text-danger">Couldn&rsquo;t load clinic settings. Try refreshing.</p>
+        ) : (
+          <SettingsForm settings={settings} />
+        )}
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <h2 className="font-display text-lg font-semibold text-ink">Opening hours</h2>
+        <p className="text-sm text-muted">
+          Shown on the landing page and enforced on the booking screen — a day marked closed here offers
+          no booking slots.
+        </p>
+
+        {hoursError ? (
+          <p className="text-sm text-danger">Couldn&rsquo;t load opening hours. Try refreshing.</p>
+        ) : (
+          <OpeningHoursForm hours={clinicHours ?? []} />
+        )}
+      </div>
     </div>
   )
 }

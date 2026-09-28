@@ -173,6 +173,48 @@ export async function updateClinicSettings(
   return { success: true, changed: changed.map((key) => fieldLabels[key]) }
 }
 
+export type HoursFormState = { error?: string; success?: boolean }
+
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+export async function updateClinicHours(_prev: HoursFormState, formData: FormData): Promise<HoursFormState> {
+  const supabase = await createClient()
+  const clinicId = await requireAdminClinicId(supabase)
+  if (!clinicId) return { error: 'Could not determine your clinic.' }
+
+  const rows: Database['public']['Tables']['clinic_hours']['Insert'][] = []
+  for (let day = 0; day <= 6; day++) {
+    const isClosed = formData.get(`day_${day}_closed`) === 'true'
+    const opensAt = String(formData.get(`day_${day}_opens`) ?? '')
+    const closesAt = String(formData.get(`day_${day}_closes`) ?? '')
+
+    if (!isClosed) {
+      if (!opensAt || !closesAt) {
+        return { error: `Enter both an opening and closing time for ${DAY_LABELS[day]}, or mark it closed.` }
+      }
+      if (closesAt <= opensAt) {
+        return { error: `${DAY_LABELS[day]}'s closing time must be after its opening time.` }
+      }
+    }
+
+    rows.push({
+      clinic_id: clinicId,
+      day_of_week: day,
+      is_closed: isClosed,
+      opens_at: isClosed ? null : opensAt,
+      closes_at: isClosed ? null : closesAt,
+    })
+  }
+
+  const { error } = await supabase.from('clinic_hours').upsert(rows, { onConflict: 'clinic_id,day_of_week' })
+  if (error) return { error: error.message }
+
+  revalidatePath('/admin/settings')
+  revalidatePath('/book')
+  revalidatePath('/')
+  return { success: true }
+}
+
 export type StaffFormState = { error?: string; success?: boolean; changed?: string[] }
 
 const STAFF_ROLES = ['receptionist', 'nurse', 'admin'] as const
