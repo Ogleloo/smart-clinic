@@ -107,7 +107,7 @@ export function EndSessionControl({ isOnDuty, currentServiceId }: EndSessionCont
   if (flow.kind === 'NEEDS_LONG_DECISION') {
     const minutes = Math.round(flow.durationMinutes)
     return (
-      <section className="flex flex-col gap-2 rounded-lg border border-warning bg-warning-bg p-3">
+      <section className="flex w-full basis-full flex-col gap-2 rounded-lg border border-warning bg-warning-bg p-3">
         <p className="text-sm font-semibold text-ink">
           This consultation has been open for {minutes} minutes. Was this continuous patient care?
         </p>
@@ -127,7 +127,7 @@ export function EndSessionControl({ isOnDuty, currentServiceId }: EndSessionCont
     const { serviceName, waitingCount } = flow
     const plural = waitingCount === 1 ? 'patient is' : 'patients are'
     return (
-      <section className="flex flex-col gap-2 rounded-lg border border-warning bg-warning-bg p-3">
+      <section className="flex w-full basis-full flex-col gap-2 rounded-lg border border-warning bg-warning-bg p-3">
         <p className="text-sm font-semibold text-ink">
           You are the only nurse serving {serviceName}. {waitingCount} {plural} waiting. If you end this
           session, their wait estimate will be unavailable until another nurse goes on duty. Continue?
@@ -145,7 +145,7 @@ export function EndSessionControl({ isOnDuty, currentServiceId }: EndSessionCont
   }
 
   return (
-    <section className="flex flex-col gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         variant="tertiary"
         loading={flow.kind === 'CHECKING' || flow.kind === 'SUBMITTING'}
@@ -153,12 +153,11 @@ export function EndSessionControl({ isOnDuty, currentServiceId }: EndSessionCont
       >
         End session
       </Button>
-      <p className="text-xs text-muted">Stop serving this queue and go off duty.</p>
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       )}
-    </section>
+    </div>
   )
 }

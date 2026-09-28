@@ -1,7 +1,9 @@
 import { requireRole } from '@/lib/auth/requireRole'
 import { getNurseCurrentState } from '@/app/actions/nurse'
-import { DutyControl } from '@/components/nurse/DutyControl'
+import { getSeenTodayStats } from '@/lib/nurseStats'
+import { NurseHeader } from '@/components/nurse/NurseHeader'
 import { EndSessionControl } from '@/components/nurse/EndSessionControl'
+import { CoverageWarning } from '@/components/nurse/CoverageWarning'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
 import { LogoutButton } from '@/components/ui/LogoutButton'
@@ -30,7 +32,7 @@ export default async function NursePage() {
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('full_name, is_on_duty, current_service_id, clinic_id')
+    .select('id, full_name, is_on_duty, current_service_id, clinic_id')
     .eq('auth_user_id', user.id)
     .single()
 
@@ -52,16 +54,26 @@ export default async function NursePage() {
   ])
 
   let initialQueue: QueueRow[] = []
+  let serviceAverageMinutes: number | null = null
+  let seenToday: { count: number; avgMinutes: number | null } = { count: 0, avgMinutes: null }
   const onDuty = profile?.is_on_duty && profile.current_service_id
   if (onDuty) {
-    const { data: queueRows } = await supabase.rpc('get_service_queue', {
-      p_service_id: profile.current_service_id as string,
-    })
+    const serviceId = profile.current_service_id as string
+    const [{ data: queueRows }, { data: stats }, seen] = await Promise.all([
+      supabase.rpc('get_service_queue', { p_service_id: serviceId }),
+      supabase.rpc('service_consultation_stats', { p_service_id: serviceId }).maybeSingle(),
+      getSeenTodayStats(supabase, profile!.id),
+    ])
     initialQueue = queueRows ?? []
+    serviceAverageMinutes = stats?.avg_minutes ?? null
+    seenToday = seen
   }
 
+  const initialNextToken = initialQueue.find((r) => r.status === 'waiting')?.token ?? null
+  const currentServiceName = services?.find((s) => s.id === profile?.current_service_id)?.name ?? null
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-6 px-6 py-6">
+    <main className="mx-auto flex min-h-dvh max-w-[1000px] flex-col gap-6 px-6 py-6">
       <div className="flex items-center justify-between">
         <h1 className="font-display text-2xl font-bold text-ink">
           Nurse{profile?.full_name ? ` — ${profile.full_name}` : ''}
@@ -69,32 +81,40 @@ export default async function NursePage() {
         <LogoutButton />
       </div>
 
-      <DutyControl
+      <NurseHeader
         services={services ?? []}
         isOnDuty={profile?.is_on_duty ?? false}
         currentServiceId={profile?.current_service_id ?? null}
-      />
-
-      {/*
-        Mounted unconditionally (not inside the onDuty branch below) so
-        its "Session ended" report survives is_on_duty flipping to
-        false — see EndSessionControl for why. It must be visible
-        wherever the nurse actually is while on duty, not buried in
-        DutyControl, which they only touch once at the start of the day.
-      */}
-      <EndSessionControl
-        isOnDuty={profile?.is_on_duty ?? false}
-        currentServiceId={profile?.current_service_id ?? null}
+        currentServiceName={currentServiceName}
+        // Mounted unconditionally (not inside the onDuty branch below) so
+        // its "Session ended" report survives is_on_duty flipping to
+        // false — see EndSessionControl's own docs for why.
+        endSession={
+          <EndSessionControl
+            isOnDuty={profile?.is_on_duty ?? false}
+            currentServiceId={profile?.current_service_id ?? null}
+          />
+        }
       />
 
       {onDuty ? (
-        <>
-          <CurrentPatientPanel
-            initialEntry={currentEntry}
-            undoWindowSeconds={settings?.undo_window_seconds ?? DEFAULT_UNDO_WINDOW_SECONDS}
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
+          <div className="flex flex-col gap-4">
+            <CoverageWarning serviceId={profile.current_service_id as string} />
+            <CurrentPatientPanel
+              initialEntry={currentEntry}
+              serviceId={profile.current_service_id as string}
+              undoWindowSeconds={settings?.undo_window_seconds ?? DEFAULT_UNDO_WINDOW_SECONDS}
+              serviceAverageMinutes={serviceAverageMinutes}
+              initialNextToken={initialNextToken}
+            />
+          </div>
+          <WaitingList
+            serviceId={profile.current_service_id as string}
+            initialQueue={initialQueue}
+            seenToday={seenToday}
           />
-          <WaitingList serviceId={profile.current_service_id as string} initialQueue={initialQueue} />
-        </>
+        </div>
       ) : (
         <p className="text-sm text-muted">Go on duty to see your current patient and the waiting list.</p>
       )}
