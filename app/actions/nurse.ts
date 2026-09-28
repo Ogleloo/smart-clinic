@@ -11,6 +11,13 @@ export type LongDecision = 'record' | 'break'
 // shapes, read directly off the migration 0028-0031 function bodies
 // (backend is frozen; these are documentation of what it does, not a
 // contract this file gets to redefine).
+// ended_counted/ended_exclusion_reason, not ended_excluded: migration
+// 0037 (next_patient_reports_plausibility_exclusion) changed the actual
+// returned shape to report both ways a consultation can miss the
+// average — an explicit staff-break judgement (exclusion_reason) and
+// the plausibility band applied at read time (which has no stored
+// reason). ended_excluded never existed in the deployed function; a
+// caller reading it was always reading undefined.
 export type CalledResult = {
   status: 'called'
   token: string
@@ -20,7 +27,8 @@ export type CalledResult = {
   queue_entry_id: string
   ended_token: string | null
   ended_minutes: number | null
-  ended_excluded: boolean
+  ended_counted: boolean | null
+  ended_exclusion_reason: string | null
   service_average: number | null
   confidence: string | null
   undo_window_seconds: number
@@ -31,7 +39,9 @@ export type QueueEmptyResult = {
   status: 'queue_empty'
   ended_consultation_id: string | null
   ended_token: string | null
-  ended_excluded: boolean
+  ended_minutes: number | null
+  ended_counted: boolean | null
+  ended_exclusion_reason: string | null
   replayed?: boolean
 }
 
@@ -62,10 +72,14 @@ export type UndoResult = { status: 'undone'; restored_token: string | null }
 export type NurseCurrentEntry = {
   queueEntryId: string
   consultationId: string
+  serviceId: string
   token: string
   patientName: string
   priority: number
   startedAt: string
+  checkedInAt: string
+  /** appointment_id is null for a walk-in — check_in_patient never sets one; check_in_appointment always does. */
+  isWalkIn: boolean
 }
 
 export async function getNurseCurrentState(): Promise<{ entry: NurseCurrentEntry | null; error?: string }> {
@@ -90,7 +104,7 @@ export async function getNurseCurrentState(): Promise<{ entry: NurseCurrentEntry
   const { data: consultation, error } = await supabase
     .from('consultations')
     .select(
-      'id, started_at, queue_entry:queue_entries!consultations_queue_entry_id_fkey(id, token, priority, patient:profiles!queue_entries_patient_id_fkey(full_name))'
+      'id, started_at, service_id, queue_entry:queue_entries!consultations_queue_entry_id_fkey(id, token, priority, checked_in_at, appointment_id, patient:profiles!queue_entries_patient_id_fkey(full_name))'
     )
     .eq('nurse_id', profile.id)
     .is('ended_at', null)
@@ -105,10 +119,13 @@ export async function getNurseCurrentState(): Promise<{ entry: NurseCurrentEntry
     entry: {
       queueEntryId: consultation.queue_entry.id,
       consultationId: consultation.id,
+      serviceId: consultation.service_id,
       token: consultation.queue_entry.token,
       patientName: consultation.queue_entry.patient?.full_name ?? 'Unknown patient',
       priority: consultation.queue_entry.priority,
       startedAt: consultation.started_at,
+      checkedInAt: consultation.queue_entry.checked_in_at,
+      isWalkIn: consultation.queue_entry.appointment_id === null,
     },
   }
 }

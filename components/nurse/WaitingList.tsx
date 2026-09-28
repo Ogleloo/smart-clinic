@@ -37,6 +37,8 @@ function formatTime(iso: string) {
 interface WaitingListProps {
   serviceId: string
   initialQueue: QueueRow[]
+  /** This nurse's own pace today (lib/nurseStats.ts) — a personal stat, distinct from the service-wide average shown on the current-patient card. Server-computed, refreshed whenever the page re-renders. */
+  seenToday: { count: number; avgMinutes: number | null }
 }
 
 /**
@@ -47,7 +49,7 @@ interface WaitingListProps {
  * audit metadata, not queue logic, so this doesn't conflict with
  * get_service_queue owning position/wait-time truth (ADR-009).
  */
-export function WaitingList({ serviceId, initialQueue }: WaitingListProps) {
+export function WaitingList({ serviceId, initialQueue, seenToday }: WaitingListProps) {
   const [supabase] = useState(() => createClient())
   const [queue, setQueue] = useState<QueueRow[]>(initialQueue)
   const [audit, setAudit] = useState<Record<string, AuditInfo>>({})
@@ -80,17 +82,31 @@ export function WaitingList({ serviceId, initialQueue }: WaitingListProps) {
   const waiting = queue.filter((r) => r.status === 'waiting')
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold tracking-wide text-muted">WAITING LIST</p>
-        <span className="text-xs text-muted">{waiting.length} waiting</span>
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs font-semibold tracking-wide text-muted">WAITING</p>
+          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">{waiting.length}</p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs font-semibold tracking-wide text-muted">SEEN TODAY</p>
+          <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-ink">
+            {seenToday.count}
+            {seenToday.avgMinutes !== null && (
+              <span className="ml-1.5 text-sm font-semibold text-muted">avg {seenToday.avgMinutes} min</span>
+            )}
+          </p>
+        </div>
       </div>
 
-      {!online && <OfflineBanner fullWidth />}
+      <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
+        <p className="text-xs font-semibold tracking-wide text-muted">WAITING LIST</p>
 
-      {waiting.length === 0 ? (
-        <p className="text-sm text-muted">No one waiting.</p>
-      ) : (
+        {!online && <OfflineBanner fullWidth />}
+
+        {waiting.length === 0 ? (
+          <p className="text-sm text-muted">No one waiting.</p>
+        ) : (
         <table className="w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs font-semibold tracking-wide text-muted">
@@ -144,7 +160,8 @@ export function WaitingList({ serviceId, initialQueue }: WaitingListProps) {
             })}
           </tbody>
         </table>
-      )}
-    </section>
+        )}
+      </section>
+    </div>
   )
 }
