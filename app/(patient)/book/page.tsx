@@ -17,11 +17,16 @@ export default async function BookPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: services, error } = await supabase
-    .from('services')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name')
+  // Unfiltered by clinic, deliberately: profiles.clinic_id is null for
+  // patients (verified live) — only staff belong to a clinic. A patient
+  // isn't scoped to one, which is why `services` on this same page has
+  // never been filtered by clinic_id either. This mirrors
+  // get_public_queue_display() (migration 0051), the other patient/anon
+  // -facing read, which has no clinic filter for the same reason.
+  const [{ data: services, error }, { data: clinicHours }] = await Promise.all([
+    supabase.from('services').select('id, name').eq('is_active', true).order('name'),
+    supabase.from('clinic_hours').select('*'),
+  ])
 
   return (
     <main className="mx-auto min-h-dvh max-w-md px-4 py-6">
@@ -30,7 +35,7 @@ export default async function BookPage() {
       {error ? (
         <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
       ) : services && services.length > 0 ? (
-        <BookingWizard services={services} />
+        <BookingWizard services={services} clinicHours={clinicHours ?? []} />
       ) : (
         <EmptyState
           headline="No services available"

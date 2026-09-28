@@ -6,6 +6,8 @@ import { bookAppointment, type ActionState } from '@/app/actions/appointments'
 import { Button } from '@/components/ui/Button'
 import { ServicePicker, type Service } from '@/components/booking/ServicePicker'
 import { CLINIC_TIMEZONE, todayInClinicTimezone } from '@/lib/clinicTime'
+import { dayFullName, dayOfWeekForDate, hoursForDate } from '@/lib/clinicHours'
+import type { ClinicHours } from '@/lib/types/database.types'
 
 interface Slot {
   slot_time: string
@@ -28,7 +30,13 @@ function formatPickedDate(dateStr: string): string {
   })
 }
 
-export function BookingWizard({ services }: { services: Service[] }) {
+export function BookingWizard({
+  services,
+  clinicHours,
+}: {
+  services: Service[]
+  clinicHours: ClinicHours[]
+}) {
   const [supabase] = useState(() => createClient())
   const [serviceId, setServiceId] = useState<string | null>(null)
   const [date, setDate] = useState(() => todayInClinicTimezone())
@@ -39,6 +47,13 @@ export function BookingWizard({ services }: { services: Service[] }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(bookAppointment, {})
 
   const selectedService = services.find((s) => s.id === serviceId) ?? null
+  // A closed day still round-trips through get_available_slots (it
+  // returns zero rows), but the reason matters to the person booking:
+  // "closed" and "every slot already taken" both look like an empty
+  // grid otherwise, and only one of them means "try a different service
+  // or time instead of a different day".
+  const closedDay = hoursForDate(clinicHours, date)?.is_closed ?? false
+  const fullyBooked = !!slots && slots.length > 0 && slots.every((s) => s.is_taken)
 
   // Fetching slots always invalidates whatever was selected before —
   // clearing it here (rather than in the effect that triggers a refetch)
@@ -125,6 +140,12 @@ export function BookingWizard({ services }: { services: Service[] }) {
             <p className="text-sm text-muted">Loading available times…</p>
           ) : slotsError ? (
             <p className="text-sm text-danger">Couldn&rsquo;t load times for that date. Try another date.</p>
+          ) : closedDay ? (
+            <p className="text-sm text-muted">
+              The clinic is closed on {dayFullName(dayOfWeekForDate(date))}s. Choose another day.
+            </p>
+          ) : fullyBooked ? (
+            <p className="text-sm text-muted">Fully booked for this date. Choose another day.</p>
           ) : slots && slots.length > 0 ? (
             <div className="grid grid-cols-3 gap-2">
               {slots.map((slot) => {
