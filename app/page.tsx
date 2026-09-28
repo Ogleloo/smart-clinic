@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
 import { LinkButton } from '@/components/ui/LinkButton'
+import { ServiceCoverageCard } from '@/components/ui/ServiceCoverageCard'
 import type { PublicQueueDisplay, UserRole } from '@/lib/types/database.types'
 
 const HOW_IT_WORKS = [
@@ -19,25 +20,6 @@ const HOW_IT_WORKS = [
     body: 'Your token, position and estimated wait update as the queue moves.',
   },
 ] as const
-
-type QueueCardVariant = 'active' | 'warning' | 'closed'
-
-/**
- * Three states, not two — a service with no nurse and nobody waiting is
- * just quiet, not broken. Only "people waiting, nobody serving them"
- * earns the warning colour; painting every uncovered service amber made
- * an ordinary clinic look like something was wrong everywhere at once.
- */
-function queueCardVariant(row: PublicQueueDisplay): QueueCardVariant {
-  if (row.is_being_served) return 'active'
-  return row.waiting_count > 0 ? 'warning' : 'closed'
-}
-
-const CARD_STYLES: Record<QueueCardVariant, string> = {
-  active: 'bg-surface border border-border',
-  warning: 'bg-warning-bg',
-  closed: 'bg-subtle',
-}
 
 /**
  * get_public_queue_display(), called with no argument, returns one row
@@ -106,38 +88,9 @@ export default async function LandingPage() {
             RIGHT NOW AT THE CLINIC
           </p>
           <div className="flex flex-col gap-2">
-            {queueStrip.map((row) => {
-              const variant = queueCardVariant(row)
-              return (
-                <div
-                  key={row.service_id}
-                  className={`flex items-center justify-between gap-3 rounded-lg px-4 py-3 ${CARD_STYLES[variant]}`}
-                >
-                  <div>
-                    <p className="font-semibold text-ink">{row.service_name}</p>
-                    <p className="text-sm text-muted">{row.waiting_count} waiting</p>
-                  </div>
-                  {variant === 'active' ? (
-                    row.waiting_count > 0 ? (
-                      <p className="shrink-0 font-mono text-lg font-semibold tabular-nums text-primary-700">
-                        ~{row.estimated_wait_minutes} min
-                      </p>
-                    ) : (
-                      <div className="shrink-0 text-right">
-                        <p className="font-semibold text-primary-700">No wait</p>
-                        <p className="text-xs text-muted">walk straight in</p>
-                      </div>
-                    )
-                  ) : variant === 'warning' ? (
-                    <p className="shrink-0 text-sm font-semibold text-warning">
-                      Not currently being served
-                    </p>
-                  ) : (
-                    <p className="shrink-0 text-sm font-semibold text-muted">Closed today</p>
-                  )}
-                </div>
-              )
-            })}
+            {queueStrip.map((row) => (
+              <ServiceCoverageCard key={row.service_id} row={row} />
+            ))}
           </div>
           <p className="mt-3 text-xs text-muted">
             Where no nurse is on duty we show no estimate rather than a guess.
