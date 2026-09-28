@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useCallback, useEffect, useState } from 'react'
+import { useActionState, useCallback, useEffect, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { bookAppointment, type ActionState } from '@/app/actions/appointments'
 import { Button } from '@/components/ui/Button'
@@ -55,12 +55,21 @@ export function BookingWizard({
   const closedDay = hoursForDate(clinicHours, date)?.is_closed ?? false
   const fullyBooked = !!slots && slots.length > 0 && slots.every((s) => s.is_taken)
 
+  // Selecting a service fires a fetch for the initial date, and picking
+  // a date fires another — a user (or a fast test) can trigger both
+  // within the same round trip. Without a sequence guard, whichever
+  // response happens to resolve last wins even if it's answering an
+  // earlier, now-superseded question, silently showing stale slots for
+  // the wrong date.
+  const latestRequestId = useRef(0)
+
   // Fetching slots always invalidates whatever was selected before —
   // clearing it here (rather than in the effect that triggers a refetch)
   // keeps every effect below free of direct setState calls; only the
   // async RPC callback updates state.
   const fetchSlots = useCallback(
     async (svcId: string, forDate: string) => {
+      const requestId = ++latestRequestId.current
       setSelectedSlot(null)
       setSlotsLoading(true)
       setSlotsError(null)
@@ -68,6 +77,7 @@ export function BookingWizard({
         p_service_id: svcId,
         p_date: forDate,
       })
+      if (requestId !== latestRequestId.current) return
       if (error) {
         setSlotsError(error.message)
         setSlots(null)

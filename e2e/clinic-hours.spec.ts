@@ -42,6 +42,24 @@ test('booking an open day still shows the time-slot grid', async ({ page }) => {
   await expect(page.locator('.grid.grid-cols-3 button').first()).toBeVisible()
 })
 
+// 2026-11-30 is a Monday (open) with every General Consultation slot
+// already taken — set up deliberately far in the future so it can
+// never collide with demo-reset data. This is the one case the whole
+// feature exists to get right: fully booked must read differently from
+// closed, and neither may render as an empty grid.
+test('a fully booked open day says so explicitly, not the closed-day message or an empty grid', async ({
+  page,
+}) => {
+  await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
+  await page.goto('/book')
+  await page.getByText('General Consultation').click()
+  await page.locator('#booking-date').fill('2026-11-30')
+
+  await expect(page.getByText('Fully booked for this date. Choose another day.')).toBeVisible()
+  await expect(page.getByText(/The clinic is closed/)).toHaveCount(0)
+  await expect(page.locator('.grid.grid-cols-3')).toHaveCount(0)
+})
+
 test('admin opening-hours editor loads current values and saves', async ({ page }) => {
   await loginAs(page, ACCOUNTS.admin.email, ACCOUNTS.admin.password)
   await page.goto('/admin/settings')
