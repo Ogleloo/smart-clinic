@@ -30,16 +30,22 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
     options: {
       data: { full_name: fullName, phone },
       // Without this, the confirmation link falls back to the Supabase
-      // Site URL directly instead of routing through /auth/callback,
-      // so the confirmation is never actually verified by this app.
+      // Site URL directly instead of routing through /auth/callback —
+      // kept for any link-based flow that still reads it, though signup
+      // itself now confirms via a 6-digit code (verifyOtp), not a link.
       emailRedirectTo: `${origin}/auth/callback?next=/dashboard`,
     },
   })
 
   if (error) return { error: error.message }
 
+  // Never treat signUp() as having signed the user in — even if
+  // Supabase auto-confirms today (Confirm Email is currently off,
+  // pending being switched on) and hands back a live session, the
+  // account isn't verified as far as this app is concerned. Always
+  // route through the verify screen.
   revalidatePath('/', 'layout')
-  redirect('/dashboard')
+  redirect(`/verify?email=${encodeURIComponent(email)}`)
 }
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -51,9 +57,17 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   const supabase = await createClient()
   const { data: signIn, error } = await supabase.auth.signInWithPassword({ email, password })
 
-  // Deliberately vague: revealing whether the email exists helps
-  // attackers enumerate accounts.
-  if (error) return { error: 'Those details don\u2019t match an account.' }
+  if (error) {
+    // An unverified account gets its own path, not the vague fallback \u2014
+    // the fix is to finish verifying, not to re-enter credentials that
+    // already matched.
+    if (error.code === 'email_not_confirmed') {
+      redirect(`/verify?email=${encodeURIComponent(email)}`)
+    }
+    // Deliberately vague otherwise: revealing whether the email exists
+    // helps attackers enumerate accounts.
+    return { error: 'Those details don\u2019t match an account.' }
+  }
 
   // Read the role to route the user to the right home. Filtered by
   // auth_user_id explicitly \u2014 RLS lets staff (receptionist/nurse/admin)

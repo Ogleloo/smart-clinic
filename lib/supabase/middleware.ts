@@ -41,6 +41,11 @@ export async function updateSession(request: NextRequest) {
     path === '/' ||
     path.startsWith('/login') ||
     path.startsWith('/register') ||
+    // Reached before a session exists (or, right now, before Confirm
+    // Email is switched on — see app/actions/auth.ts's register()):
+    // gating this behind `user` would bounce an unconfirmed signup
+    // straight to /login before they can ever enter their code.
+    path.startsWith('/verify') ||
     path.startsWith('/forgot-password') ||
     path.startsWith('/reset-password') ||
     path.startsWith('/auth') ||
