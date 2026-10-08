@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { getActiveQueueEntries } from '@/lib/patientQueue'
 import { QueueStatus } from '@/components/queue/QueueStatus'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { LinkButton } from '@/components/ui/LinkButton'
+import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
 import type { Notification } from '@/lib/types/database.types'
 
 /**
@@ -54,18 +56,27 @@ export default async function QueuePage() {
   }))
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 px-4 py-6">
-      <h1 className="font-display text-[22px] font-bold text-ink">Your queue status</h1>
+    <main className={PAGE_CLASS}>
+      <PageHeader title="Your queue status" subtitle="Updates live as the queue moves." />
 
-      {estimates.length > 0 ? (
-        <QueueStatus entries={estimates} entryIds={entryIds} initialNotifications={initialNotifications} />
-      ) : (
-        <EmptyState
-          headline="No active queue entry"
-          body="Check in at reception to join the queue."
-          fullWidth
-        />
-      )}
+      {/* The V2 queue cards and explainability panel, unchanged — capped
+          to a readable width beside the V3 sidebar on desktop. */}
+      <div className="w-full max-w-2xl">
+        {estimates.length > 0 ? (
+          <QueueStatus entries={estimates} entryIds={entryIds} initialNotifications={initialNotifications} />
+        ) : (
+          <EmptyState
+            headline="No active queue entry"
+            body="Check in at reception to join the queue."
+            action={
+              <LinkButton href="/appointments" variant="secondary">
+                My appointments
+              </LinkButton>
+            }
+            fullWidth
+          />
+        )}
+      </div>
     </main>
   )
 }

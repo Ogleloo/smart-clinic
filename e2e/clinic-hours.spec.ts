@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { loginAs, ACCOUNTS } from './helpers'
+import { loginAs, ACCOUNTS, chooseBookingService, pickBookingDate } from './helpers'
 
 // Migration 0052: clinic_hours drives the landing-page footer, the
 // booking screen's closed/fully-booked distinction, and an admin editor.
@@ -14,30 +14,28 @@ test('landing page footer reads live opening hours, grouped by consecutive day',
 
 test('booking a closed day shows a closed message, not an empty slot grid', async ({ page }) => {
   await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
-  await page.goto('/book')
-  await page.getByText('General Consultation').click()
+  await chooseBookingService(page, 'General Consultation')
 
   const today = new Date()
   const nextSunday = new Date(today)
   nextSunday.setDate(today.getDate() + ((7 - today.getDay()) % 7 || 7))
   const dateStr = nextSunday.toISOString().slice(0, 10)
 
-  await page.locator('#booking-date').fill(dateStr)
+  await pickBookingDate(page, dateStr)
   await expect(page.getByText(/The clinic is closed on Sundays\. Choose another day\./)).toBeVisible()
   await expect(page.locator('.grid.grid-cols-3')).toHaveCount(0)
 })
 
 test('booking an open day still shows the time-slot grid', async ({ page }) => {
   await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
-  await page.goto('/book')
-  await page.getByText('General Consultation').click()
+  await chooseBookingService(page, 'General Consultation')
 
   const today = new Date()
   const nextMonday = new Date(today)
   nextMonday.setDate(today.getDate() + (((1 - today.getDay() + 7) % 7) || 7))
   const dateStr = nextMonday.toISOString().slice(0, 10)
 
-  await page.locator('#booking-date').fill(dateStr)
+  await pickBookingDate(page, dateStr)
   await expect(page.getByText(/The clinic is closed/)).toHaveCount(0)
   await expect(page.locator('.grid.grid-cols-3 button').first()).toBeVisible()
 })
@@ -51,9 +49,8 @@ test('a fully booked open day says so explicitly, not the closed-day message or 
   page,
 }) => {
   await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
-  await page.goto('/book')
-  await page.getByText('General Consultation').click()
-  await page.locator('#booking-date').fill('2026-11-30')
+  await chooseBookingService(page, 'General Consultation')
+  await pickBookingDate(page, '2026-11-30')
 
   await expect(page.getByText('Fully booked for this date. Choose another day.')).toBeVisible()
   await expect(page.getByText(/The clinic is closed/)).toHaveCount(0)

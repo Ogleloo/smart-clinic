@@ -50,7 +50,7 @@ test('booked but not checked in renders the explanatory state, not a blank', asy
   // the dashboard it redirects to still has its own server-side fetches
   // in flight (profile, appointment, queue) under this sandbox's variable
   // latency, so wait for real dashboard content before reading it.
-  await page.getByText(/^Hello, /).waitFor({ timeout: 15_000 })
+  await page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), / }).waitFor({ timeout: 15_000 })
   const mainText = await page.locator('main').innerText()
   expect(mainText).toMatch(/Your appointment is (today|on) /)
   expect(mainText).toContain('Check in at reception')

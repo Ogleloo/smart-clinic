@@ -1483,7 +1483,7 @@ export type Appointment = Database["public"]["Tables"]["appointments"]["Row"]
 export type AppointmentStatus = Database["public"]["Enums"]["appointment_status"]
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"]
 export type ClinicHours = Database["public"]["Tables"]["clinic_hours"]["Row"]
-/** notifications.kind is a plain text column with a CHECK constraint, not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with migration 0023. */
+/** notifications.kind is a plain text column with a CHECK constraint (notifications_kind_check), not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with that constraint. */
 export type NotificationKind =
   | "queue_position"
   | "you_are_next"
@@ -1491,6 +1491,7 @@ export type NotificationKind =
   | "appointment_reminder"
   | "appointment_cancelled"
   | "emergency_ahead"
+  | "appointment_no_show"
 export type ConsultationNotes = Database["public"]["Tables"]["consultation_notes"]["Row"]
 export type PatientVitals = Database["public"]["Tables"]["patient_vitals"]["Row"]
 export type StaffInvitation = Database["public"]["Tables"]["staff_invitations"]["Row"]

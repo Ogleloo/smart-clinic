@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { NotificationsList } from '@/components/notifications/NotificationsList'
+import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
 
 /**
  * RLS scopes notifications to the caller (recipient_id) — no explicit
@@ -20,13 +21,15 @@ export default async function NotificationsPage() {
     .limit(50)
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col gap-4 px-4 py-6">
-      <h1 className="font-display text-[22px] font-bold text-ink">Notifications</h1>
-      {error ? (
-        <p className="text-sm text-danger">Couldn&rsquo;t load notifications. Try refreshing.</p>
-      ) : (
-        <NotificationsList initialNotifications={notifications ?? []} />
-      )}
+    <main className={PAGE_CLASS}>
+      <PageHeader title="Notifications" subtitle="Updates about your queue and appointments." />
+      <div className="w-full max-w-3xl">
+        {error ? (
+          <p className="text-sm text-danger">Couldn&rsquo;t load notifications. Try refreshing.</p>
+        ) : (
+          <NotificationsList initialNotifications={notifications ?? []} />
+        )}
+      </div>
     </main>
   )
 }

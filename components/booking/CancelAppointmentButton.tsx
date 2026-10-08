@@ -8,9 +8,12 @@ import type { AppointmentStatus } from '@/lib/types/database.types'
 export function CancelAppointmentButton({
   appointmentId,
   status,
+  compact = false,
 }: {
   appointmentId: string
   status: AppointmentStatus
+  /** List rows: a plain-width "Cancel" next to "View details" instead of a full-width block. */
+  compact?: boolean
 }) {
   // Captured once at mount, not re-derived from `status` on every
   // render: a successful cancel changes the appointment's status on the
@@ -33,7 +36,11 @@ export function CancelAppointmentButton({
   }
 
   if (!confirming) {
-    return (
+    return compact ? (
+      <Button variant="tertiary" className="text-danger hover:bg-danger-bg" onClick={() => setConfirming(true)}>
+        Cancel
+      </Button>
+    ) : (
       <Button variant="danger" fullWidth onClick={() => setConfirming(true)}>
         Cancel appointment
       </Button>
@@ -50,10 +57,10 @@ export function CancelAppointmentButton({
         </p>
       )}
       <div className="flex gap-2">
-        <Button type="button" variant="tertiary" fullWidth onClick={() => setConfirming(false)}>
+        <Button type="button" variant="tertiary" fullWidth={!compact} onClick={() => setConfirming(false)}>
           Keep it
         </Button>
-        <Button type="submit" variant="danger" fullWidth loading={pending}>
+        <Button type="submit" variant="danger" fullWidth={!compact} loading={pending}>
           Yes, cancel
         </Button>
       </div>

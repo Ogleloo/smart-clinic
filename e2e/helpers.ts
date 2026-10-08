@@ -71,3 +71,23 @@ export async function waitSettled(page: Page, timeout = 30_000) {
   await page.waitForFunction(() => !document.body.innerText.includes('Please wait'), { timeout })
   await page.waitForTimeout(300)
 }
+
+/** V3 booking wizard, step 1 → step 2: pick a service card and continue to the calendar. */
+export async function chooseBookingService(page: Page, serviceName: string) {
+  await page.goto('/book')
+  await page.getByText(serviceName, { exact: true }).click()
+  await page.getByRole('button', { name: 'Continue' }).click()
+}
+
+/** V3 booking calendar: page forward month by month until the YYYY-MM-DD day is on screen, then pick it. */
+export async function pickBookingDate(page: Page, dateStr: string) {
+  for (let i = 0; i < 24; i++) {
+    const day = page.locator(`button[data-date="${dateStr}"]`)
+    if ((await day.count()) > 0) {
+      await day.click()
+      return
+    }
+    await page.getByRole('button', { name: 'Next month' }).click()
+  }
+  throw new Error(`Calendar never reached ${dateStr}`)
+}

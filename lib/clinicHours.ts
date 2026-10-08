@@ -80,3 +80,11 @@ export function hoursForDate(hours: ClinicHours[], dateStr: string): ClinicHours
 export function dayFullName(dayOfWeek: number): string {
   return DAY_FULL[dayOfWeek]
 }
+
+/** "Open today 07:30–16:30" / "Closed today" — null when today's row was never configured (not guessed at). */
+export function todayHoursLine(hours: ClinicHours[], todayStr: string): string | null {
+  const today = hoursForDate(hours, todayStr)
+  if (!today) return null
+  if (today.is_closed || !today.opens_at || !today.closes_at) return 'Closed today'
+  return `Open today ${formatHM(today.opens_at)}–${formatHM(today.closes_at)}`
+}
