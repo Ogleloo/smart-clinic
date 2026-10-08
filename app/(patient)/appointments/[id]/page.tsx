@@ -1,13 +1,25 @@
+import type { ReactNode } from 'react'
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, CalendarDays, Check, Clock, ListOrdered, Stethoscope } from 'lucide-react'
+import {
+  ArrowLeft,
+  Calendar,
+  Check,
+  CircleCheck,
+  Clock,
+  Hash,
+  ListOrdered,
+  MapPin,
+  Stethoscope,
+  Timer,
+  type LucideIcon,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { StatusChip } from '@/components/ui/StatusChip'
-import { appointmentStatusToChip } from '@/components/ui/AppointmentCard'
+import { PatientStatusChip } from '@/components/patient/PatientStatusChip'
 import { ConfidenceChip } from '@/components/ui/ConfidenceChip'
 import { CancelAppointmentButton } from '@/components/booking/CancelAppointmentButton'
 import { LinkButton } from '@/components/ui/LinkButton'
-import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
+import { PAGE_CLASS, PageHeader, TYPE } from '@/components/patient/PageHeader'
 import { toConfidenceLevel } from '@/lib/confidence'
 import { formatClinicDate, formatClinicTime } from '@/lib/clinicTime'
 
@@ -77,125 +89,118 @@ export default async function AppointmentDetailsPage({
 
   const { data: appointment, error } = await supabase
     .from('appointments')
-    .select('id, scheduled_time, status, reference, service_id, service:services(name, description)')
+    .select(
+      'id, scheduled_time, status, reference, service_id, service:services(name, description, clinic:clinics(name, city))'
+    )
     .eq('id', id)
     .maybeSingle()
 
   if (error) {
     return (
       <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
-        <p className="text-sm font-semibold text-ink">Couldn&rsquo;t load this appointment</p>
-        <p className="text-sm text-muted">Please refresh the page.</p>
+        <p className="text-base font-semibold text-ink">Couldn&rsquo;t load this appointment</p>
+        <p className="text-base text-muted">Please refresh the page.</p>
       </main>
     )
   }
   if (!appointment) notFound()
 
   const typical = await getTypicalTime(supabase, appointment.service_id)
-  const chip = appointmentStatusToChip(appointment.status)
   const isActive = appointment.status === 'booked' || appointment.status === 'checked_in'
+
+  const clinic = appointment.service?.clinic
+  const location = clinic ? [clinic.name, clinic.city].filter(Boolean).join(', ') : null
+
+  const fields: { label: string; icon: LucideIcon; value: ReactNode }[] = [
+    {
+      label: 'Reference number',
+      icon: Hash,
+      value: <span className="font-mono">{appointment.reference ?? '—'}</span>,
+    },
+    { label: 'Service', icon: Stethoscope, value: appointment.service?.name ?? 'Appointment' },
+    {
+      label: 'Date',
+      icon: Calendar,
+      value: formatClinicDate(appointment.scheduled_time, { weekday: 'long', month: 'long' }),
+    },
+    { label: 'Time', icon: Clock, value: <span className="tabular">{formatClinicTime(appointment.scheduled_time)}</span> },
+    ...(location ? [{ label: 'Location', icon: MapPin, value: location }] : []),
+    { label: 'Status', icon: CircleCheck, value: <PatientStatusChip status={appointment.status} /> },
+    {
+      label: 'Typical consultation time',
+      icon: Timer,
+      value:
+        typical.kind === 'known' ? (
+          <span className="flex flex-wrap items-center gap-2">
+            About {typical.minutes} min with the nurse
+            <ConfidenceChip level={toConfidenceLevel(typical.confidence)} sampleCount={typical.sampleCount} />
+          </span>
+        ) : typical.kind === 'no_data' ? (
+          <span className="font-normal text-muted">
+            Not enough completed visits for this service yet to say how long it usually takes.
+          </span>
+        ) : (
+          <span className="font-normal text-muted">Couldn&rsquo;t load this right now.</span>
+        ),
+    },
+  ]
 
   return (
     <main className={PAGE_CLASS}>
-      <Link href="/appointments" className="inline-flex w-fit items-center gap-1.5 text-sm font-semibold text-primary-700">
-        <ArrowLeft size={16} aria-hidden />
+      <Link href="/appointments" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-primary-700">
+        <ArrowLeft size={20} aria-hidden />
         Back to appointments
       </Link>
 
-      <PageHeader title="Appointment details" />
+      <div className="flex w-full max-w-2xl flex-col gap-6">
+        <PageHeader title="Appointment details" />
 
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="flex flex-col gap-5 lg:col-span-2">
-          <section className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold tracking-wide text-muted">REFERENCE NUMBER</p>
-                <p className="mt-1 font-mono text-xl font-semibold text-ink">{appointment.reference ?? '—'}</p>
-              </div>
-              <StatusChip status={chip.variant} label={chip.label} />
-            </div>
-
-            <dl className="grid grid-cols-1 gap-4 border-t border-border pt-4 text-sm sm:grid-cols-3">
-              <div className="flex items-start gap-2">
-                <Stethoscope size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden />
-                <div>
-                  <dt className="text-xs font-semibold tracking-wide text-muted">SERVICE</dt>
-                  <dd className="mt-0.5 font-semibold text-ink">{appointment.service?.name ?? 'Appointment'}</dd>
+        <section className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-6">
+          {appointment.service?.description && (
+            <p className="text-base text-muted">{appointment.service.description}</p>
+          )}
+          <dl className="flex flex-col gap-5">
+            {fields.map(({ label, icon: Icon, value }) => (
+              <div key={label} className="flex items-start gap-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card-mint text-primary-700">
+                  <Icon size={20} aria-hidden />
+                </span>
+                <div className="flex min-w-0 flex-col gap-1">
+                  <dt className="text-xs text-muted">{label}</dt>
+                  <dd className="text-base font-semibold text-ink">{value}</dd>
                 </div>
               </div>
-              <div className="flex items-start gap-2">
-                <CalendarDays size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden />
-                <div>
-                  <dt className="text-xs font-semibold tracking-wide text-muted">DATE</dt>
-                  <dd className="mt-0.5 font-semibold text-ink">
-                    {formatClinicDate(appointment.scheduled_time, { weekday: 'long', month: 'long' })}
-                  </dd>
-                </div>
-              </div>
-              <div className="flex items-start gap-2">
-                <Clock size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden />
-                <div>
-                  <dt className="text-xs font-semibold tracking-wide text-muted">TIME</dt>
-                  <dd className="mt-0.5 font-semibold text-ink tabular">{formatClinicTime(appointment.scheduled_time)}</dd>
-                </div>
-              </div>
-            </dl>
+            ))}
+          </dl>
+          <p className="text-xs text-muted">Typical consultation time is time with the nurse, not your waiting time.</p>
 
-            {appointment.service?.description && (
-              <p className="text-sm text-muted">{appointment.service.description}</p>
-            )}
+          {appointment.status === 'checked_in' && (
+            <LinkButton href="/queue" variant="primary" fullWidth>
+              <ListOrdered size={20} className="mr-2" aria-hidden />
+              Follow my queue
+            </LinkButton>
+          )}
 
-            <div className="rounded-lg bg-subtle p-4">
-              <p className="text-xs font-semibold tracking-wide text-muted">TYPICAL CONSULTATION TIME</p>
-              {typical.kind === 'known' ? (
-                <div className="mt-1 flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold text-ink">About {typical.minutes} min with the nurse</p>
-                  <ConfidenceChip level={toConfidenceLevel(typical.confidence)} sampleCount={typical.sampleCount} />
-                </div>
-              ) : typical.kind === 'no_data' ? (
-                <p className="mt-1 text-sm text-muted">
-                  Not enough completed visits for this service yet to say how long it usually takes.
-                </p>
-              ) : (
-                <p className="mt-1 text-sm text-muted">Couldn&rsquo;t load this right now.</p>
-              )}
-              <p className="mt-1 text-xs text-muted">This is time with the nurse, not your waiting time.</p>
-            </div>
-
-            {appointment.status === 'checked_in' && (
-              <LinkButton href="/queue" variant="primary" fullWidth>
-                <ListOrdered size={16} className="mr-2" aria-hidden />
-                Follow my queue
-              </LinkButton>
-            )}
-
-            <CancelAppointmentButton appointmentId={appointment.id} status={appointment.status} />
-          </section>
-        </div>
+          <CancelAppointmentButton appointmentId={appointment.id} status={appointment.status} />
+        </section>
 
         {isActive && (
-          <section className="flex h-fit flex-col gap-3 rounded-lg border border-border bg-surface p-5">
-            <p className="text-xs font-semibold tracking-wide text-muted">BEFORE YOUR VISIT</p>
+          <section className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-6" aria-labelledby="before-visit">
+            <h2 id="before-visit" className={TYPE.section}>
+              Before your visit
+            </h2>
             <ul className="flex flex-col gap-3">
-              {CHECKLIST.map((item) => (
-                <li key={item} className="flex items-start gap-2.5 text-sm text-ink">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary-700">
-                    <Check size={12} aria-hidden />
+              {[
+                ...CHECKLIST,
+                ...(appointment.reference ? [`Quote your reference ${appointment.reference} at reception.`] : []),
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-3 text-base text-ink">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-700 text-white">
+                    <Check size={14} aria-hidden />
                   </span>
                   {item}
                 </li>
               ))}
-              {appointment.reference && (
-                <li className="flex items-start gap-2.5 text-sm text-ink">
-                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary-700">
-                    <Check size={12} aria-hidden />
-                  </span>
-                  <span>
-                    Quote your reference <span className="font-mono font-semibold">{appointment.reference}</span> at
-                    reception.
-                  </span>
-                </li>
-              )}
             </ul>
           </section>
         )}

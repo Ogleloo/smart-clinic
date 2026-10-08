@@ -36,6 +36,51 @@
   --radius-xl: 24px;
 }
 
+/* Patient V3 palette accents — only used inside .theme-patient. */
+@theme {
+  --color-card-mint:   #E6FBF7;
+  --color-card-blue:   #E6F2FB;
+  --color-card-purple: #F0E6FB;
+  --spacing-66: 264px;
+}
+
+/*
+ * Patient V3 design system (Figma). Scoped to the patient area by
+ * redefining the same variables the Tailwind utilities read, so every
+ * patient screen picks it up while staff screens (reception, nurse,
+ * admin) keep the V2 palette untouched.
+ *
+ * Radii: only 8 / 12 / 16 / 24. One red. Buttons and chips 14px.
+ */
+.theme-patient {
+  --color-primary-50:  #E6FBF7;
+  --color-primary-100: #E6FBF7;
+  --color-primary-500: #039486;
+  --color-primary-600: #039486;
+  --color-primary-700: #039486;
+  --color-primary-900: #07172F;
+
+  --color-paper: #F5FFFD;
+  --color-surface: #FFFFFF;
+  --color-ink:   #07172F;
+  --color-muted: #5B6B8D;
+  --color-info:  #5B6B8D;
+
+  --color-danger:    #FF4D4D;
+  --color-danger-bg: rgb(255 77 77 / 0.1);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  --button-text: 14px;
+  --chip-text: 14px;
+
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
 body {
   background: var(--color-paper);
   color: var(--color-ink);

@@ -65,7 +65,7 @@ export function ConfidenceChip({ level, sampleCount }: ConfidenceChipProps) {
   if (sampleCount === undefined) {
     return (
       <span
-        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[level]}`}
+        className={`inline-flex items-center rounded-full px-3 py-1 text-[length:var(--chip-text,0.75rem)] font-semibold ${STYLES[level]}`}
         title={EXPLANATIONS[level]}
       >
         {LABELS[level]}
@@ -79,7 +79,7 @@ export function ConfidenceChip({ level, sampleCount }: ConfidenceChipProps) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[level]}`}
+        className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-[length:var(--chip-text,0.75rem)] font-semibold ${STYLES[level]}`}
       >
         {LABELS[level]}
         <span aria-hidden>{open ? '−' : '+'}</span>

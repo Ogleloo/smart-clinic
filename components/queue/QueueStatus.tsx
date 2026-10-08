@@ -42,7 +42,7 @@ export function QueueStatus({ entries, entryIds, initialNotifications }: QueueSt
 
       {nowServing.length > 0 && (
         <section className="flex flex-col gap-3">
-          <p className="text-xs font-semibold tracking-wide text-muted">NOW BEING SERVED</p>
+          <h2 className="font-display text-[22px] font-semibold text-ink">Now being served</h2>
           {nowServing.map((entry) => (
             <QueueEntryStatus key={entry.entryId} {...entry} onOnlineChange={handleOnlineChange} />
           ))}
@@ -52,7 +52,7 @@ export function QueueStatus({ entries, entryIds, initialNotifications }: QueueSt
       {alsoInVisit.length > 0 && (
         <section className="flex flex-col gap-3">
           {nowServing.length > 0 && (
-            <p className="text-xs font-semibold tracking-wide text-muted">ALSO IN YOUR VISIT</p>
+            <h2 className="font-display text-[22px] font-semibold text-ink">Also in your visit</h2>
           )}
           {alsoInVisit.map((entry) => (
             <QueueEntryStatus key={entry.entryId} {...entry} onOnlineChange={handleOnlineChange} />
@@ -61,7 +61,7 @@ export function QueueStatus({ entries, entryIds, initialNotifications }: QueueSt
       )}
 
       <section className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
-        <p className="text-xs font-semibold tracking-wide text-muted">RECENT UPDATES</p>
+        <h2 className="font-display text-[22px] font-semibold text-ink">Recent updates</h2>
         <RecentNotifications queueEntryIds={entryIds} initialNotifications={initialNotifications} />
       </section>
     </div>

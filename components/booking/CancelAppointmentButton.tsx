@@ -29,7 +29,7 @@ export function CancelAppointmentButton({
 
   if (state.success) {
     return (
-      <p role="status" className="text-sm font-semibold text-success">
+      <p role="status" className="text-base font-semibold text-primary-700">
         {state.success}
       </p>
     )
@@ -37,11 +37,11 @@ export function CancelAppointmentButton({
 
   if (!confirming) {
     return compact ? (
-      <Button variant="tertiary" className="text-danger hover:bg-danger-bg" onClick={() => setConfirming(true)}>
+      <Button variant="danger-outline" onClick={() => setConfirming(true)}>
         Cancel
       </Button>
     ) : (
-      <Button variant="danger" fullWidth onClick={() => setConfirming(true)}>
+      <Button variant="danger-outline" fullWidth onClick={() => setConfirming(true)}>
         Cancel appointment
       </Button>
     )
@@ -50,9 +50,9 @@ export function CancelAppointmentButton({
   return (
     <form action={formAction} className="flex flex-col gap-3">
       <input type="hidden" name="appointment_id" value={appointmentId} />
-      <p className="text-sm font-semibold text-ink">Cancel this appointment?</p>
+      <p className="text-base font-semibold text-ink">Cancel this appointment?</p>
       {state.error && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-base text-danger">
           {state.error}
         </p>
       )}

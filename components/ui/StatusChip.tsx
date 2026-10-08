@@ -40,7 +40,7 @@ const LABELS: Record<StatusChipVariant, string> = {
 export function StatusChip({ status, label }: StatusChipProps) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STYLES[status]}`}
+      className={`inline-flex items-center rounded-full px-3 py-1 text-[length:var(--chip-text,0.75rem)] font-semibold ${STYLES[status]}`}
     >
       {label ?? LABELS[status]}
     </span>

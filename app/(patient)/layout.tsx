@@ -29,7 +29,8 @@ export default async function PatientLayout({ children }: { children: React.Reac
   ])
 
   return (
-    <div className="min-h-dvh md:flex">
+    // theme-patient switches every token below to the V3 Figma palette (globals.css).
+    <div className="theme-patient min-h-dvh md:flex">
       <PatientNav
         initialUnreadCount={count ?? 0}
         clinicName={clinic?.name ?? null}
