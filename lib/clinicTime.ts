@@ -46,3 +46,68 @@ export function formatRelativeTime(iso: string): string {
     timeZone: CLINIC_TIMEZONE,
   })
 }
+
+/** Hour of day (0–23) right now in the clinic's timezone — not the browser's or the server's (ADR-020). */
+function clinicHourNow(): number {
+  const hour = new Intl.DateTimeFormat('en-GB', {
+    hour: 'numeric',
+    hourCycle: 'h23',
+    timeZone: CLINIC_TIMEZONE,
+  }).format(new Date())
+  return Number(hour)
+}
+
+export function greetingForNow(): string {
+  const hour = clinicHourNow()
+  if (hour < 12) return 'Good morning'
+  if (hour < 17) return 'Good afternoon'
+  return 'Good evening'
+}
+
+/** "Thursday, 8 October" — today's date as the clinic sees it. */
+export function formatTodayLong(): string {
+  return new Date().toLocaleDateString('en-GB', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    timeZone: CLINIC_TIMEZONE,
+  })
+}
+
+export function formatClinicDate(iso: string, opts: Intl.DateTimeFormatOptions = {}): string {
+  return new Date(iso).toLocaleDateString('en-GB', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    ...opts,
+    timeZone: CLINIC_TIMEZONE,
+  })
+}
+
+export function formatClinicTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: CLINIC_TIMEZONE,
+  })
+}
+
+/** "08 Oct 2026, 09:14" — absolute timestamp alongside a relative one. */
+export function formatClinicDateTime(iso: string): string {
+  return `${formatClinicDate(iso, { weekday: undefined, year: 'numeric' })}, ${formatClinicTime(iso)}`
+}
+
+/**
+ * A YYYY-MM-DD calendar date (date_of_birth, scheduled_date) has no
+ * timezone of its own — formatting it at noon UTC, in UTC, reads back
+ * exactly the day it names wherever this runs.
+ */
+export function formatCalendarDate(dateStr: string, opts: Intl.DateTimeFormatOptions = {}): string {
+  return new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    ...opts,
+    timeZone: 'UTC',
+  })
+}

@@ -35,5 +35,5 @@ test('patient visiting /dashboard directly still works normally', async ({ page 
   await page.waitForLoadState('networkidle')
 
   await expect(page.getByText("Couldn't load your account")).not.toBeVisible()
-  await expect(page.getByText('Hello, Thabo')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Thabo$/ })).toBeVisible()
 })

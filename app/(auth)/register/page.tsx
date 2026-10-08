@@ -22,6 +22,12 @@ export default function RegisterPage() {
                placeholder="you@email.com" />
         <Input label="Phone" name="phone" type="tel" autoComplete="tel"
                placeholder="+27 82 555 0134" />
+        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+          <Input label="Date of birth (optional)" name="date_of_birth" type="date" autoComplete="bday"
+                 min="1900-01-01" />
+          <Input label="ID or passport number (optional)" name="id_number" autoComplete="off"
+                 helper="6–20 letters or digits." />
+        </div>
         <Input label="Password" name="password" type="password" autoComplete="new-password"
                required placeholder="••••••••" helper="At least 8 characters." />
 

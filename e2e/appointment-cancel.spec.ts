@@ -72,10 +72,13 @@ test('dashboard appointment card links to details, and cancel reaches it in two 
   await page.getByRole('button', { name: 'Yes, cancel' }).click()
   await expect(page.getByText('Appointment cancelled.')).toBeVisible({ timeout: 30_000 })
 
-  // The list page (new — previously the only way to reach any
-  // appointment was this one dashboard card) reflects the cancellation
-  // distinctly, not as a bare token.
+  // The list page reflects the cancellation distinctly, not as a bare
+  // token. V3: a cancelled booking leaves the Upcoming tab and is listed
+  // under Previous; each row is an <article> with its own "View details"
+  // link rather than one big link.
   await page.goto('/appointments')
-  const listRow = page.locator(`a[href="/appointments/${appointmentId}"]`)
+  await expect(page.locator(`a[href="/appointments/${appointmentId}"]`)).toHaveCount(0)
+  await page.goto('/appointments?tab=previous')
+  const listRow = page.locator('article', { has: page.locator(`a[href="/appointments/${appointmentId}"]`) })
   await expect(listRow).toContainText('Cancelled')
 })

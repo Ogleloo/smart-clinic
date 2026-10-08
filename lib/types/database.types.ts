@@ -21,6 +21,7 @@ export type Database = {
           created_at: string
           id: string
           patient_id: string
+          reference: string | null
           scheduled_date: string
           scheduled_time: string
           service_id: string
@@ -33,6 +34,7 @@ export type Database = {
           created_at?: string
           id?: string
           patient_id: string
+          reference?: string | null
           scheduled_date: string
           scheduled_time: string
           service_id: string
@@ -45,6 +47,7 @@ export type Database = {
           created_at?: string
           id?: string
           patient_id?: string
+          reference?: string | null
           scheduled_date?: string
           scheduled_time?: string
           service_id?: string
@@ -177,6 +180,7 @@ export type Database = {
           id: string
           is_active: boolean
           name: string
+          phone: string | null
           timezone: string
           updated_at: string
         }
@@ -187,6 +191,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           name: string
+          phone?: string | null
           timezone?: string
           updated_at?: string
         }
@@ -197,10 +202,62 @@ export type Database = {
           id?: string
           is_active?: boolean
           name?: string
+          phone?: string | null
           timezone?: string
           updated_at?: string
         }
         Relationships: []
+      }
+      consultation_notes: {
+        Row: {
+          additional_notes: string | null
+          chief_complaint: string | null
+          consultation_id: string
+          created_at: string
+          diagnosis: string | null
+          id: string
+          nurse_id: string
+          treatment: string | null
+          updated_at: string
+        }
+        Insert: {
+          additional_notes?: string | null
+          chief_complaint?: string | null
+          consultation_id: string
+          created_at?: string
+          diagnosis?: string | null
+          id?: string
+          nurse_id: string
+          treatment?: string | null
+          updated_at?: string
+        }
+        Update: {
+          additional_notes?: string | null
+          chief_complaint?: string | null
+          consultation_id?: string
+          created_at?: string
+          diagnosis?: string | null
+          id?: string
+          nurse_id?: string
+          treatment?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultation_notes_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: true
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultation_notes_nurse_id_fkey"
+            columns: ["nurse_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       consultations: {
         Row: {
@@ -353,14 +410,86 @@ export type Database = {
           },
         ]
       }
+      patient_vitals: {
+        Row: {
+          bp_diastolic: number | null
+          bp_systolic: number | null
+          consultation_id: string
+          height: number | null
+          id: string
+          nurse_id: string
+          oxygen_saturation: number | null
+          patient_id: string
+          pulse: number | null
+          recorded_at: string
+          respiratory_rate: number | null
+          temperature: number | null
+          weight: number | null
+        }
+        Insert: {
+          bp_diastolic?: number | null
+          bp_systolic?: number | null
+          consultation_id: string
+          height?: number | null
+          id?: string
+          nurse_id: string
+          oxygen_saturation?: number | null
+          patient_id: string
+          pulse?: number | null
+          recorded_at?: string
+          respiratory_rate?: number | null
+          temperature?: number | null
+          weight?: number | null
+        }
+        Update: {
+          bp_diastolic?: number | null
+          bp_systolic?: number | null
+          consultation_id?: string
+          height?: number | null
+          id?: string
+          nurse_id?: string
+          oxygen_saturation?: number | null
+          patient_id?: string
+          pulse?: number | null
+          recorded_at?: string
+          respiratory_rate?: number | null
+          temperature?: number | null
+          weight?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "patient_vitals_consultation_id_fkey"
+            columns: ["consultation_id"]
+            isOneToOne: true
+            referencedRelation: "consultations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_vitals_nurse_id_fkey"
+            columns: ["nurse_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "patient_vitals_patient_id_fkey"
+            columns: ["patient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           auth_user_id: string | null
           clinic_id: string | null
           created_at: string
           current_service_id: string | null
+          date_of_birth: string | null
           full_name: string
           id: string
+          id_number: string | null
           is_active: boolean
           is_on_duty: boolean
           phone: string | null
@@ -372,8 +501,10 @@ export type Database = {
           clinic_id?: string | null
           created_at?: string
           current_service_id?: string | null
+          date_of_birth?: string | null
           full_name: string
           id?: string
+          id_number?: string | null
           is_active?: boolean
           is_on_duty?: boolean
           phone?: string | null
@@ -385,8 +516,10 @@ export type Database = {
           clinic_id?: string | null
           created_at?: string
           current_service_id?: string | null
+          date_of_birth?: string | null
           full_name?: string
           id?: string
+          id_number?: string | null
           is_active?: boolean
           is_on_duty?: boolean
           phone?: string | null
@@ -589,11 +722,106 @@ export type Database = {
           },
         ]
       }
+      staff_invitations: {
+        Row: {
+          accepted_at: string | null
+          accepted_by: string | null
+          clinic_id: string
+          created_at: string
+          email: string
+          expires_at: string
+          full_name: string
+          id: string
+          invited_by: string
+          revoked_at: string | null
+          role: Database["public"]["Enums"]["user_role"]
+        }
+        Insert: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          clinic_id: string
+          created_at?: string
+          email: string
+          expires_at?: string
+          full_name: string
+          id?: string
+          invited_by: string
+          revoked_at?: string | null
+          role: Database["public"]["Enums"]["user_role"]
+        }
+        Update: {
+          accepted_at?: string | null
+          accepted_by?: string | null
+          clinic_id?: string
+          created_at?: string
+          email?: string
+          expires_at?: string
+          full_name?: string
+          id?: string
+          invited_by?: string
+          revoked_at?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_invitations_accepted_by_fkey"
+            columns: ["accepted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invitations_clinic_id_fkey"
+            columns: ["clinic_id"]
+            isOneToOne: false
+            referencedRelation: "clinics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_invitations_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      accept_staff_invitation: { Args: never; Returns: Json }
+      admin_invite_staff: {
+        Args: {
+          p_email: string
+          p_full_name: string
+          p_role: Database["public"]["Enums"]["user_role"]
+        }
+        Returns: {
+          accepted_at: string | null
+          accepted_by: string | null
+          clinic_id: string
+          created_at: string
+          email: string
+          expires_at: string
+          full_name: string
+          id: string
+          invited_by: string
+          revoked_at: string | null
+          role: Database["public"]["Enums"]["user_role"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "staff_invitations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      admin_revoke_staff_invitation: {
+        Args: { p_id: string }
+        Returns: undefined
+      }
       admin_set_staff_status: {
         Args: {
           p_is_active?: boolean
@@ -605,8 +833,10 @@ export type Database = {
           clinic_id: string | null
           created_at: string
           current_service_id: string | null
+          date_of_birth: string | null
           full_name: string
           id: string
+          id_number: string | null
           is_active: boolean
           is_on_duty: boolean
           phone: string | null
@@ -642,6 +872,7 @@ export type Database = {
           created_at: string
           id: string
           patient_id: string
+          reference: string | null
           scheduled_date: string
           scheduled_time: string
           service_id: string
@@ -692,6 +923,7 @@ export type Database = {
           created_at: string
           id: string
           patient_id: string
+          reference: string | null
           scheduled_date: string
           scheduled_time: string
           service_id: string
@@ -780,8 +1012,10 @@ export type Database = {
           clinic_id: string | null
           created_at: string
           current_service_id: string | null
+          date_of_birth: string | null
           full_name: string
           id: string
+          id_number: string | null
           is_active: boolean
           is_on_duty: boolean
           phone: string | null
@@ -965,8 +1199,10 @@ export type Database = {
           clinic_id: string | null
           created_at: string
           current_service_id: string | null
+          date_of_birth: string | null
           full_name: string
           id: string
+          id_number: string | null
           is_active: boolean
           is_on_duty: boolean
           phone: string | null
@@ -1247,7 +1483,7 @@ export type Appointment = Database["public"]["Tables"]["appointments"]["Row"]
 export type AppointmentStatus = Database["public"]["Enums"]["appointment_status"]
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"]
 export type ClinicHours = Database["public"]["Tables"]["clinic_hours"]["Row"]
-/** notifications.kind is a plain text column with a CHECK constraint, not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with migration 0023. */
+/** notifications.kind is a plain text column with a CHECK constraint (notifications_kind_check), not a Postgres enum, so this union is hand-maintained rather than generated — keep it in sync with that constraint. */
 export type NotificationKind =
   | "queue_position"
   | "you_are_next"
@@ -1255,3 +1491,7 @@ export type NotificationKind =
   | "appointment_reminder"
   | "appointment_cancelled"
   | "emergency_ahead"
+  | "appointment_no_show"
+export type ConsultationNotes = Database["public"]["Tables"]["consultation_notes"]["Row"]
+export type PatientVitals = Database["public"]["Tables"]["patient_vitals"]["Row"]
+export type StaffInvitation = Database["public"]["Tables"]["staff_invitations"]["Row"]

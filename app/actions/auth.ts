@@ -5,6 +5,8 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
+import { parseDateOfBirth, parseIdNumber } from '@/lib/profileValidation'
+import { todayInClinicTimezone } from '@/lib/clinicTime'
 
 export type ActionState = { error?: string; success?: string }
 
@@ -13,9 +15,16 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
   const email = String(formData.get('email') ?? '').trim()
   const phone = String(formData.get('phone') ?? '').trim()
   const password = String(formData.get('password') ?? '')
+  // Optional. handle_new_user() re-validates both and silently drops a
+  // malformed value rather than failing signup — checking here first is
+  // what tells the person, instead of the field quietly not saving.
+  const dob = parseDateOfBirth(String(formData.get('date_of_birth') ?? ''), todayInClinicTimezone())
+  const idNumber = parseIdNumber(String(formData.get('id_number') ?? ''))
 
   if (!fullName) return { error: 'Enter your full name.' }
   if (!email) return { error: 'Enter your email address.' }
+  if (dob.error) return { error: dob.error }
+  if (idNumber.error) return { error: idNumber.error }
   if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
 
   const supabase = await createClient()
@@ -28,7 +37,12 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
     email,
     password,
     options: {
-      data: { full_name: fullName, phone },
+      data: {
+        full_name: fullName,
+        phone,
+        ...(dob.value ? { date_of_birth: dob.value } : {}),
+        ...(idNumber.value ? { id_number: idNumber.value } : {}),
+      },
       // Without this, the confirmation link falls back to the Supabase
       // Site URL directly instead of routing through /auth/callback —
       // kept for any link-based flow that still reads it, though signup

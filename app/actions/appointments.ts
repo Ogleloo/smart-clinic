@@ -30,7 +30,9 @@ export async function bookAppointment(_prev: ActionState, formData: FormData): P
 
   if (error) return { error: error.message }
 
-  redirect(`/appointments/${data.id}`)
+  revalidatePath('/dashboard')
+  revalidatePath('/appointments')
+  redirect(`/book/confirmed/${data.id}`)
 }
 
 export async function cancelAppointment(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -45,6 +47,7 @@ export async function cancelAppointment(_prev: ActionState, formData: FormData):
   // cancelled rows, so the slot is free again the moment this commits —
   // no separate "release the slot" step needed here.
   revalidatePath(`/appointments/${appointmentId}`)
+  revalidatePath('/appointments')
   revalidatePath('/dashboard')
   return { success: 'Appointment cancelled.' }
 }

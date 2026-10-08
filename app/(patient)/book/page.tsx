@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { getPatientClinic } from '@/lib/patientClinic'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { BookingWizard } from '@/components/booking/BookingWizard'
+import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
 
 /**
- * Book an appointment (Slice 3).
+ * Book an appointment — V3 three-step wizard.
  *
  * Services are read once, server-side — RLS lets any authenticated user
  * read active services. Everything after that (date, available slots)
@@ -23,19 +25,19 @@ export default async function BookPage() {
   // never been filtered by clinic_id either. This mirrors
   // get_public_queue_display() (migration 0051), the other patient/anon
   // -facing read, which has no clinic filter for the same reason.
-  const [{ data: services, error }, { data: clinicHours }] = await Promise.all([
-    supabase.from('services').select('id, name').eq('is_active', true).order('name'),
-    supabase.from('clinic_hours').select('*'),
+  const [{ data: services, error }, clinic] = await Promise.all([
+    supabase.from('services').select('id, name, description').eq('is_active', true).order('name'),
+    getPatientClinic(),
   ])
 
   return (
-    <main className="mx-auto min-h-dvh max-w-md px-4 py-6">
-      <h1 className="mb-5 font-display text-[22px] font-bold text-ink">Book an appointment</h1>
+    <main className={PAGE_CLASS}>
+      <PageHeader title="Book an appointment" subtitle="Three quick steps: service, day and time, confirm." />
 
       {error ? (
         <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
       ) : services && services.length > 0 ? (
-        <BookingWizard services={services} clinicHours={clinicHours ?? []} />
+        <BookingWizard services={services} clinicHours={clinic?.hours ?? []} clinicName={clinic?.name ?? null} />
       ) : (
         <EmptyState
           headline="No services available"
