@@ -1,4 +1,4 @@
-export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger'
+export type ButtonVariant = 'primary' | 'secondary' | 'tertiary' | 'danger' | 'danger-outline'
 
 /**
  * Design System: Button.
@@ -15,10 +15,13 @@ export const buttonVariantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-surface text-primary-700 border-[1.5px] border-primary-700 hover:bg-primary-50',
   tertiary: 'bg-transparent text-primary-700 hover:bg-primary-50',
   danger: 'bg-danger text-white hover:opacity-90',
+  'danger-outline': 'bg-surface text-danger border-[1.5px] border-danger hover:bg-danger-bg',
 }
 
 export function buttonClasses(variant: ButtonVariant, fullWidth: boolean, className = '') {
-  return `inline-flex min-h-11 items-center justify-center rounded-[10px] px-5 text-base
+  // rounded-md and --button-text resolve to 10px / 16px on staff screens
+  // and 12px / 14px inside .theme-patient (globals.css).
+  return `inline-flex min-h-11 items-center justify-center rounded-md px-5 text-[length:var(--button-text,1rem)]
     font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50
     ${buttonVariantClasses[variant]} ${fullWidth ? 'w-full' : ''} ${className}`
 }

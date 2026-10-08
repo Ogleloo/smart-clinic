@@ -13,7 +13,7 @@ interface WaitBreakdownProps {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-muted">{label}</span>
+      <span className="text-base text-muted">{label}</span>
       <span className="font-mono text-sm font-semibold tabular-nums text-ink">{value}</span>
     </div>
   )
@@ -81,7 +81,7 @@ export function WaitBreakdown({
               <Row label="Patients ahead of you" value={String(patientsAhead)} />
               <Row label="Average consultation time" value={`${averageMinutes} min`} />
               <hr className="my-1 border-border" />
-              <p className="text-sm text-muted">
+              <p className="text-base text-muted">
                 We work out when each nurse becomes free, then work through the queue in order.
               </p>
             </>

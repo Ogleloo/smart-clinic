@@ -71,10 +71,12 @@ test.describe('sidebar and bottom nav', () => {
 
     await expect(sidebar.getByText('Need help?')).toBeVisible()
     if (clinic?.phone) {
-      await expect(sidebar.getByRole('link', { name: clinic.phone })).toBeVisible()
+      await expect(sidebar.getByText(clinic.phone)).toBeVisible()
+      await expect(sidebar.getByRole('link', { name: 'Get help' })).toHaveAttribute('href', /^tel:/)
     } else {
-      // No number on file means no number shown — never a placeholder.
+      // No number on file means no number and no call button — never a placeholder.
       await expect(sidebar.getByText('Ask at reception during opening hours.')).toBeVisible()
+      await expect(sidebar.getByRole('link', { name: 'Get help' })).toHaveCount(0)
       await expect(sidebar.locator('a[href^="tel:"]')).toHaveCount(0)
     }
 
@@ -103,12 +105,12 @@ test('dashboard: greeting, action cards, clinic hours from clinic_hours, quick a
   const main = page.locator('main')
 
   await expect(main.getByRole('heading', { level: 1 })).toHaveText(/^Good (morning|afternoon|evening), Thabo$/)
-  for (const href of ['/book', '/appointments', '/queue']) {
-    await expect(main.locator(`a[href="${href}"]`).first()).toBeVisible()
+  for (const title of ['Book Appointment', 'View My Queue', 'My Appointments']) {
+    await expect(main.getByRole('link', { name: new RegExp(`^${title}`) })).toBeVisible()
   }
-  await expect(main.getByText('NEXT APPOINTMENT')).toBeVisible()
-  await expect(main.getByText('CURRENT QUEUE')).toBeVisible()
-  await expect(main.getByText('CLINIC INFORMATION')).toBeVisible()
+  await expect(main.getByRole('heading', { name: 'Next Appointment' })).toBeVisible()
+  await expect(main.getByRole('heading', { name: 'Current Queue' })).toBeVisible()
+  await expect(main.getByRole('heading', { name: 'Clinic Information' })).toBeVisible()
   // Same rows the landing-page footer reads (clinic-hours.spec.ts).
   await expect(main.getByText('Mon–Fri 07:30–16:30')).toBeVisible()
   await expect(main.getByText('Closed Sunday')).toBeVisible()
@@ -190,7 +192,8 @@ test('booking wizard: service descriptions, 3 steps, success page shows the data
     // Upcoming tab lists it with a status chip, View details and Cancel.
     await page.goto('/appointments')
     const listRow = page.locator('article', { has: page.locator(`a[href="/appointments/${appointmentId}"]`) })
-    await expect(listRow).toContainText('Booked')
+    // V3: a booked appointment reads "Confirmed" to the patient.
+  await expect(listRow).toContainText('Confirmed')
     await expect(listRow).toContainText(shownReference)
     await expect(listRow.getByRole('button', { name: 'Cancel' })).toBeVisible()
 
@@ -265,15 +268,16 @@ test('notifications: filter tabs partition by kind and read state', async ({ pag
   const all = await countOf('All')
   const queue = await countOf('Queue')
   const appts = await countOf('Appointments')
-  expect(queue + appts).toBeLessThanOrEqual(all)
+  const reminders = await countOf('Reminders')
+  expect(queue + appts + reminders).toBeLessThanOrEqual(all)
 
-  for (const name of ['Queue', 'Appointments', 'All']) {
+  for (const name of ['Queue', 'Appointments', 'Reminders', 'All']) {
     await tabs.getByRole('tab', { name: new RegExp(`^${name}`) }).click()
     await expect(tabs.getByRole('tab', { name: new RegExp(`^${name}`) })).toHaveAttribute('aria-selected', 'true')
     const expected = await countOf(name)
     if (expected > 0) {
       await expect(page.locator('ul[role="tabpanel"] > li')).toHaveCount(expected)
-      // Every item has a kind icon and an absolute clinic-time timestamp.
+      // Every item carries a relative timestamp (absolute clinic time on hover).
       await expect(page.locator('ul[role="tabpanel"] > li time').first()).toBeVisible()
     } else {
       await expect(page.getByText('Nothing here yet')).toBeVisible()

@@ -4,6 +4,7 @@ import { useActionState } from 'react'
 import { updateProfile, changePassword, type ActionState } from '@/app/actions/profile'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { LinkButton } from '@/components/ui/LinkButton'
 
 interface ProfileSettingsFormProps {
   fullName: string
@@ -17,14 +18,14 @@ interface ProfileSettingsFormProps {
 function FormMessage({ state }: { state: ActionState }) {
   if (state.error) {
     return (
-      <p role="alert" className="text-sm font-semibold text-danger">
+      <p role="alert" className="text-base font-semibold text-danger">
         {state.error}
       </p>
     )
   }
   if (state.success) {
     return (
-      <p role="status" className="text-sm font-semibold text-success">
+      <p role="status" className="text-base font-semibold text-primary-700">
         {state.success}
       </p>
     )
@@ -75,10 +76,13 @@ export function ProfileSettingsForm({ fullName, phone, dateOfBirth, idNumber, em
         />
       </div>
       <FormMessage state={state} />
-      <div>
+      <div className="flex flex-wrap gap-3">
         <Button type="submit" loading={pending}>
-          Save changes
+          Save Changes
         </Button>
+        <LinkButton href="/profile" variant="secondary">
+          Cancel
+        </LinkButton>
       </div>
     </form>
   )
@@ -90,7 +94,7 @@ export function ChangePasswordForm() {
   return (
     // key on the success message resets the fields once a change succeeds.
     <form key={state.success ?? 'form'} action={formAction} className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4">
         <Input label="Current password" name="current_password" type="password" autoComplete="current-password" required />
         <Input
           label="New password"

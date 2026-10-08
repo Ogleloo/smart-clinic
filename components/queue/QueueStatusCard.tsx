@@ -53,8 +53,8 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
 
   if (isNotBeingServed) {
     return (
-      <div className="flex flex-col items-center gap-3 rounded-2xl bg-primary-700 p-6 text-center text-white">
-        <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">{service_name}</p>
+      <div className="flex flex-col items-center gap-3 rounded-xl bg-primary-700 p-6 text-center text-white">
+        <p className="text-xs text-white/80">{service_name}</p>
         <QueueToken token={token} size="xl" tone="white" />
         <p className="text-base font-semibold">Not currently being served</p>
       </div>
@@ -63,9 +63,9 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-4 rounded-2xl bg-primary-700 p-6 text-white">
+      <div className="flex flex-col gap-4 rounded-xl bg-primary-700 p-6 text-white">
         <div className="flex items-start justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">{service_name}</p>
+          <p className="text-xs text-white/80">{service_name}</p>
           {isWaiting && <StatusChip status="waiting" label="Waiting" />}
           {isInProgress && <StatusChip status="in-progress" label="In progress" />}
         </div>
@@ -78,26 +78,26 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
           <p className="text-center text-lg font-bold">Please proceed</p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-primary-600 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">Your position</p>
+            <div className="rounded-md bg-white/15 p-4">
+              <p className="text-xs text-white/80">Your position</p>
               {isNext ? (
                 <p className="mt-1 font-display text-xl font-bold">You&rsquo;re next</p>
               ) : (
                 <>
-                  <p className="mt-1 font-mono text-2xl font-bold tabular-nums">{queue_position}</p>
+                  <p className="mt-1 font-mono text-2xl font-semibold tabular-nums">{queue_position}</p>
                   {patients_ahead !== null && (
-                    <p className="text-xs text-primary-100">
+                    <p className="text-xs text-white/80">
                       {patients_ahead} patient{patients_ahead === 1 ? '' : 's'} ahead
                     </p>
                   )}
                 </>
               )}
             </div>
-            <div className="rounded-xl bg-primary-600 p-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-primary-100">Estimated wait</p>
+            <div className="rounded-md bg-white/15 p-4">
+              <p className="text-xs text-white/80">Estimated wait</p>
               {hasWaitNumber ? (
                 <>
-                  <p className="mt-1 font-mono text-2xl font-bold tabular-nums">~{estimated_wait_minutes} min</p>
+                  <p className="mt-1 font-mono text-2xl font-semibold tabular-nums">~{estimated_wait_minutes} min</p>
                   {confidence && (
                     <div className="mt-1">
                       <ConfidenceChip level={toConfidenceLevel(confidence)} sampleCount={sample_count ?? undefined} />
@@ -111,7 +111,7 @@ export function QueueStatusCard({ estimate, nowServingToken }: QueueStatusCardPr
       </div>
 
       {isWaiting && nowServingToken && (
-        <p className="text-sm text-muted">
+        <p className="text-base text-muted">
           Now serving <span className="font-mono font-semibold text-ink">{nowServingToken}</span>
         </p>
       )}

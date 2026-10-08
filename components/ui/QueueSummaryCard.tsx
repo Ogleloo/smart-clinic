@@ -37,38 +37,38 @@ export function QueueSummaryCard({ estimate, otherCount = 0, href = '/queue', fu
   return (
     <Link
       href={href}
-      className={`inline-flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-5 ${fullWidth ? 'w-full' : ''}`}
+      className={`inline-flex flex-1 items-center justify-between gap-4 rounded-md bg-card-blue p-4 ${fullWidth ? 'w-full' : ''}`}
     >
-      <div>
-        <p className="text-xs font-semibold tracking-wide text-muted">YOUR QUEUE TOKEN</p>
-        <div className="mt-1 flex flex-wrap items-center gap-2">
+      <div className="flex flex-col gap-1">
+        <p className="text-xs text-muted">Your queue token</p>
+        <div className="flex flex-wrap items-center gap-2">
           <QueueToken token={token} size="sm" />
           {isInProgress ? (
             <span className="text-sm font-semibold text-primary-700">Now being served</span>
           ) : isNext ? (
             <span className="text-sm font-semibold text-primary-700">You&rsquo;re next</span>
           ) : isNotBeingServed ? (
-            <span className="text-sm text-muted">
+            <span className="text-base text-muted">
               Position {queue_position} · Not currently being served
             </span>
           ) : hasEstimate ? (
             <>
-              <span className="text-sm text-ink">
+              <span className="text-base text-ink">
                 Position {queue_position} · About {estimated_wait_minutes} min
               </span>
               {confidence && <ConfidenceChip level={toConfidenceLevel(confidence)} />}
             </>
           ) : status === 'waiting' ? (
-            <span className="text-sm text-ink">Position {queue_position}</span>
+            <span className="text-base text-ink">Position {queue_position}</span>
           ) : null}
         </div>
         {otherCount > 0 && (
-          <p className="mt-1 text-xs text-muted">
+          <p className="text-xs text-muted">
             +{otherCount} more {otherCount === 1 ? 'queue' : 'queues'} today
           </p>
         )}
       </div>
-      <span className="text-sm font-semibold text-primary-700">View status →</span>
+      <span className="shrink-0 text-sm font-semibold text-primary-700">View status →</span>
     </Link>
   )
 }

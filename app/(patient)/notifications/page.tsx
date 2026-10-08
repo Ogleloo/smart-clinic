@@ -25,7 +25,7 @@ export default async function NotificationsPage() {
       <PageHeader title="Notifications" subtitle="Updates about your queue and appointments." />
       <div className="w-full max-w-3xl">
         {error ? (
-          <p className="text-sm text-danger">Couldn&rsquo;t load notifications. Try refreshing.</p>
+          <p className="text-base text-danger">Couldn&rsquo;t load notifications. Try refreshing.</p>
         ) : (
           <NotificationsList initialNotifications={notifications ?? []} />
         )}

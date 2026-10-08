@@ -47,12 +47,12 @@ export function RecentNotifications({ queueEntryIds, initialNotifications }: Rec
   return (
     <ul className="flex flex-col gap-2">
       {notifications.map((n) => (
-        <li key={n.id} className="rounded-lg border border-border bg-surface p-3">
+        <li key={n.id} className="rounded-md border border-border bg-surface p-4">
           <div className="flex items-start justify-between gap-3">
-            <p className="text-sm font-semibold text-ink">{n.title}</p>
+            <p className="text-base font-semibold text-ink">{n.title}</p>
             <span className="shrink-0 text-xs text-muted">{formatRelativeTime(n.created_at)}</span>
           </div>
-          {n.body && <p className="mt-0.5 text-xs text-muted">{n.body}</p>}
+          {n.body && <p className="mt-1 text-base text-ink">{n.body}</p>}
         </li>
       ))}
     </ul>

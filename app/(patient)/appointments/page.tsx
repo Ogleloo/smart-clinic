@@ -1,11 +1,10 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { CalendarCheck, CalendarDays, Clock, ListOrdered } from 'lucide-react'
+import { Calendar, CalendarCheck, Clock, ListOrdered, MapPin, Stethoscope } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { LinkButton } from '@/components/ui/LinkButton'
-import { StatusChip } from '@/components/ui/StatusChip'
-import { appointmentStatusToChip } from '@/components/ui/AppointmentCard'
+import { PatientStatusChip } from '@/components/patient/PatientStatusChip'
 import { CancelAppointmentButton } from '@/components/booking/CancelAppointmentButton'
 import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
 import { formatClinicDate, formatClinicTime, todayInClinicTimezone } from '@/lib/clinicTime'
@@ -19,36 +18,58 @@ type Row = {
   scheduled_date: string
   status: AppointmentStatus
   reference: string | null
-  service: { name: string } | null
+  service: {
+    name: string
+    description: string | null
+    clinic: { name: string; city: string | null } | null
+  } | null
 }
 
-const SELECT = 'id, scheduled_time, scheduled_date, status, reference, service:services(name)'
+const SELECT =
+  'id, scheduled_time, scheduled_date, status, reference, service:services(name, description, clinic:clinics(name, city))'
 
 function AppointmentRow({ appointment, cancellable }: { appointment: Row; cancellable: boolean }) {
-  const chip = appointmentStatusToChip(appointment.status)
+  const clinic = appointment.service?.clinic
+  const location = clinic ? [clinic.name, clinic.city].filter(Boolean).join(', ') : null
   return (
-    <article className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-700">
-          <CalendarDays size={20} aria-hidden />
+    <article className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-6 md:flex-row md:items-center md:justify-between">
+      <div className="flex items-start gap-4">
+        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-700 text-white">
+          <Stethoscope size={20} aria-hidden />
         </span>
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-display text-base font-semibold text-ink">{appointment.service?.name ?? 'Appointment'}</p>
-            <StatusChip status={chip.variant} label={chip.label} />
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-base font-semibold text-ink">{appointment.service?.name ?? 'Appointment'}</p>
+            <PatientStatusChip status={appointment.status} />
           </div>
-          <p className="mt-0.5 text-sm text-muted">
-            {formatClinicDate(appointment.scheduled_time)} · {formatClinicTime(appointment.scheduled_time)}
-          </p>
+          {appointment.service?.description && (
+            <p className="text-xs text-muted">{appointment.service.description}</p>
+          )}
+          <div className="flex flex-wrap items-center gap-4 text-xs text-muted">
+            <span className="flex items-center gap-1">
+              <Calendar size={14} aria-hidden />
+              {formatClinicDate(appointment.scheduled_time)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock size={14} aria-hidden />
+              {formatClinicTime(appointment.scheduled_time)}
+            </span>
+            {location && (
+              <span className="flex items-center gap-1">
+                <MapPin size={14} aria-hidden />
+                {location}
+              </span>
+            )}
+          </div>
           {appointment.reference && (
-            <p className="mt-1 font-mono text-xs text-muted">
-              Ref <span className="font-semibold text-ink">{appointment.reference}</span>
+            <p className="text-xs text-muted">
+              Ref <span className="font-mono text-ink">{appointment.reference}</span>
             </p>
           )}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-        <LinkButton href={`/appointments/${appointment.id}`} variant="secondary">
+      <div className="flex flex-wrap items-center gap-3 md:justify-end">
+        <LinkButton href={`/appointments/${appointment.id}`} variant="primary">
           View details
         </LinkButton>
         {cancellable && <CancelAppointmentButton appointmentId={appointment.id} status={appointment.status} compact />}
@@ -126,9 +147,9 @@ export default async function AppointmentsListPage({
       />
 
       {checkedInToday ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-primary-100 bg-primary-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="flex items-start gap-3 text-sm text-primary-900">
-            <CalendarCheck size={20} className="mt-0.5 shrink-0 text-primary-700" aria-hidden />
+        <div className="flex flex-col gap-4 rounded-lg bg-card-mint p-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-start gap-3 text-base text-ink">
+            <CalendarCheck size={20} className="shrink-0 text-primary-700" aria-hidden />
             <span>
               <span className="font-semibold">You&rsquo;re checked in</span> for{' '}
               {checkedInToday.service?.name ?? 'your appointment'}. Follow your place in the queue.
@@ -140,8 +161,8 @@ export default async function AppointmentsListPage({
           </LinkButton>
         </div>
       ) : bookedToday ? (
-        <div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning-bg p-4 text-sm text-ink">
-          <Clock size={20} className="mt-0.5 shrink-0 text-warning" aria-hidden />
+        <div className="flex items-start gap-3 rounded-lg bg-card-blue p-5 text-base text-ink">
+          <Clock size={20} className="shrink-0 text-primary-700" aria-hidden />
           <p>
             <span className="font-semibold">
               Your {bookedToday.service?.name ?? ''} appointment is today at {formatClinicTime(bookedToday.scheduled_time)}.
@@ -167,13 +188,13 @@ export default async function AppointmentsListPage({
               role="tab"
               aria-selected={active}
               href={key === 'upcoming' ? '/appointments' : '/appointments?tab=previous'}
-              className={`-mb-px flex min-h-11 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors ${
+              className={`-mb-px flex min-h-12 items-center gap-2 border-b-2 px-4 text-sm font-semibold transition-colors ${
                 active ? 'border-primary-700 text-primary-700' : 'border-transparent text-muted hover:text-ink'
               }`}
             >
               {label}
               <span
-                className={`rounded-full px-2 py-0.5 text-xs tabular ${active ? 'bg-primary-50 text-primary-700' : 'bg-subtle text-muted'}`}
+                className={`rounded-full px-2 py-1 text-xs tabular ${active ? 'bg-card-mint text-primary-700' : 'bg-subtle text-muted'}`}
               >
                 {count}
               </span>
@@ -183,9 +204,9 @@ export default async function AppointmentsListPage({
       </div>
 
       {error ? (
-        <p className="text-sm text-danger">Couldn&rsquo;t load your appointments. Try refreshing.</p>
+        <p className="text-base text-danger">Couldn&rsquo;t load your appointments. Try refreshing.</p>
       ) : rows.length > 0 ? (
-        <div role="tabpanel" className="flex flex-col gap-3">
+        <div role="tabpanel" className="flex flex-col gap-4">
           {rows.map((appointment) => (
             <AppointmentRow
               key={appointment.id}

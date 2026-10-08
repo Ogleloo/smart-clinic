@@ -35,7 +35,7 @@ export default async function BookPage() {
       <PageHeader title="Book an appointment" subtitle="Three quick steps: service, day and time, confirm." />
 
       {error ? (
-        <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
+        <p className="text-base text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
       ) : services && services.length > 0 ? (
         <BookingWizard services={services} clinicHours={clinic?.hours ?? []} clinicName={clinic?.name ?? null} />
       ) : (
