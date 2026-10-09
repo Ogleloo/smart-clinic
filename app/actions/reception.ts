@@ -30,7 +30,7 @@ export async function checkInAppointment(
 
 export type CreatePatientState = {
   error?: string
-  patient?: { id: string; full_name: string }
+  patient?: { id: string; full_name: string; phone: string | null }
 }
 
 export async function createWalkinPatient(
@@ -48,7 +48,7 @@ export async function createWalkinPatient(
   })
   if (error) return { error: error.message }
 
-  return { patient: { id: data.id, full_name: data.full_name } }
+  return { patient: { id: data.id, full_name: data.full_name, phone: data.phone } }
 }
 
 export async function checkInPatient(
