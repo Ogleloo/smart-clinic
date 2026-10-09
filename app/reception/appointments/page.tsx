@@ -31,7 +31,7 @@ export default async function ReceptionAppointmentsPage() {
     .order('scheduled_time')
 
   return (
-    <div className="flex flex-col gap-4">
+    <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-4 px-6 py-6">
       <h2 className="font-display text-lg font-semibold text-ink">Today&rsquo;s appointments</h2>
 
       {error ? (
@@ -75,6 +75,6 @@ export default async function ReceptionAppointmentsPage() {
           </tbody>
         </table>
       )}
-    </div>
+    </main>
   )
 }
