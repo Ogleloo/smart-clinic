@@ -1,4 +1,4 @@
-import { Building2 } from 'lucide-react'
+import Image from 'next/image'
 import { initials } from '@/lib/initials'
 import { greetingForNow } from '@/lib/clinicTime'
 import { TYPE } from './PageHeader'
@@ -10,9 +10,16 @@ interface DashboardHeroProps {
 
 /**
  * Figma frame 111:2 "Hero-Section". The two background ellipses are
- * decorative only (no asset); there's no clinic photo in storage yet, so
- * the photo panel is a placeholder, same convention as the patient
- * dashboard's "Clinic photo placeholder" block.
+ * decorative only (no asset).
+ *
+ * The photo itself is NOT the Figma source image — that file is a real
+ * photograph of "CityMD Clinic" (a different, identifiable clinic's
+ * branding on the reception wall), which can't be shipped in this app.
+ * public/images/reception/dashboard-hero.jpg is a substitute: an
+ * unbranded clinic reception photo by Cristian Rojas
+ * (pexels.com/photo/waiting-room-in-a-hospital-8459996), used under the
+ * Pexels License (free for commercial use, no attribution required,
+ * modification permitted) — stored locally rather than hot-linked.
  */
 export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
   const firstInitials = initials(fullName)
@@ -39,9 +46,16 @@ export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
           </p>
         </div>
 
-        <div className="relative flex min-h-[180px] items-center justify-center rounded-lg bg-subtle md:min-h-[286px]">
-          <Building2 size={40} className="text-muted" aria-hidden />
-          <div className="absolute right-4 top-4 flex max-w-[330px] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_12px_32px_rgba(5,48,46,0.08)]">
+        <div className="relative min-h-[180px] overflow-hidden rounded-lg bg-subtle md:min-h-[286px]">
+          <Image
+            src="/images/reception/dashboard-hero.jpg"
+            alt=""
+            fill
+            sizes="(min-width: 768px) 700px, 100vw"
+            className="object-cover"
+            priority
+          />
+          <div className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_12px_32px_rgba(5,48,46,0.08)] sm:max-w-[330px]">
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-500 text-sm font-semibold text-white">
               {firstInitials}
             </span>
