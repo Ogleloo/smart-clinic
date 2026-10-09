@@ -10,7 +10,8 @@ interface DashboardHeroProps {
 
 /**
  * Figma frame 111:2 "Hero-Section". The two background ellipses are
- * decorative only (no asset).
+ * decorative only (no asset). The text/image split is asymmetric in
+ * Figma (400px text column, image takes the rest) — not a 50/50 grid.
  *
  * The photo itself is NOT the Figma source image — that file is a real
  * photograph of "CityMD Clinic" (a different, identifiable clinic's
@@ -34,19 +35,19 @@ export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
         aria-hidden
         className="pointer-events-none absolute right-24 top-10 h-56 w-56 rounded-full bg-primary-50 opacity-70 blur-xl"
       />
-      <div className="relative grid grid-cols-1 gap-6 p-6 md:grid-cols-2 md:p-9">
-        <div className="flex flex-col justify-center gap-3">
+      <div className="relative flex flex-col gap-6 px-6 pb-5 pt-8 md:flex-row md:items-start md:justify-between md:px-8 md:pt-11">
+        <div className="flex flex-col justify-center gap-3 md:w-[400px] md:shrink-0">
           <h1 className={TYPE.pageTitle}>
             {greetingForNow()},
             <br />
-            {fullName}
+            <span className="text-primary-600">{fullName}</span>
           </h1>
-          <p className="text-base text-muted">
+          <p className="max-w-[380px] text-base text-muted">
             Manage patient check-ins, queue entries and daily clinic activities — all in one place.
           </p>
         </div>
 
-        <div className="relative min-h-[180px] overflow-hidden rounded-lg bg-subtle md:min-h-[286px]">
+        <div className="relative min-h-[180px] flex-1 overflow-hidden rounded-xl bg-subtle md:min-h-[286px] md:max-w-[700px]">
           <Image
             src="/images/clinic/riverside-reception.webp"
             alt=""
