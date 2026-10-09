@@ -64,34 +64,61 @@ now also carries `phone` so that path doesn't need a second read either.
   column anywhere; no `email` column on `profiles`), so both are omitted
   rather than fabricated.
 
-**Not verified live — appointment path:** no "booked, today" appointment
-existed in the shared dev DB at verification time, and `reset_demo_state()`
-doesn't seed one (it resets queue/consultation/notification state, not
-appointments). The appointment-vs-walk-in branch itself was exercised
-(a patient with zero eligible appointments correctly defaulted to
-walk-in) and the code was reviewed, but the "has a real appointment" /
-"multiple eligible appointments" / "stale or already-used appointment"
-paths were not clicked through end to end. Three scenarios are written as
-`test.skip` in `e2e/reception-checkin.spec.ts` for this reason — next
-session should either seed a same-day appointment fixture or add a
-same-day-booking e2e helper before un-skipping them.
+### Post-review corrections (same checkpoint)
 
-**Tests:** `e2e/reception-checkin.spec.ts` added — 4 active tests (new
+A review of the first PR #21 push caught a real bug and asked for the
+appointment path to actually be verified rather than left skipped:
+
+- **Bug fixed:** a failed appointment-lookup query (network error, RLS
+  denial, anything) used to fall into the same code path as a genuine
+  "zero appointments found" result — both set `appointments` to `[]` and
+  silently defaulted to the walk-in path. Fixed by splitting appointment
+  fetching into its own `fetchAppointments()`, adding a distinct
+  `appointmentLoadError` state, and gating `canConfirm` on
+  `appointments !== null` (eligibility actually resolved) rather than
+  just "a service or appointment is picked." A failed lookup now shows
+  a visible error with Retry and blocks `Continue`/check-in until it
+  resolves — it can no longer be silently treated as "no appointment."
+- **Appointment path verified via network-mocked Playwright tests**, not
+  a live booking: `checkInAppointment` runs as a Server Action, so its
+  Supabase RPC call happens on the Next.js server process and is
+  invisible to `page.route()` — confirmed by first writing tests that
+  tried to intercept `rpc/check_in_appointment` from the browser and
+  observing they never fired. The client-side reads
+  (`search_patients`/`profiles`/`appointments`) run in the browser and
+  *are* interceptable, so the 4 new tests in
+  `e2e/reception-checkin.spec.ts` mock those three endpoints only — no
+  real Supabase row is read or written, nothing to approve — and verify:
+  a real booked appointment's service/time display correctly; with two
+  eligible appointments the receptionist's actual choice (not just the
+  first) is what the hidden `appointment_id` form input carries
+  (checked via `toHaveValue`, not a network capture, for the same
+  server-action reason above); the `appointments` query itself carries
+  `status=eq.booked` + `scheduled_date=eq.<today, clinic timezone>` +
+  the right `patient_id` (proving ineligible appointments are excluded
+  by the query, not by client-side filtering); and the Retry fix above.
+  **All 4 pass** (`npx playwright test -g "appointment path \(mocked"`).
+  Token-display after a real `checkInAppointment` success is not
+  separately covered — same success component/code path the live
+  walk-in tests already exercise, so not a new gap.
+- **Still not run:** no live appointment was booked and
+  `resetDemoState()` was not called — both would have needed approval
+  first, and the mocked tests above made that unnecessary for what this
+  round asked to verify.
+
+**Tests:** `e2e/reception-checkin.spec.ts` — 4 live walk-in tests (new
 walk-in + real token, reset-no-stuck, duplicate-checkin RPC error, legacy
-redirect + param preservation) plus 3 skipped (appointment path, see
-above). **Written and listed (`npx playwright test --list` — 7 discovered,
-0 syntax errors) but not executed against the shared dev Supabase
-project** — every active test calls `resetDemoState()`
-(resets queue/consultation/notification state to a known baseline,
-per `e2e/helpers.ts`), which this session flagged rather than ran without
-approval, consistent with the Phase 1 precedent. Manual Playwright
-verification (described above) covered the same ground without that
-reset. Ask to run the suite for real before merging if that's wanted.
+redirect + param preservation) **written and listed but not executed**
+(every one calls `resetDemoState()`, flagged rather than run without
+approval, per the Phase 1 precedent) + 4 network-mocked appointment-path
+tests, **executed and passing** (see above, no approval needed — no real
+data touched).
 
-**Note:** manual verification this session created a handful of real
-`E2E Phase2 *` walk-in patients and queue entries in the shared dev
+**Note:** earlier manual verification this session created a handful of
+real `E2E Phase2 *` walk-in patients and queue entries in the shared dev
 database (same as the existing `reception-walkin.spec.ts` leaves behind
-today) — harmless, cleared by the next `reset_demo_state()`.
+today) — harmless, cleared by the next `reset_demo_state()`. The mocked
+appointment tests added in this correction round created nothing.
 
 ### What was done (Phase 1, merged)
 

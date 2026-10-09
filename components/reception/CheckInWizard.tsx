@@ -95,6 +95,8 @@ function CheckInWizardInner({
   const [loadingPatient, setLoadingPatient] = useState(false)
 
   const [appointments, setAppointments] = useState<EligibleAppointment[] | null>(null)
+  const [appointmentLoadError, setAppointmentLoadError] = useState<string | null>(null)
+  const [loadingAppointments, setLoadingAppointments] = useState(false)
   const [checkInMode, setCheckInMode] = useState<'appointment' | 'walkin'>('walkin')
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string | null>(null)
   const [walkinServiceId, setWalkinServiceId] = useState<string | null>(null)
@@ -119,28 +121,65 @@ function CheckInWizardInner({
    * RLS-scoped query every time — a name or id arriving from outside this
    * function is never displayed or submitted on its own say-so.
    */
+  /**
+   * A failed query here is NOT the same as a genuine zero-appointments
+   * result: the first means eligibility is unknown, the second means it's
+   * known and empty. Conflating them used to default straight to the
+   * walk-in path on a failed query — i.e. silently treating "couldn't
+   * check" as "checked, found nothing", which could skip a patient's real
+   * booked appointment. On failure, appointments stays null (not []) and
+   * checkInMode is left alone, so the confirm step blocks on a visible
+   * Retry rather than quietly proceeding.
+   */
+  async function fetchAppointments(id: string) {
+    setAppointmentLoadError(null)
+    setLoadingAppointments(true)
+    const { data: appts, error: apptError } = await supabase
+      .from('appointments')
+      .select('id, scheduled_time, service:services(id, name)')
+      .eq('patient_id', id)
+      .eq('scheduled_date', todayInClinicTimezone())
+      .eq('status', 'booked')
+      .order('scheduled_time')
+
+    setLoadingAppointments(false)
+
+    if (apptError || !appts) {
+      setAppointmentLoadError('Couldn’t check for today’s appointments. Try again.')
+      return
+    }
+
+    const eligible: EligibleAppointment[] = appts
+      .filter((a) => a.service !== null)
+      .map((a) => ({
+        id: a.id,
+        scheduled_time: a.scheduled_time,
+        service_id: a.service!.id,
+        service_name: a.service!.name,
+      }))
+    setAppointments(eligible)
+    if (eligible.length > 0) {
+      setCheckInMode('appointment')
+      setSelectedAppointmentId(eligible[0].id)
+    } else {
+      setCheckInMode('walkin')
+    }
+  }
+
   async function loadPatient(id: string) {
     setLoadingPatient(true)
     setPatientLoadError(null)
     setPatient(null)
     setAppointments(null)
+    setAppointmentLoadError(null)
     setSelectedAppointmentId(null)
     setWalkinServiceId(null)
 
-    const [{ data: profile, error: profileError }, { data: appts, error: apptError }] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, full_name, phone, date_of_birth, id_number')
-        .eq('id', id)
-        .maybeSingle(),
-      supabase
-        .from('appointments')
-        .select('id, scheduled_time, service:services(id, name)')
-        .eq('patient_id', id)
-        .eq('scheduled_date', todayInClinicTimezone())
-        .eq('status', 'booked')
-        .order('scheduled_time'),
-    ])
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, date_of_birth, id_number')
+      .eq('id', id)
+      .maybeSingle()
 
     setLoadingPatient(false)
 
@@ -150,29 +189,8 @@ function CheckInWizardInner({
     }
 
     setPatient(profile)
-
-    if (!apptError && appts) {
-      const eligible: EligibleAppointment[] = appts
-        .filter((a) => a.service !== null)
-        .map((a) => ({
-          id: a.id,
-          scheduled_time: a.scheduled_time,
-          service_id: a.service!.id,
-          service_name: a.service!.name,
-        }))
-      setAppointments(eligible)
-      if (eligible.length > 0) {
-        setCheckInMode('appointment')
-        setSelectedAppointmentId(eligible[0].id)
-      } else {
-        setCheckInMode('walkin')
-      }
-    } else {
-      setAppointments([])
-      setCheckInMode('walkin')
-    }
-
     setStep('confirm')
+    await fetchAppointments(id)
   }
 
   function handlePatientSelected(result: PatientSearchResult) {
@@ -227,7 +245,10 @@ function CheckInWizardInner({
 
   const selectedAppointment = appointments?.find((a) => a.id === selectedAppointmentId) ?? null
   const walkinService = services.find((s) => s.id === walkinServiceId) ?? null
-  const canConfirm = checkInMode === 'appointment' ? !!selectedAppointment : !!walkinServiceId
+  // Eligibility must have resolved (appointments !== null) before either path can proceed —
+  // a failed lookup must never fall through to an unchecked walk-in check-in.
+  const canConfirm =
+    appointments !== null && (checkInMode === 'appointment' ? !!selectedAppointment : !!walkinServiceId)
 
   const token = apptCheckInState.token ?? walkinCheckInState.token
   const submitError = checkInMode === 'appointment' ? apptCheckInState.error : walkinCheckInState.error
@@ -313,7 +334,18 @@ function CheckInWizardInner({
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
             <p className="text-sm font-semibold text-muted">Visit details</p>
 
-            {appointments && appointments.length > 0 ? (
+            {loadingAppointments ? (
+              <p className="text-sm text-muted">Checking for today&rsquo;s appointments…</p>
+            ) : appointmentLoadError ? (
+              <div className="flex flex-col items-start gap-2 rounded-md bg-danger-bg p-3">
+                <p role="alert" className="text-sm font-semibold text-danger">
+                  {appointmentLoadError}
+                </p>
+                <Button type="button" variant="danger-outline" onClick={() => void fetchAppointments(patient.id)}>
+                  Retry
+                </Button>
+              </div>
+            ) : appointments && appointments.length > 0 ? (
               <div className="flex flex-col gap-2">
                 <label className="flex items-center gap-2 text-sm text-ink">
                   <input
@@ -359,10 +391,12 @@ function CheckInWizardInner({
                 </label>
               </div>
             ) : (
-              <p className="text-xs text-muted">No booked appointment today — checking in as a walk-in.</p>
+              appointments && (
+                <p className="text-xs text-muted">No booked appointment today — checking in as a walk-in.</p>
+              )
             )}
 
-            {checkInMode === 'walkin' && (
+            {checkInMode === 'walkin' && appointments && (
               <div className="flex flex-col gap-2">
                 <p className="text-xs font-semibold tracking-wide text-muted">SERVICE</p>
                 <ServicePicker services={services} selectedId={walkinServiceId} onSelect={setWalkinServiceId} />
