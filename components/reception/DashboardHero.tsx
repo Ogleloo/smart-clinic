@@ -15,11 +15,11 @@ interface DashboardHeroProps {
  * The photo itself is NOT the Figma source image — that file is a real
  * photograph of "CityMD Clinic" (a different, identifiable clinic's
  * branding on the reception wall), which can't be shipped in this app.
- * public/images/reception/dashboard-hero.jpg is a substitute: an
- * unbranded clinic reception photo by Cristian Rojas
- * (pexels.com/photo/waiting-room-in-a-hospital-8459996), used under the
- * Pexels License (free for commercial use, no attribution required,
- * modification permitted) — stored locally rather than hot-linked.
+ * public/images/clinic/riverside-reception.webp is the approved
+ * replacement: an illustrative clinic reception image, not a verified
+ * photograph of the actual Riverside Clinic — hence the empty alt text,
+ * same as the purely decorative role the Figma photo itself plays here
+ * (the receptionist's real identity is in the chip text, not the image).
  */
 export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
   const firstInitials = initials(fullName)
@@ -48,7 +48,7 @@ export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
 
         <div className="relative min-h-[180px] overflow-hidden rounded-lg bg-subtle md:min-h-[286px]">
           <Image
-            src="/images/reception/dashboard-hero.jpg"
+            src="/images/clinic/riverside-reception.webp"
             alt=""
             fill
             sizes="(min-width: 768px) 700px, 100vw"
