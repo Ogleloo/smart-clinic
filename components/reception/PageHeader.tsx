@@ -5,7 +5,7 @@ export const PAGE_CLASS = 'mx-auto flex w-full max-w-[1176px] flex-col gap-6 px-
 
 /** Figma type scale (frame 111:2 variable defs) — the only text styles reception V3 screens use. */
 export const TYPE = {
-  pageTitle: 'font-display text-[40px] font-bold leading-tight text-ink',
+  pageTitle: 'font-display text-[40px] font-bold leading-[44px] text-ink',
   section: 'font-display text-[22px] font-semibold text-ink',
   body: 'text-base text-ink',
   small: 'text-xs text-muted',
