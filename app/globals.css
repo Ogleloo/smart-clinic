@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Only the approved V3 light design is shipped — form controls, scrollbars
+   and other native UA chrome must not switch to a browser/OS dark theme. */
+:root {
+  color-scheme: light;
+}
+
 /* Design System tokens — names match the Figma variables exactly,
    so a component styled in Figma maps directly to Tailwind classes. */
 @theme {
