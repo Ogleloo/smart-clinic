@@ -175,7 +175,7 @@ test('booking wizard: service descriptions, 3 steps, success page shows the data
 
     // Step 3: confirm.
     await expect(page.getByRole('heading', { name: 'Confirm your appointment' })).toBeVisible()
-    await expect(page.locator('form')).toContainText('Pharmacy')
+    await expect(page.locator('main form')).toContainText('Pharmacy')
     await page.getByRole('button', { name: 'Confirm booking' }).click()
 
     await page.waitForURL(/\/book\/confirmed\/[0-9a-f-]+$/, { timeout: 30_000 })
@@ -298,7 +298,8 @@ test('profile is read-only; settings saves normalised values, rejects bad ones, 
   try {
     await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
     await page.goto('/profile')
-    await expect(page.locator('main input')).toHaveCount(0)
+    // Read-only: no editable fields (Server Action forms carry a hidden action input).
+    await expect(page.locator('main input:not([type="hidden"])')).toHaveCount(0)
     await expect(page.locator('main')).toContainText(ACCOUNTS.patient.email)
     await page.getByRole('link', { name: 'Edit profile' }).click()
     await page.waitForURL('**/profile/settings')
@@ -377,10 +378,45 @@ test('profile is read-only; settings saves normalised values, rejects bad ones, 
 test('profile settings: Sign out ends the session', async ({ page }) => {
   await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
   await page.goto('/profile/settings')
-  await page.getByRole('button', { name: 'Sign out' }).click()
+  await page.locator('main').getByRole('button', { name: 'Sign out' }).click()
   await waitSettled(page)
   await expect(page).toHaveURL(/\/login$/)
   await page.goto('/dashboard')
+  await expect(page).toHaveURL(/\/login/)
+})
+
+test('desktop sidebar: Sign Out sits above "Need help?" and ends the session', async ({ page }) => {
+  await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
+  await page.goto('/dashboard')
+  const sidebar = page.locator('aside')
+  const signOut = sidebar.getByRole('button', { name: 'Sign Out' })
+  await expect(signOut).toBeVisible()
+  const signOutBox = (await signOut.boundingBox())!
+  const helpBox = (await sidebar.getByText('Need help?').boundingBox())!
+  expect(signOutBox.y).toBeLessThan(helpBox.y)
+  // Desktop profile relies on the sidebar — no second Sign Out in the page body.
+  await page.goto('/profile')
+  await expect(page.locator('main').getByRole('button', { name: 'Sign Out' })).toBeHidden()
+
+  await signOut.click()
+  await waitSettled(page)
+  await expect(page).toHaveURL(/\/login$/)
+  await page.goto('/dashboard')
+  await expect(page).toHaveURL(/\/login/)
+})
+
+test('mobile profile: Sign Out is shown and ends the session', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 })
+  await loginAs(page, ACCOUNTS.patient.email, ACCOUNTS.patient.password)
+  await page.goto('/profile')
+  const signOut = page.locator('main').getByRole('button', { name: 'Sign Out' })
+  await expect(signOut).toBeVisible()
+  // Double-submit must still land cleanly on /login.
+  await Promise.all([signOut.click(), signOut.click({ force: true }).catch(() => {})])
+  await waitSettled(page)
+  await expect(page).toHaveURL(/\/login$/)
+  await expect(page.getByText('Internal Server Error')).not.toBeVisible()
+  await page.goto('/profile')
   await expect(page).toHaveURL(/\/login/)
 })
 
