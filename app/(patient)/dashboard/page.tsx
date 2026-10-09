@@ -1,9 +1,9 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import {
   ArrowRight,
   Bell,
-  Building2,
   Calendar,
   Clock,
   FileText,
@@ -255,12 +255,20 @@ export default async function DashboardPage() {
         </h2>
         {clinic ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            <div
-              className="flex min-h-36 items-center justify-center rounded-md bg-subtle text-muted"
-              role="img"
-              aria-label="Clinic photo placeholder"
-            >
-              <Building2 size={40} aria-hidden />
+            {/*
+              Approved illustrative clinic image, not a verified photograph
+              of the actual Riverside Clinic — alt text stays generic rather
+              than clinic.name for that reason. Address/hours text beside it
+              is still the real, live clinic record.
+            */}
+            <div className="relative min-h-36 overflow-hidden rounded-md bg-subtle">
+              <Image
+                src="/images/clinic/riverside-exterior.webp"
+                alt="Clinic building exterior"
+                fill
+                sizes="(min-width: 768px) 33vw, 100vw"
+                className="object-cover"
+              />
             </div>
             <div className="flex flex-col gap-2">
               <p className="text-base font-semibold text-ink">{clinic.name}</p>
