@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation'
-import { Pencil } from 'lucide-react'
+import { LogOut, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { logout } from '@/app/actions/auth'
+import { buttonClasses } from '@/components/ui/button-styles'
 import { LinkButton } from '@/components/ui/LinkButton'
 import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
 import { formatCalendarDate } from '@/lib/clinicTime'
@@ -79,6 +81,14 @@ export default async function ProfilePage() {
           <Pencil size={20} className="mr-2" aria-hidden />
           Edit profile
         </LinkButton>
+
+        {/* Mobile only — from md up the sidebar carries Sign Out. */}
+        <form action={logout} className="w-full md:hidden">
+          <button type="submit" className={buttonClasses('danger-outline', true)}>
+            <LogOut size={20} className="mr-2" aria-hidden />
+            Sign Out
+          </button>
+        </form>
       </section>
     </main>
   )
