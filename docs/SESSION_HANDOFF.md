@@ -7,10 +7,93 @@ Latest development checkpoint. Read this when continuing previous work.
 ## Last checkpoint
 
 **Date:** 2026-10-09
-**Branch:** `feat/reception-v3`
-**Session:** Reception V3 — Phase 1 (shell + Dashboard) built, stopped for review before continuing.
+**Branch:** `feat/reception-v3-check-in`
+**Session:** Reception V3 — Phase 2 (unified check-in wizard) built, stopped for review before continuing. Phase 1 (PR #19) and the shared image assets (PR #20) are merged to `main`.
 
-### What was done (this session)
+### What was done (Phase 2, this session)
+
+New route `/reception/check-in` + `CheckInWizard.tsx`, consolidating
+`WalkInWizard`/`CheckInAppointmentButton` into one 3-step flow (Figma
+frames `111:183` / `111:342` / `111:487` / `112:302`): Find patient →
+Confirm details → Add to queue → success.
+
+**Verified live** (one login session, no `reset_demo_state()`): search for
+a genuinely new patient → register → confirm (correctly defaults to
+walk-in, no appointment found) → pick service → queue summary → confirm →
+real queue token (`GC-007`) displayed. Reset ("Check in another patient")
+correctly returns to step 1, no stuck-screen regression. Re-checking the
+same patient into the same service surfaces the real RPC error ("already
+in the queue for this service today") and the button re-enables — found
+the "Please wait…" disabled state mid-flight in a screenshot, confirming
+the existing double-submit guard (via `useActionState`'s pending flag)
+covers this flow too, no new code needed for it. Legacy
+`/reception/walk-in?patientId=&patientName=&newPatientName=` redirects to
+`/reception/check-in` with all three params preserved — including the
+negative case: a bogus `patientId` is correctly rejected ("Couldn't
+verify this patient"), never displayed.
+
+**Real bug found and fixed during verification:** a freshly-created walk-in
+patient could not be re-read via the normal RLS-scoped `profiles` query —
+`profiles_staff_read_clinic_patients` only grants read access once a
+patient has an appointment or queue entry (or shares the staff member's
+clinic_id), and a patient `create_walkin_patient` just inserted has none
+of those yet. Fixed by trusting the RPC's own return value directly for
+that one case (it ran server-side, role-checked, under the receptionist's
+session — that create call IS the authorized access event) instead of
+re-fetching. `CreatePatientState.patient` in `app/actions/reception.ts`
+now also carries `phone` so that path doesn't need a second read either.
+
+**Key design decisions:**
+- The appointment/walk-in choice is a **real lookup**, not a toggle:
+  on selecting a patient, the wizard queries `appointments` for that
+  `patient_id` + today (clinic timezone) + `status = 'booked'`. Zero
+  results → walk-in only. One or more → receptionist picks; only a real
+  `appointment_id` from that query is ever sent to `checkInAppointment`.
+  A `patientId` arriving via URL is re-verified through the same
+  RLS-scoped query, never trusted/displayed as-is.
+- **No predicted-token preview on step 3**, unlike Figma's own "Queue
+  token to be issued: GC-016" — the real token only exists after
+  `check_in_appointment`/`check_in_patient` actually succeeds, and
+  showing a guess first would be exactly the kind of unjustified number
+  this project's rules forbid. The success screen shows the real token
+  only, from the RPC's actual response.
+- **No Notes field** — neither RPC accepts one.
+- Patient details on step 2 show only real columns (`full_name`, `phone`,
+  `date_of_birth`, `id_number`). Figma's mock also shows "Patient number"
+  and "Email address" — neither exists in the schema (no `patient_number`
+  column anywhere; no `email` column on `profiles`), so both are omitted
+  rather than fabricated.
+
+**Not verified live — appointment path:** no "booked, today" appointment
+existed in the shared dev DB at verification time, and `reset_demo_state()`
+doesn't seed one (it resets queue/consultation/notification state, not
+appointments). The appointment-vs-walk-in branch itself was exercised
+(a patient with zero eligible appointments correctly defaulted to
+walk-in) and the code was reviewed, but the "has a real appointment" /
+"multiple eligible appointments" / "stale or already-used appointment"
+paths were not clicked through end to end. Three scenarios are written as
+`test.skip` in `e2e/reception-checkin.spec.ts` for this reason — next
+session should either seed a same-day appointment fixture or add a
+same-day-booking e2e helper before un-skipping them.
+
+**Tests:** `e2e/reception-checkin.spec.ts` added — 4 active tests (new
+walk-in + real token, reset-no-stuck, duplicate-checkin RPC error, legacy
+redirect + param preservation) plus 3 skipped (appointment path, see
+above). **Written and listed (`npx playwright test --list` — 7 discovered,
+0 syntax errors) but not executed against the shared dev Supabase
+project** — every active test calls `resetDemoState()`
+(resets queue/consultation/notification state to a known baseline,
+per `e2e/helpers.ts`), which this session flagged rather than ran without
+approval, consistent with the Phase 1 precedent. Manual Playwright
+verification (described above) covered the same ground without that
+reset. Ask to run the suite for real before merging if that's wanted.
+
+**Note:** manual verification this session created a handful of real
+`E2E Phase2 *` walk-in patients and queue entries in the shared dev
+database (same as the existing `reception-walkin.spec.ts` leaves behind
+today) — harmless, cleared by the next `reset_demo_state()`.
+
+### What was done (Phase 1, merged)
 
 Reception V3 scope was read directly off Figma (file `xKCONNQAkEBe56q0rbQuYC`,
 page `04 · Reception V3`, 11 frames) since `V3_REQUIREMENTS.md` doesn't break
@@ -58,15 +141,10 @@ against the dev account):**
 
 ### What's next (not started)
 
-- [ ] **Check-in wizard** (`/reception/check-in`) — consolidates
-      `WalkInWizard`/`CheckInAppointmentButton`. Must treat the
-      appointment-vs-walk-in choice as a real data lookup (does this
-      patient have a genuine booked appointment today?), not a UI toggle —
-      only pass a real `appointment_id` to `checkInAppointment`. No notes
-      field (`check_in_appointment`/`check_in_patient` don't accept one).
-      `/reception/walk-in` becomes a redirect preserving `patientId`,
-      `patientName`, `newPatientName` — don't delete it or the legacy
-      components until the new wizard is verified end-to-end.
+- [x] **Check-in wizard** (`/reception/check-in`) — done in Phase 2
+      (this checkpoint), on `feat/reception-v3-check-in`, PR not yet
+      opened/merged. Appointment-path live verification still pending —
+      see Phase 2 notes above.
 - [ ] **Queue Management** restyle + Skip Patient modal. Needs a new
       `skipPatient` Server Action in `app/actions/reception.ts` (none
       exists yet) wrapping `skip_patient()` — no RLS/GRANT change, that

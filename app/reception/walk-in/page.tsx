@@ -1,38 +1,25 @@
-import { createClient } from '@/lib/supabase/server'
-import { EmptyState } from '@/components/ui/EmptyState'
-import { WalkInWizard } from '@/components/reception/WalkInWizard'
+import { redirect } from 'next/navigation'
 
-export default async function WalkInPage({
+/**
+ * Legacy route, kept as a redirect rather than removed: anything that
+ * still links here (e.g. a bookmark, or a handoff from elsewhere in
+ * reception) lands on the unified check-in wizard instead, with the same
+ * three query params preserved. WalkInWizard itself stays in the tree,
+ * unreferenced, until it's safe to delete as a separate cleanup — see
+ * docs/SESSION_HANDOFF.md.
+ */
+export default async function WalkInRedirectPage({
   searchParams,
 }: {
-  // Handed off from the patient search on /reception itself — see
-  // components/reception/ReceptionPatientSearch.
   searchParams: Promise<{ patientId?: string; patientName?: string; newPatientName?: string }>
 }) {
   const { patientId, patientName, newPatientName } = await searchParams
-  const supabase = await createClient()
 
-  const { data: services, error } = await supabase
-    .from('services')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name')
+  const params = new URLSearchParams()
+  if (patientId) params.set('patientId', patientId)
+  if (patientName) params.set('patientName', patientName)
+  if (newPatientName) params.set('newPatientName', newPatientName)
 
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-5 px-6 py-6">
-      <h2 className="font-display text-lg font-semibold text-ink">Register walk-in</h2>
-
-      {error ? (
-        <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
-      ) : services && services.length > 0 ? (
-        <WalkInWizard
-          services={services}
-          initialSelectedPatient={patientId && patientName ? { id: patientId, full_name: patientName } : undefined}
-          initialNewPatientName={newPatientName}
-        />
-      ) : (
-        <EmptyState headline="No services available" fullWidth />
-      )}
-    </main>
-  )
+  const query = params.toString()
+  redirect(`/reception/check-in${query ? `?${query}` : ''}`)
 }
