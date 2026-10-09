@@ -6,9 +6,35 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ## Last checkpoint
 
-**Date:** 2026-10-09
-**Branch:** `feat/reception-v3-check-in`
-**Session:** Reception V3 — Phase 2 (unified check-in wizard) built, stopped for review before continuing. Phase 1 (PR #19) and the shared image assets (PR #20) are merged to `main`.
+**Date:** 2026-10-10
+**Branch:** `feat/reception-v3-queue`
+**Session:** Reception V3 Phase 3 (Queue Management, Figma frames `114:736` / `114:1204` / `114:1353`) built, stopped for review before merging. Phase 1 (PR #19), image assets (PR #20), Phase 2 (PR #21), the light-theme lock (PR #22) and the Dashboard visual-fidelity pass (PR #23) are all merged to `main`.
+
+### What was done (Phase 3, this session)
+
+Rewrote `/reception/queue` to match Figma: hero header (title/subtitle/photo/profile chip, `QueueHeader.tsx`), service filter pills driven by real active services (not Figma's hardcoded examples), and a single combined 7-column table (`#`, Token, Patient name, Service, Status, Wait time, Actions) — `table-fixed` with explicit column widths so it never overflows at the 1440px reference width (confirmed via `scrollWidth === clientWidth`), with a stacked-card fallback below `md` for 390px.
+
+`ServiceQueueSync.tsx` replaces the old `ServiceQueuePanel.tsx` (deleted — fully superseded): one `useQueueBroadcast` subscription per service runs continuously regardless of which filter pill is selected, so switching filters is a pure client-side re-slice of already-live data rather than a resubscribe, and "All services" stays correctly live across every service at once. `#` position is recomputed client-side from `(priority desc, checked_in_at asc)` for whatever subset is currently shown — `get_service_queue`'s own `queue_position` is only valid within one service and would collide (two "#1"s) once combined.
+
+**Security blocker found and NOT worked around — Skip Patient's write is disabled.** `skip_patient(p_queue_entry_id, p_no_show)` (`supabase/migrations/20260809125334_skip_patient_closes_consultation.sql`) checks only `auth_role() in ('nurse','receptionist','admin')` — it has **no clinic-isolation check at all**. Unlike its sibling nurse-flow RPCs (`call_next_patient` implicitly scopes to the caller's own assigned service; `end_consultation` checks `cons.nurse_id = caller`), nothing here ties the queue entry to the caller's own clinic. Since it's `security definer`, it bypasses RLS entirely — RLS being the project's only security boundary (CLAUDE.md) does not cover this call. Practical exploitability is bounded (the only RLS-scoped read path, `get_service_queue`, already filters to the caller's own clinic, and `get_public_queue_display()` — the one `anon`-callable function — never exposes `queue_entry_id`), but any authenticated staff member who obtains another clinic's queue-entry UUID by any other means could skip or no-show that patient. The migration's own comment already acknowledges the RPC's waiting-only restriction is UI-only and "not sufficient... the RPC remains directly callable" — the same reasoning applies to clinic isolation, which was never added at all.
+
+Per the Phase 3 brief's explicit instruction for this situation ("STOP the Skip write integration and report the security blocker... do not silently weaken rules or introduce an unapproved production migration"), **no Server Action calls `skip_patient()` anywhere in this codebase.** `SkipPatientModal.tsx` is built to the full approved Figma spec (icon badge, patient panel with real token/patient/service/wait-time, Cancel, Confirm) but its Confirm button is permanently disabled with an inline explanation, and Cancel/Escape close it with no network call — verified by a test that arms `page.route` on `rpc/skip_patient` and asserts it's never invoked (`e2e/reception-queue.spec.ts`).
+
+**To unblock:** a new migration adding a clinic-match check to `skip_patient()` (e.g. joining through `queue_entries.service_id → services.clinic_id` and comparing to `auth_clinic_id()`, the same pattern `get_service_queue` already uses) needs review and approval before `SkipPatientModal`'s Confirm button can be wired to a real Server Action. The modal, row-level Skip button, and surrounding UI are otherwise complete — unblocking is expected to be a small, contained change once approved.
+
+**Also omitted, and why:** the Figma "Reason (optional)" dropdown in the Skip modal — `skip_patient()`'s signature has no parameter to persist a reason, and a field whose value is silently discarded is worse than no field (documented in `SkipPatientModal.tsx`). The "Next" (call-next) button Figma shows per waiting row is never rendered for receptionists — `call_next_patient()` is hard-gated to `role='nurse'` and this was out of scope from Phase 1 onward.
+
+**Tests:** `e2e/reception-queue.spec.ts` (7 tests, all passing) reads real live queue data from the shared dev Supabase project — no `resetDemoState()`, no writes, since skip has no live-write path to test at all right now. Covers: position ordering, All-services vs. individual-service filtering, the waiting-vs-in-consultation action split (and that a "Next" button never renders for a receptionist), the Skip modal's content/disabled-Confirm/no-RPC-call, Escape-to-close, and no horizontal overflow at both 1440px and 390px. `QueueUpdatedToast.tsx` (the success state, Figma `114:1353`) was built and visually verified against Figma via a disposable local route (not committed) rather than a live trigger, since there is no safe way to actually succeed a skip yet — it isn't wired into any flow.
+
+### What remains / next session
+
+- **Fix `skip_patient()`'s clinic isolation** (needs an approved migration — see blocker above), then wire `SkipPatientModal`'s Confirm button to a real Server Action and `QueueUpdatedToast` to its real success response.
+- Phase 4 (Profile Settings) is next per the original Reception V3 plan — not started.
+- Patients/Reports nav items remain absent (no V3 page design exists yet).
+
+---
+
+## Previous checkpoint — Reception V3 Phase 1–2, Dashboard visual fidelity, light-theme lock (2026-10-09, merged to `main`)
 
 ### What was done (Phase 2, this session)
 
