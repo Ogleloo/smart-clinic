@@ -24,6 +24,7 @@ export interface TodayRow {
 export interface ActivityEvent {
   id: string
   token: string
+  patientName: string
   event: string
   at: string
 }
@@ -172,15 +173,16 @@ export async function getReceptionDashboardData(supabase: SupabaseClient<Databas
   // this is a glance-back list, not an audit trail.
   const recentActivity: ActivityEvent[] = []
   for (const e of entries) {
-    recentActivity.push({ id: `${e.id}-checkin`, token: e.token, event: 'Checked in', at: e.checked_in_at })
+    const patientName = e.patient?.full_name ?? 'Unknown patient'
+    recentActivity.push({ id: `${e.id}-checkin`, token: e.token, patientName, event: 'Checked in', at: e.checked_in_at })
     if (e.called_at) {
-      recentActivity.push({ id: `${e.id}-called`, token: e.token, event: 'Called', at: e.called_at })
+      recentActivity.push({ id: `${e.id}-called`, token: e.token, patientName, event: 'Called to consultation', at: e.called_at })
     }
     if (e.status === 'done' && e.completed_at) {
-      recentActivity.push({ id: `${e.id}-done`, token: e.token, event: 'Completed', at: e.completed_at })
+      recentActivity.push({ id: `${e.id}-done`, token: e.token, patientName, event: 'Completed', at: e.completed_at })
     }
     if (e.status === 'no_show') {
-      recentActivity.push({ id: `${e.id}-noshow`, token: e.token, event: 'Marked no-show', at: e.completed_at ?? e.checked_in_at })
+      recentActivity.push({ id: `${e.id}-noshow`, token: e.token, patientName, event: 'Marked no-show', at: e.completed_at ?? e.checked_in_at })
     }
   }
   recentActivity.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())

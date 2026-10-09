@@ -11,11 +11,21 @@ export default async function ReceptionQueuePage() {
     .eq('is_active', true)
     .order('name')
 
+  const wrapperClass = 'mx-auto flex min-h-dvh max-w-[820px] flex-col gap-4 px-6 py-6'
+
   if (error) {
-    return <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
+    return (
+      <main className={wrapperClass}>
+        <p className="text-sm text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
+      </main>
+    )
   }
   if (!services || services.length === 0) {
-    return <EmptyState headline="No active services" fullWidth />
+    return (
+      <main className={wrapperClass}>
+        <EmptyState headline="No active services" fullWidth />
+      </main>
+    )
   }
 
   // Initial data fetched server-side per service so the panels render
@@ -29,7 +39,7 @@ export default async function ReceptionQueuePage() {
   )
 
   return (
-    <div className="flex flex-col gap-4">
+    <main className={wrapperClass}>
       <h2 className="font-display text-lg font-semibold text-ink">Queue</h2>
       {panels.map(({ service, queue }) => (
         <ServiceQueuePanel
@@ -39,6 +49,6 @@ export default async function ReceptionQueuePage() {
           initialQueue={queue}
         />
       ))}
-    </div>
+    </main>
   )
 }

@@ -19,7 +19,7 @@ export default async function WalkInPage({
     .order('name')
 
   return (
-    <div className="flex flex-col gap-5">
+    <main className="mx-auto flex min-h-dvh max-w-[820px] flex-col gap-5 px-6 py-6">
       <h2 className="font-display text-lg font-semibold text-ink">Register walk-in</h2>
 
       {error ? (
@@ -33,6 +33,6 @@ export default async function WalkInPage({
       ) : (
         <EmptyState headline="No services available" fullWidth />
       )}
-    </div>
+    </main>
   )
 }
