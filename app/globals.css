@@ -81,6 +81,36 @@
   color: var(--color-ink);
 }
 
+/*
+ * Reception V3 design system (Figma page "04 · Reception V3", frame
+ * 111:2 variable defs). Same scoping mechanism as .theme-patient: redefine
+ * the tokens every ui/* component already reads, so reception picks up its
+ * own palette while nurse/admin screens keep the V2 palette untouched.
+ */
+.theme-reception {
+  --color-primary-50:  #E6FBF7;
+  --color-primary-100: #E6FBF7;
+  --color-primary-500: #08B9A8;
+  --color-primary-600: #039486;
+  --color-primary-700: #039486;
+  --color-primary-900: #07172F;
+
+  --color-paper: #F5FFFD;
+  --color-surface: #FFFFFF;
+  --color-border: #D9ECE9;
+  --color-ink:   #07172F;
+  --color-muted: #5B6B8D;
+  --color-info:  #5B6B8D;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
 body {
   background: var(--color-paper);
   color: var(--color-ink);

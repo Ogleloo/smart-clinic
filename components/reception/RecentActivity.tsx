@@ -9,15 +9,14 @@ export function RecentActivity({ events }: { events: ActivityEvent[] }) {
   }
 
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className="flex flex-col gap-3">
       {events.map((event) => (
-        <li
-          key={event.id}
-          className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-2.5"
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="font-mono text-sm font-semibold tabular-nums text-ink">{event.token}</span>
-            <span className="text-sm text-ink">{event.event}</span>
+        <li key={event.id} className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm text-ink">
+              <span className="font-mono font-semibold tabular-nums">{event.token}</span> {event.event}
+            </span>
+            <span className="text-xs text-muted">{event.patientName}</span>
           </div>
           <span className="shrink-0 text-xs text-muted">{formatRelativeTime(event.at)}</span>
         </li>
