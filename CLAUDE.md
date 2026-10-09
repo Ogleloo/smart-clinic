@@ -7,11 +7,59 @@ Live: `smart-clinic-alpha.vercel.app` · Supabase project `bffhjvpkfivtbzqielve`
 
 ---
 
-## Status: feature freeze
+## Project status — V3 controlled development
 
-Functionality is complete. Do **not** add features. If testing reveals a
-missing behaviour that blocks a real workflow, say so and wait for a decision —
-do not build it unprompted. Ideas for later go in `Future_Features_V2.md`.
+V3 replaces the V2 screens role by role. Each role is a single body of
+work — do not mix roles in one session.
+
+| Role          | Status        | Branch / PR                |
+|---------------|---------------|----------------------------|
+| Patient V3    | ✅ Implemented | `feat/patient-v3-screens`  |
+| Reception V3  | 🔲 Pending    | —                          |
+| Nurse V3      | 🔲 Pending    | —                          |
+| Admin V3      | 🔲 Pending    | —                          |
+| Public Display| 🔲 Pending    | —                          |
+
+Do **not** add features outside the current task scope. Ideas for later
+go in `Future_Features_V2.md`.
+
+---
+
+## Context-efficiency policy
+
+Claude Code sessions must stay focused and lightweight.
+
+**Session boundaries**
+- One session = one related group of tasks (e.g. "build Reception V3 screens").
+- Before switching to an unrelated task, save a checkpoint to
+  `docs/SESSION_HANDOFF.md` and start a fresh session.
+
+**Repository inspection**
+- Read `CLAUDE.md` and `AGENTS.md` at the start of every session.
+- Read other docs only when relevant to the current task.
+- Use targeted `grep` / `glob` searches — do not scan unrelated directories.
+
+**Task execution**
+- Work only within the requested scope.
+- Do not refactor unrelated code encountered during the task.
+- Preserve existing security rules, RLS policies, and test coverage.
+
+**Context handoff** — before ending a session with unfinished or
+follow-up work, update `docs/SESSION_HANDOFF.md` with:
+```
+## Last checkpoint
+Date, branch, what was done, what remains, any blockers.
+```
+
+**Session prompt template** (paste into Claude Code):
+```
+Task: [DESCRIBE THE SPECIFIC TASK]
+Read CLAUDE.md and only the project documentation relevant to this task.
+If the task continues previous work, read docs/SESSION_HANDOFF.md.
+Use targeted repository searches. Do not scan unrelated directories.
+Work only within the requested scope. Preserve existing security and testing requirements.
+Keep the final report concise.
+```
 
 ---
 
@@ -21,10 +69,14 @@ Never work directly on `main` unless explicitly instructed.
 
 ```
 fix/     a defect
-feat/    new behaviour (rare — see feature freeze)
+feat/    new behaviour
 docs/    documentation only
 chore/   tooling, config, dependencies
 ```
+
+**Vercel preview warning:** preview deployments isolate code but share
+the production database. Do not run destructive tests or
+`reset_demo_state()` from a preview without saying so first.
 
 **Before pushing a branch**
 
