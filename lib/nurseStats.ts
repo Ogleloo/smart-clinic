@@ -11,6 +11,31 @@ function localDate(iso: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: CLINIC_TIMEZONE }).format(new Date(iso))
 }
 
+export interface ConsultationTimes {
+  started_at: string
+  ended_at: string | null
+  exclude_from_prediction: boolean
+}
+
+/**
+ * The rule behind "seen today", as a pure function so the nurse working
+ * screen and the Nurse V3 dashboard cannot drift apart: a consultation
+ * counts when it has ended, started on today's clinic-calendar day, and
+ * was not excluded from prediction (a marked staff break, a skip or a
+ * no-show all set exclude_from_prediction).
+ */
+export function summariseSeenToday(rows: ConsultationTimes[], today: string = todayInClinicTimezone()): SeenTodayStats {
+  const counted = rows.filter((c) => c.ended_at && !c.exclude_from_prediction && localDate(c.started_at) === today)
+
+  if (counted.length === 0) return { count: 0, avgMinutes: null }
+
+  const totalMinutes = counted.reduce(
+    (sum, c) => sum + (new Date(c.ended_at!).getTime() - new Date(c.started_at).getTime()) / 60000,
+    0
+  )
+  return { count: counted.length, avgMinutes: Math.round(totalMinutes / counted.length) }
+}
+
 /**
  * This nurse's own pace today — distinct from service_average (the
  * service-wide figure every nurse and the patient screen share).
@@ -36,14 +61,5 @@ export async function getSeenTodayStats(
     .not('ended_at', 'is', null)
     .gte('started_at', isoNDaysAgo(1))
 
-  const today = todayInClinicTimezone()
-  const rows = (data ?? []).filter((c) => !c.exclude_from_prediction && localDate(c.started_at) === today)
-
-  if (rows.length === 0) return { count: 0, avgMinutes: null }
-
-  const totalMinutes = rows.reduce(
-    (sum, c) => sum + (new Date(c.ended_at!).getTime() - new Date(c.started_at).getTime()) / 60000,
-    0
-  )
-  return { count: rows.length, avgMinutes: Math.round(totalMinutes / rows.length) }
+  return summariseSeenToday(data ?? [])
 }

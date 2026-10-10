@@ -13,7 +13,7 @@ interface ReceptionSidebarProps {
 }
 
 /** `SmartClinic/Brand` lockup (Figma node 10:3) — four offset rounded squares in a pinwheel, two accent tones. */
-function BrandMark() {
+export function BrandMark() {
   return (
     <div aria-hidden className="relative size-8 shrink-0">
       <span className="absolute left-[28%] top-0 size-[43%] rounded-[3px] bg-primary-500" />

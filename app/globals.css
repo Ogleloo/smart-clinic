@@ -89,11 +89,13 @@
 
 /*
  * Reception V3 design system (Figma page "04 · Reception V3", frame
- * 111:2 variable defs). Same scoping mechanism as .theme-patient: redefine
+ * 111:2 variable defs). Nurse V3 (page "05 · Nurse V3") uses the identical palette,
+ * so .theme-nurse shares this block rather than copying it. Same scoping mechanism as .theme-patient: redefine
  * the tokens every ui/* component already reads, so reception picks up its
  * own palette while nurse/admin screens keep the V2 palette untouched.
  */
-.theme-reception {
+.theme-reception,
+.theme-nurse {
   --color-primary-50:  #E6FBF7;
   --color-primary-100: #E6FBF7;
   --color-primary-500: #08B9A8;
