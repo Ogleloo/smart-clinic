@@ -37,7 +37,7 @@ async function appShell(): Promise<{ cssLinks: string[]; htmlClass: string }> {
 }
 
 export interface HarnessConfig {
-  mode: 'queue' | 'classic'
+  mode: 'queue' | 'classic' | 'header'
   props: Record<string, unknown>
   defaults?: Record<string, HarnessResponse>
   online?: boolean

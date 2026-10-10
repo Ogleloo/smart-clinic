@@ -1,11 +1,12 @@
 import { test, expect, type Page } from '@playwright/test'
+import { readFileSync, readdirSync } from 'node:fs'
+import path from 'node:path'
 import { ACCOUNTS, loginAs as rawLoginAs } from './helpers'
 import {
   buildMyQueueRows,
   countMyQueueTabs,
   filterMyQueueRows,
   isCompletedConsultation,
-  waitingSkipRefusal,
   type MyQueueRow,
 } from '../lib/nurseQueue'
 import { NURSE_NAV_ITEMS } from '../components/nurse/v3/navItems'
@@ -127,12 +128,21 @@ test.describe('pure: rows, order and statuses', () => {
   })
 })
 
-test.describe('pure: skip is only for waiting patients (server-side rule)', () => {
-  test('only a waiting entry may be skipped from a waiting row; an in-progress one is refused with a reason', () => {
-    expect(waitingSkipRefusal('waiting')).toBeNull()
-    expect(waitingSkipRefusal('in_progress')).toMatch(/already in consultation/)
-    for (const s of ['skipped', 'completed', 'no_show', 'cancelled']) expect(waitingSkipRefusal(s)).toBe('That patient is no longer waiting.')
-    expect(waitingSkipRefusal(null)).toBe('Queue entry not found')
+test.describe('pure: no skip route from the Nurse V3 UI', () => {
+  test('no V3 nurse file imports or calls a skip action, and the V3 skip Server Action no longer exists', () => {
+    const roots = ['components/nurse/v3', 'app/nurse/(v3)', 'lib/hooks', 'lib/nurseQueue.ts']
+    const files: string[] = []
+    const walk = (p: string) => {
+      if (p.endsWith('.ts') || p.endsWith('.tsx')) return void files.push(p)
+      for (const e of readdirSync(p, { withFileTypes: true })) walk(path.join(p, e.name))
+    }
+    roots.forEach(walk)
+    expect(files.length).toBeGreaterThan(5)
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8')
+      expect(src, f).not.toMatch(/\bskipPatient\b|\bskipWaitingPatient\b|skip_patient'|SkipButton|SkipPatientModal|skipQueueEntry/)
+    }
+    expect(readFileSync('app/actions/nurse.ts', 'utf8')).not.toMatch(/export async function skipWaitingPatient/)
   })
 })
 
@@ -209,7 +219,13 @@ async function open(page: Page, cfg: Partial<HarnessConfig> = {}) {
   const full: HarnessConfig = { mode: 'queue', props: queueProps() as never, defaults: readDefaults(), ...cfg }
   const res = await openHarness(page, full)
   escapes = res.escapes
-  await expect(full.mode === 'classic' ? page.getByText('CURRENT PATIENT', { exact: true }) : page.getByRole('heading', { level: 1, name: 'My Queue' })).toBeVisible()
+  const ready =
+    full.mode === 'classic'
+      ? page.getByText('CURRENT PATIENT', { exact: true })
+      : full.mode === 'header'
+        ? page.getByText(/^(On duty · .+|Off duty)$/)
+        : page.getByRole('heading', { level: 1, name: 'My Queue' })
+  await expect(ready).toBeVisible()
 }
 
 const panel = (page: Page) => page.locator('#my-queue-panel')
@@ -266,7 +282,8 @@ test.describe('harness: rendering and states', () => {
   test('skip and emergency only on waiting rows; current patient links to its panel; completed rows have no actions', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1024 })
     await open(page)
-    await expect(panel(page).getByRole('button', { name: /^Skip / })).toHaveCount(4)
+    // Skip is shown on waiting rows only, and only as an unavailable control (see the fail-closed tests).
+    await expect(panel(page).getByRole('button', { name: /^Skip .* — unavailable$/ })).toHaveCount(4)
     await expect(tableRows(page).nth(0).getByRole('button')).toHaveCount(0)
     await expect(tableRows(page).nth(0).getByRole('link', { name: 'Go to current patient' })).toHaveAttribute('href', '#current-patient')
     await expect(tableRows(page).nth(5).getByRole('button')).toHaveCount(0)
@@ -545,78 +562,43 @@ test.describe('harness: Call next, retry, long consultation, Undo', () => {
   })
 })
 
-test.describe('harness: Skip Patient modal', () => {
+test.describe('harness: Skip is disabled fail-closed on Nurse V3', () => {
   test.afterEach(() => expect(escapes, 'a request escaped the harness').toEqual([]))
 
-  test('shows the right patient and the corrected wording; no Reason or Notes fields', async ({ page }) => {
+  test('every waiting-row Skip is aria-disabled, explained, and does nothing when clicked or activated by keyboard', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1024 })
     await open(page)
-    await page.getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Skip Patient' })
-    await expect(dialog).toBeVisible()
-    await expect(dialog).toContainText('GC-102')
-    await expect(dialog).toContainText('Harness First')
-    await expect(dialog).toContainText('General Consultation')
-    await expect(dialog).toContainText(
-      'The patient will be marked as skipped and removed from the active waiting queue. Their history will be retained.'
-    )
-    await expect(dialog).not.toContainText('remain in the queue')
-    await expect(dialog.locator('select, textarea, input:not([type=hidden])')).toHaveCount(0)
+    const note = page.locator('#my-queue-skip-unavailable')
+    await expect(note).toContainText('Skip is temporarily unavailable on My Queue')
+    await expect(note).toContainText('ask reception to skip them')
+    const skip = panel(page).getByRole('button', { name: 'Skip GC-102, Harness First — unavailable' })
+    await expect(skip).toHaveAttribute('aria-disabled', 'true')
+    await expect(skip).toHaveAttribute('aria-describedby', 'my-queue-skip-unavailable')
+    await expect(skip).toHaveAccessibleDescription(/Skip is temporarily unavailable on My Queue/)
+    await skip.click({ force: true }) // Playwright otherwise waits for an aria-disabled control to become enabled
+    await skip.focus()
+    await expect(skip).toBeFocused()
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Space')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const names = (await calls(page)).map((c) => c.name)
+    expect(names.filter((n) => /skip/i.test(n))).toEqual([])
   })
 
-  test('Cancel, Escape and the close button dismiss without skipping; focus returns to the row button', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1024 })
+  test('the same on the stacked mobile cards', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
     await open(page)
-    const trigger = page.getByRole('button', { name: 'Skip GC-102, Harness First' })
-    await trigger.click()
-    await page.getByRole('button', { name: 'Cancel' }).click()
+    const skip = panel(page).getByRole('button', { name: 'Skip GC-102, Harness First — unavailable' })
+    await expect(skip).toHaveAttribute('aria-disabled', 'true')
+    await skip.click({ force: true }) // Playwright otherwise waits for an aria-disabled control to become enabled
     await expect(page.getByRole('dialog')).toHaveCount(0)
-    await expect(trigger).toBeFocused()
-    await trigger.click()
-    await page.keyboard.press('Escape')
-    await expect(page.getByRole('dialog')).toHaveCount(0)
-    await trigger.click()
-    await page.getByRole('button', { name: 'Close dialog' }).click()
-    await expect(page.getByRole('dialog')).toHaveCount(0)
-    expect(await calls(page, 'skipWaitingPatient')).toHaveLength(0)
+    expect((await calls(page)).filter((c) => /skip/i.test(c.name))).toEqual([])
   })
 
-  test('focus is kept inside the dialog', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1024 })
-    await open(page)
-    await page.getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    for (let i = 0; i < 6; i++) {
-      await page.keyboard.press('Tab')
-      expect(await page.evaluate(() => !!document.activeElement?.closest('[role=dialog]'))).toBe(true)
-    }
-  })
-
-  test('confirm: one request for same-tick clicks, loading state, success closes, toast, queue re-read', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1024 })
-    await open(page)
-    await queueResponse(page, 'skipWaitingPatient', { hold: true, value: { skippedToken: 'GC-102' } })
-    const after = snapshot({ queue: QUEUE.filter((r) => r.queue_entry_id !== ID.first) })
-    await setDefault(page, 'rpc:get_service_queue', { value: { data: after.queue, error: null } })
-    await page.getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    await tripleClick(page, '[role=dialog] button[type=submit]')
-    await expect(page.getByRole('dialog').getByRole('button', { name: 'Skipping…' })).toBeDisabled()
-    expect(await calls(page, 'skipWaitingPatient')).toHaveLength(1)
-    expect((await calls(page, 'skipWaitingPatient'))[0]!.args[0]).toEqual({ queue_entry_id: ID.first })
-    await release(page, 'skipWaitingPatient')
-    await expect(page.getByRole('dialog')).toHaveCount(0)
-    await expect(page.getByRole('status').filter({ hasText: 'Queue updated' })).toContainText('GC-102 was skipped')
-    await expect(tableRows(page).filter({ hasText: 'GC-102' })).toHaveCount(0)
-    await expect(tab(page, /^Waiting \(3\)$/)).toBeVisible()
-  })
-
-  test('failure: the error is shown in the dialog, which stays open and can be retried', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1024 })
-    await open(page)
-    await queueResponse(page, 'skipWaitingPatient', { value: { error: 'This patient is already in consultation, so they can’t be skipped from the waiting list.' } })
-    await page.getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    await page.getByRole('dialog').getByRole('button', { name: 'Skip Patient' }).click()
-    await expect(page.getByRole('dialog').getByRole('alert')).toContainText('already in consultation')
-    await expect(page.getByRole('dialog').getByRole('button', { name: 'Skip Patient' })).toBeEnabled()
+  test('no explanation note when there is nothing to skip', async ({ page }) => {
+    const empty = snapshot({ queue: [], completed: [], estimates: {} })
+    await open(page, { props: queueProps({ initialSnapshot: empty, initialEntry: null }) as never, defaults: readDefaults(empty, null) })
+    await expect(page.locator('#my-queue-skip-unavailable')).toHaveCount(0)
   })
 
   test('emergency control on a waiting row is the existing action, with its confirmation', async ({ page }) => {
@@ -660,17 +642,17 @@ test.describe('harness: realtime, reconciliation and stale reads', () => {
     await page.setViewportSize({ width: 1440, height: 1024 })
     await open(page)
     await page.waitForTimeout(200)
-    const stale = QUEUE // still contains GC-102
-    const fresh = QUEUE.filter((r) => r.queue_entry_id !== ID.first)
+    const stale = QUEUE // the queue before the call: no GC-108
+    const fresh = [...QUEUE.filter((r) => r.queue_entry_id !== ID.emergency), { ...QUEUE[2]!, queue_entry_id: ID.newCheckIn, token: 'GC-108', patient_name: 'Harness Newcomer' }]
     await queueResponse(page, 'rpc:get_service_queue', { hold: true, value: { data: stale, error: null } }, { value: { data: fresh, error: null } })
     await fireQueueChange(page) // read #1 starts and hangs
-    await queueResponse(page, 'skipWaitingPatient', { value: { skippedToken: 'GC-102' } })
-    await page.getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    await page.getByRole('dialog').getByRole('button', { name: 'Skip Patient' }).click()
-    await expect(tableRows(page).filter({ hasText: 'GC-102' })).toHaveCount(0) // read #2 (after the action) applied
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await page.locator('#current-patient').getByRole('button', { name: 'Next patient' }).click()
+    await expect(tableRows(page).filter({ hasText: 'GC-108' })).toHaveCount(1) // read #2 (after the action) applied
     await release(page, 'rpc:get_service_queue') // the stale read #1 now resolves
     await page.waitForTimeout(400)
-    await expect(tableRows(page).filter({ hasText: 'GC-102' })).toHaveCount(0)
+    await expect(tableRows(page).filter({ hasText: 'GC-108' })).toHaveCount(1)
   })
 
   test('another tab advanced the queue: on focus this tab re-reads and shows the new current patient', async ({ page }) => {
@@ -742,6 +724,146 @@ test.describe('harness: the working screen still uses the same state machine', (
   })
 })
 
+test.describe('harness: classic CurrentPatientPanel regressions (shared hook)', () => {
+  test.afterEach(() => expect(escapes, 'a request escaped the harness').toEqual([]))
+  const classic = (over: Record<string, unknown> = {}): Partial<HarnessConfig> => ({
+    mode: 'classic',
+    props: { initialEntry: CURRENT, serviceId: SERVICE_ID, undoWindowSeconds: 60, serviceAverageMinutes: 11, initialNextToken: 'GC-107', ...over },
+  })
+
+  test('same-tick clicks send one request', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', { hold: true, value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => x.textContent === 'Next patient')!
+      b.click()
+      b.click()
+      b.click()
+    })
+    await page.waitForTimeout(200)
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+    await release(page, 'nextPatient')
+    await expect(page.getByText('Harness Emergency')).toBeVisible()
+  })
+
+  test('a thrown request is retryable with the same id', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', { throws: 'Failed to fetch' }, { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await expect(page.getByRole('alert')).toContainText('Couldn’t reach the server')
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await expect(page.getByText('Harness Emergency')).toBeVisible()
+    const ids = (await calls(page, 'nextPatient')).map((c) => c.args[0])
+    expect(ids).toHaveLength(2)
+    expect(ids[1]).toBe(ids[0])
+  })
+
+  test('Undo expiry: countdown, "Undo window has closed", no undo sent', async ({ page }) => {
+    await open(page, classic({ undoWindowSeconds: 2 }))
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await expect(page.getByRole('button', { name: /^Undo \([12]s\)$/ })).toBeVisible()
+    await expect(page.getByText('Undo window has closed')).toBeVisible({ timeout: 6000 })
+    await expect(page.getByRole('button', { name: /^Undo/ })).toHaveCount(0)
+    expect(await calls(page, 'undoAction')).toHaveLength(0)
+  })
+
+  test('Undo that never reached the server stays available and retries the same id', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } }, { value: { entry: CURRENT } })
+    await queueResponse(page, 'undoAction', { throws: 'Failed to fetch' }, { value: { data: { status: 'undone', restored_token: 'GC-101' } } })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await page.getByRole('button', { name: /^Undo/ }).click()
+    await expect(page.getByRole('alert')).toContainText('Couldn’t reach the server')
+    await page.getByRole('button', { name: /^Undo/ }).click()
+    await expect(page.getByText('Harness Current')).toBeVisible()
+    const ids = (await calls(page, 'undoAction')).map((c) => c.args[0])
+    expect(ids).toEqual([ids[0], ids[0]])
+    expect(ids[0]).toBe((await calls(page, 'nextPatient'))[0]!.args[0])
+  })
+
+  test('focus reconciliation shows what another tab did; a failed read keeps the patient', async ({ page }) => {
+    await open(page, classic())
+    await setDefault(page, 'getNurseCurrentState', { value: { entry: null, error: 'network' } })
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await page.waitForTimeout(300)
+    await expect(page.getByText('Harness Current')).toBeVisible()
+    await setDefault(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(page.getByText('Harness Emergency')).toBeVisible()
+    expect(await calls(page, 'nextPatient')).toHaveLength(0)
+  })
+
+  test('queue empty: "No patients waiting", Undo offered only because a consultation was ended', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', {
+      value: { data: { status: 'queue_empty', ended_consultation_id: CURRENT.consultationId, ended_token: 'GC-101', ended_minutes: 12, ended_counted: true, ended_exclusion_reason: null } },
+    })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await expect(page.getByText('Consultation completed. No patients waiting.')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Undo/ })).toBeVisible()
+  })
+
+  test('queue empty with nothing open before: no Undo', async ({ page }) => {
+    await open(page, classic({ initialEntry: null, initialNextToken: null }))
+    await queueResponse(page, 'nextPatient', {
+      value: { data: { status: 'queue_empty', ended_consultation_id: null, ended_token: null, ended_minutes: null, ended_counted: null, ended_exclusion_reason: null } },
+    })
+    await page.getByRole('button', { name: 'Call next patient' }).click()
+    await expect(page.getByText('Consultation completed. No patients waiting.')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Undo/ })).toHaveCount(0)
+  })
+})
+
+test.describe('harness: End session report survives going off duty', () => {
+  test.afterEach(() => expect(escapes, 'a request escaped the harness').toEqual([]))
+  const ended = { value: { data: { status: 'shift_ended', closed_consultation: true, closed_token: 'GC-101', closed_minutes: 30.2, excluded: false } } }
+  const header = (onDuty: boolean) => ({
+    services: [{ id: SERVICE_ID, name: 'General Consultation' }],
+    isOnDuty: onDuty,
+    currentServiceId: onDuty ? SERVICE_ID : null,
+    currentServiceName: onDuty ? 'General Consultation' : null,
+  })
+  /** What the server re-render after router.refresh() does: the same mounted tree receives new props. */
+  const rerender = (page: Page, props: unknown) =>
+    page.evaluate((p) => (window as unknown as { __harnessSetProps: (x: unknown) => void }).__harnessSetProps(p), props)
+
+  test('classic /nurse header: after end_shift and the page re-render, "Session ended…" is still shown', async ({ page }) => {
+    await open(page, { mode: 'header', props: header(true), defaults: { checkEndSessionImpact: { value: { impact: null } }, endShift: ended } })
+    await page.getByRole('button', { name: 'End session' }).click()
+    await expect.poll(async () => (await calls(page, 'router.refresh')).length).toBe(1)
+    await rerender(page, header(false))
+    await expect(page.getByText('Off duty', { exact: true })).toBeVisible()
+    await expect(page.getByRole('status')).toHaveText('Session ended. GC-101 closed at 30 min.')
+    expect(await calls(page, 'endShift')).toHaveLength(1)
+  })
+
+  test('the report clears when a new session starts', async ({ page }) => {
+    await open(page, { mode: 'header', props: header(true), defaults: { checkEndSessionImpact: { value: { impact: null } }, endShift: ended } })
+    await page.getByRole('button', { name: 'End session' }).click()
+    await expect.poll(async () => (await calls(page, 'router.refresh')).length).toBe(1)
+    await rerender(page, header(false))
+    await expect(page.getByText(/^Session ended/)).toBeVisible()
+    await rerender(page, header(true))
+    await expect(page.getByText(/^Session ended/)).toHaveCount(0)
+  })
+
+  test('Nurse V3 My Queue: the report survives too, while the queue body resets to off duty', async ({ page }) => {
+    await open(page, { defaults: { ...readDefaults(), endShift: ended } })
+    await page.getByRole('button', { name: 'End session' }).click()
+    await expect.poll(async () => (await calls(page, 'router.refresh')).length).toBe(1)
+    await rerender(page, queueProps({ nurse: { ...queueProps().nurse, isOnDuty: false, serviceId: null, serviceName: null }, initialSnapshot: snapshot({ queue: [], estimates: {} }), initialEntry: null }))
+    await expect(page.getByText('Off duty', { exact: true })).toBeVisible()
+    await expect(page.getByText('Session ended. GC-101 closed at 30 min.')).toBeVisible()
+    await expect(page.locator('#current-patient')).toHaveCount(0)
+    await expect(tab(page, /^Waiting \(0\)$/)).toBeVisible()
+  })
+})
+
 test.describe('harness: fail-closed interception', () => {
   test('a request to Supabase or a Server Action POST from the page is aborted and recorded', async ({ page }) => {
     await open(page)
@@ -799,7 +921,7 @@ test.describe('harness: responsive layout and accessibility', () => {
       } else {
         await expect(panel(page).locator('table')).toBeHidden()
         await expect(panel(page).locator('ul > li')).toHaveCount(7)
-        const skip = panel(page).getByRole('button', { name: 'Skip GC-102, Harness First' })
+        const skip = panel(page).getByRole('button', { name: 'Skip GC-102, Harness First — unavailable' })
         await expect(skip).toBeVisible()
         const b = (await skip.boundingBox())!
         expect(b.height).toBeGreaterThanOrEqual(44)
@@ -827,21 +949,6 @@ test.describe('harness: responsive layout and accessibility', () => {
     const filters = (await page.getByRole('button', { name: 'Filters' }).boundingBox())!
     expect(Math.round(filters.height)).toBe(48)
     expect(Math.round(filters.x + filters.width)).toBe(1400)
-  })
-
-  test('390px: the Skip modal fits the screen and its buttons are reachable', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 700 })
-    await open(page)
-    await panel(page).getByRole('button', { name: 'Skip GC-102, Harness First' }).click()
-    const dialog = page.getByRole('dialog')
-    const box = (await dialog.boundingBox())!
-    expect(box.x).toBeGreaterThanOrEqual(0)
-    expect(box.x + box.width).toBeLessThanOrEqual(390)
-    for (const name of ['Cancel', 'Skip Patient']) {
-      const btn = dialog.getByRole('button', { name })
-      await btn.scrollIntoViewIfNeeded()
-      await expect(btn).toBeInViewport()
-    }
   })
 
   test('structure: one h1, one main, labelled regions, tablist/tabpanel, captioned table with 8 column headers, labelled search', async ({ page }) => {

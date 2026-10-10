@@ -29,7 +29,7 @@ export interface Harness {
 declare global {
   interface Window {
     __harness: Harness
-    __harnessConfig: { mode: 'queue' | 'classic'; props: Record<string, unknown>; defaults?: Record<string, HarnessResponse>; online?: boolean }
+    __harnessConfig: { mode: 'queue' | 'classic' | 'header'; props: Record<string, unknown>; defaults?: Record<string, HarnessResponse>; online?: boolean }
   }
 }
 

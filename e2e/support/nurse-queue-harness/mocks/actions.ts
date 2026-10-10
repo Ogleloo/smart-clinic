@@ -12,7 +12,6 @@ import type {
   NurseCurrentEntry,
   SkipState,
   UndoResult,
-  WaitingSkipState,
 } from '../../../../app/actions/nurse'
 import { respond } from './state'
 
@@ -40,9 +39,6 @@ export async function setDuty(_prev: DutyState, fd: FormData) {
 }
 export async function skipPatient(_prev: SkipState, fd: FormData) {
   return (await respond('skipPatient', [form(fd)])) as SkipState
-}
-export async function skipWaitingPatient(_prev: WaitingSkipState, fd: FormData) {
-  return (await respond('skipWaitingPatient', [form(fd)])) as WaitingSkipState
 }
 export async function setEmergencyPriority(_prev: EmergencyState, fd: FormData) {
   return (await respond('setEmergencyPriority', [form(fd)])) as EmergencyState
