@@ -1,19 +1,40 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { ACCOUNTS, loginAs } from './helpers'
+
+const NONEXISTENT_ID = 'deadbeef-0000-4000-8000-000000000000'
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+/** Server Actions are invoked by a browser POST carrying a `next-action` header; their internal Supabase RPCs are invisible to page.route. */
+function trackServerActions(page: Page) {
+  const posts: string[] = []
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && req.headers()['next-action']) posts.push(req.url())
+  })
+  return posts
+}
+
+/** Replaces the real queue_entry_id in the Server Action body with a nonexistent UUID, so the real RPC rejects it and nothing is mutated. */
+async function forgeSkipId(page: Page) {
+  const posts: string[] = []
+  await page.route('**/reception/queue', async (route) => {
+    const req = route.request()
+    if (req.method() !== 'POST' || !req.headers()['next-action']) return route.continue()
+    const body = req.postData() ?? ''
+    expect(body).toMatch(UUID_RE)
+    posts.push(req.url())
+    await route.continue({ postData: body.replace(UUID_RE, NONEXISTENT_ID) })
+  })
+  return posts
+}
 
 /**
  * Queue Management (Phase 3 — Figma frames 114:736 / 114:1204 / 114:1353).
  *
- * Every assertion here reads real, live data from the shared dev Supabase
- * project (get_service_queue, services) — no resetDemoState(), no writes,
- * nothing mutated. That's deliberate: skip_patient() has a known clinic-
- * isolation gap (see docs/SESSION_HANDOFF.md and SkipPatientModal.tsx), so
- * the Confirm action is disabled in the UI and this suite never attempts to
- * call it — there is no live-write path to test here at all. Structural
- * behaviour (ordering, filtering, the waiting-vs-in-consultation action
- * split, the modal, responsiveness) is still fully exercised against
- * whatever the real queue happens to contain right now, rather than against
- * a fixed fixture.
+ * Reads real, live data from the shared Supabase project and never performs
+ * a successful skip. The Skip write path is exercised only with a forged
+ * (nonexistent) queue entry id, which the database rejects without changing
+ * anything. Specs needing a waiting patient skip themselves when today's
+ * queue has none.
  */
 test.describe('Queue Management', () => {
   test.beforeEach(async ({ page }) => {
@@ -74,24 +95,18 @@ test.describe('Queue Management', () => {
     }
   })
 
-  test('Skip opens the confirmation modal with real patient details; Confirm is disabled and never calls skip_patient', async ({
+  test('Skip opens the modal with real patient details and an enabled Confirm; Cancel sends no Server Action', async ({
     page,
   }) => {
-    let skipPatientCalled = false
-    await page.route(
-      (url) => url.pathname.endsWith('/rest/v1/rpc/skip_patient'),
-      (route) => {
-        skipPatientCalled = true
-        route.abort()
-      }
-    )
-
+    const actionPosts = trackServerActions(page)
     const skipButton = page.getByRole('button', { name: 'Skip' }).first()
-    test.skip((await skipButton.count()) === 0, 'no waiting patient currently available to open the modal against')
+    test.skip((await skipButton.count()) === 0, 'no waiting patient in today\'s live queue')
 
     const row = page.locator('table tbody tr').filter({ has: page.getByRole('button', { name: 'Skip' }) }).first()
     const expectedToken = (await row.locator('td:nth-child(2)').textContent())?.trim()
     const expectedPatient = (await row.locator('td:nth-child(3)').textContent())?.trim()
+    const expectedService = (await row.locator('td:nth-child(4)').textContent())?.trim()
+    const rowsBefore = await page.locator('table tbody tr').count()
 
     await skipButton.click()
 
@@ -99,20 +114,20 @@ test.describe('Queue Management', () => {
     await expect(dialog).toBeVisible()
     if (expectedToken) await expect(dialog).toContainText(expectedToken)
     if (expectedPatient) await expect(dialog).toContainText(expectedPatient)
+    if (expectedService) await expect(dialog).toContainText(expectedService)
+    await expect(dialog.getByText(/temporarily unavailable/i)).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: /Skip patient/i })).toBeEnabled()
 
-    const confirmButton = dialog.getByRole('button', { name: /Skip patient/i })
-    await expect(confirmButton).toBeDisabled()
-    await expect(dialog.getByText(/temporarily unavailable/i)).toBeVisible()
-
-    // Cancel must close without ever reaching the RPC.
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).not.toBeVisible()
-    expect(skipPatientCalled).toBe(false)
+    expect(actionPosts.length).toBe(0)
+    expect(await page.locator('table tbody tr').count()).toBe(rowsBefore)
   })
 
-  test('Escape closes the Skip modal without changing the queue', async ({ page }) => {
+  test('Escape closes the Skip modal with no Server Action and no queue change', async ({ page }) => {
+    const actionPosts = trackServerActions(page)
     const skipButton = page.getByRole('button', { name: 'Skip' }).first()
-    test.skip((await skipButton.count()) === 0, 'no waiting patient currently available to open the modal against')
+    test.skip((await skipButton.count()) === 0, 'no waiting patient in today\'s live queue')
 
     const rowsBefore = await page.locator('table tbody tr').count()
     await skipButton.click()
@@ -120,7 +135,41 @@ test.describe('Queue Management', () => {
 
     await page.keyboard.press('Escape')
     await expect(page.getByRole('dialog')).not.toBeVisible()
+    expect(actionPosts.length).toBe(0)
     expect(await page.locator('table tbody tr').count()).toBe(rowsBefore)
+  })
+
+  test('forged queue entry id: the database rejects it, the modal stays open with the error, nothing changes', async ({
+    page,
+  }) => {
+    const skipButton = page.getByRole('button', { name: 'Skip' }).first()
+    test.skip((await skipButton.count()) === 0, 'no waiting patient in today\'s live queue')
+
+    const actionPosts = await forgeSkipId(page)
+    const rowsBefore = await page.locator('table tbody tr').count()
+    await skipButton.click()
+    const dialog = page.getByRole('dialog', { name: 'Skip patient' })
+    await dialog.getByRole('button', { name: /Skip patient/i }).click()
+
+    await expect(dialog.getByRole('alert')).toContainText(/Queue entry not found/i)
+    await expect(dialog).toBeVisible()
+    expect(actionPosts.length).toBe(1)
+    expect(await page.locator('table tbody tr').count()).toBe(rowsBefore)
+    await expect(page.getByRole('button', { name: 'Skip' }).first()).toBeVisible()
+  })
+
+  test('double submit sends exactly one Server Action (forged id, so nothing is mutated)', async ({ page }) => {
+    const skipButton = page.getByRole('button', { name: 'Skip' }).first()
+    test.skip((await skipButton.count()) === 0, 'no waiting patient in today\'s live queue')
+
+    const actionPosts = await forgeSkipId(page)
+    await skipButton.click()
+    const dialog = page.getByRole('dialog', { name: 'Skip patient' })
+    const confirm = dialog.getByRole('button', { name: /Skip patient|Please wait/i })
+    await Promise.all([confirm.click(), confirm.click({ force: true, noWaitAfter: true }).catch(() => {})])
+
+    await expect(dialog.getByRole('alert')).toContainText(/Queue entry not found/i)
+    expect(actionPosts.length).toBe(1)
   })
 
   test('responsive at 390px: stacked queue cards, no page-level horizontal scroll', async ({ page }) => {

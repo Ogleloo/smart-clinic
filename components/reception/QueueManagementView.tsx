@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { OfflineBanner } from '@/components/ui/OfflineBanner'
 import { QueueToken } from '@/components/ui/QueueToken'
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { queueEntryStatusToChip } from '@/lib/queueEntryStatus'
 import { ServiceQueueSync, type QueueRow } from './ServiceQueueSync'
 import { SkipPatientModal } from './SkipPatientModal'
+import { QueueUpdatedToast } from './QueueUpdatedToast'
 
 interface Service {
   id: string
@@ -32,8 +33,8 @@ const ALL = 'all'
  *
  * No "Next" action anywhere here — call_next_patient() is nurse-only and
  * this screen never exposes it, forged or otherwise (Phase 3 brief). The
- * only receptionist action is Skip, and SkipPatientModal explains why even
- * that one is currently disabled.
+ * only receptionist action is Skip; skip_patient() enforces clinic isolation
+ * and waiting-only for receptionists in the database.
  */
 export function QueueManagementView({ services, initialQueues }: QueueManagementViewProps) {
   const [queueByService, setQueueByService] = useState<Record<string, QueueRow[]>>({})
@@ -41,6 +42,26 @@ export function QueueManagementView({ services, initialQueues }: QueueManagement
   const [onlineByService, setOnlineByService] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<string>(ALL)
   const [skipTarget, setSkipTarget] = useState<QueueRow | null>(null)
+  const [refreshNonce, setRefreshNonce] = useState<Record<string, number>>({})
+  const [toastToken, setToastToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!toastToken) return
+    const t = setTimeout(() => setToastToken(null), 5000)
+    return () => clearTimeout(t)
+  }, [toastToken])
+
+  const closeSkip = useCallback(() => setSkipTarget(null), [])
+
+  const handleSkipped = useCallback(
+    (token: string) => {
+      const serviceId = skipTarget?.serviceId
+      setSkipTarget(null)
+      setToastToken(token)
+      if (serviceId) setRefreshNonce((prev) => ({ ...prev, [serviceId]: (prev[serviceId] ?? 0) + 1 }))
+    },
+    [skipTarget]
+  )
 
   const onUpdate = useCallback((serviceId: string, rows: QueueRow[], error: string | null) => {
     setErrorByService((prev) => ({ ...prev, [serviceId]: error }))
@@ -69,12 +90,21 @@ export function QueueManagementView({ services, initialQueues }: QueueManagement
 
   return (
     <div className="flex flex-col gap-5">
+      {toastToken && (
+        <div className="pointer-events-none fixed inset-x-4 top-4 z-40 flex justify-end md:inset-x-auto md:right-8 md:top-6">
+          <div className="pointer-events-auto w-full max-w-[380px]">
+            <QueueUpdatedToast message={`${toastToken} skipped. The queue has been updated.`} />
+          </div>
+        </div>
+      )}
+
       {services.map((s) => (
         <ServiceQueueSync
           key={s.id}
           serviceId={s.id}
           serviceName={s.name}
           initialQueue={initialQueues[s.id] ?? []}
+          refreshNonce={refreshNonce[s.id] ?? 0}
           onUpdate={onUpdate}
           onOnlineChange={onOnlineChange}
         />
@@ -214,7 +244,7 @@ export function QueueManagementView({ services, initialQueues }: QueueManagement
         )}
       </section>
 
-      {skipTarget && <SkipPatientModal entry={skipTarget} onClose={() => setSkipTarget(null)} />}
+      {skipTarget && <SkipPatientModal entry={skipTarget} onClose={closeSkip} onSkipped={handleSkipped} />}
     </div>
   )
 }

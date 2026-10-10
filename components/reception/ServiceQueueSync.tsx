@@ -22,6 +22,8 @@ interface ServiceQueueSyncProps {
   serviceId: string
   serviceName: string
   initialQueue: Omit<QueueRow, 'serviceId' | 'serviceName'>[]
+  /** Bumped by the parent to force an immediate re-fetch (e.g. after a skip). */
+  refreshNonce?: number
   onUpdate: (serviceId: string, rows: QueueRow[], error: string | null) => void
   onOnlineChange: (serviceId: string, online: boolean) => void
 }
@@ -37,7 +39,7 @@ interface ServiceQueueSyncProps {
  * rows are NOT cleared to empty — a query failure must not read as "nobody
  * is waiting" (Phase 3 requirement).
  */
-export function ServiceQueueSync({ serviceId, serviceName, initialQueue, onUpdate, onOnlineChange }: ServiceQueueSyncProps) {
+export function ServiceQueueSync({ serviceId, serviceName, initialQueue, refreshNonce = 0, onUpdate, onOnlineChange }: ServiceQueueSyncProps) {
   const [supabase] = useState(() => createClient())
 
   const refresh = useCallback(async () => {
@@ -64,6 +66,12 @@ export function ServiceQueueSync({ serviceId, serviceName, initialQueue, onUpdat
     // Seed once from server-rendered data; `refresh` (via useQueueBroadcast) takes over after the first realtime subscribe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (refreshNonce > 0) void refresh()
+    // Only a nonce bump should trigger this; `refresh` identity changes must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshNonce])
 
   useEffect(() => {
     onOnlineChange(serviceId, online)

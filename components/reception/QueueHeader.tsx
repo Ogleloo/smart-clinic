@@ -14,10 +14,8 @@ interface QueueHeaderProps {
  *
  * The Figma subtitle references "Call next patient" — that's nurse-only
  * (call_next_patient() is hard-gated to role='nurse'), so the copy here
- * describes only what a receptionist can actually do on this screen:
- * view the live queue and track status. Skip isn't named either, since
- * it's currently blocked pending a security fix (see SkipPatientModal) —
- * advertising an action that doesn't work yet would be worse than vague.
+ * describes only what a receptionist can do on this screen: view the live
+ * queue and skip a waiting patient.
  */
 export function QueueHeader({ fullName, clinicName }: QueueHeaderProps) {
   const firstInitials = initials(fullName)
@@ -27,7 +25,7 @@ export function QueueHeader({ fullName, clinicName }: QueueHeaderProps) {
       <div className="flex flex-col gap-2 md:w-[480px] md:shrink-0 md:pt-1">
         <h1 className={TYPE.pageTitle}>Queue management</h1>
         <p className="max-w-[455px] text-base text-muted">
-          View the live queue and track patient status across services.
+          View the live queue, skip a waiting patient who has left, and track service flow.
         </p>
       </div>
 
