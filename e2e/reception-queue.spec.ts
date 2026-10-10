@@ -225,6 +225,22 @@ test.describe('Queue Management', () => {
     expect(overflow).toBe(false)
   })
 
+  // 768 used to overflow: the header's fixed 480px title block left the photo 0px wide and pushed the page sideways.
+  for (const width of [768, 900, 1024, 1280]) {
+    test(`no page-level horizontal scroll at ${width}px, and the header photo keeps a real width`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForTimeout(250)
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+      )
+      expect(overflow).toBe(false)
+
+      const photoWidth = await page.locator('main img').first().evaluate((el) => el.getBoundingClientRect().width)
+      expect(photoWidth).toBeGreaterThan(150)
+    })
+  }
+
   test('desktop at 1440px: the queue table never overflows its card', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1024 })
     await page.waitForTimeout(200)
