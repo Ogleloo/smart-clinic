@@ -12,7 +12,7 @@ import { NURSE_NAV_ITEMS, isNurseActivePath } from './navItems'
  * is always visible on a phone (the sidebar's own Sign Out lives inside the hidden <aside>).
  */
 export function NurseMobileNav() {
-  const pathname = usePathname()
+  const pathname = usePathname() ?? ''
 
   return (
     <nav

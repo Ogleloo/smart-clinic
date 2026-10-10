@@ -13,12 +13,15 @@ interface NurseSidebarProps {
 }
 
 /**
+ * The clinic name is the signed-in nurse's own clinic. When it can't be read the sidebar says "Clinic", never
+ * an example clinic's name.
+ *
  * Desktop (md and up) persistent navigation, 264px — Figma `SmartClinic/NurseSidebar` (node 222:3600). Same
  * geometry and brand lockup as the Reception sidebar. Only routes that exist are linked; Sign Out is a row
  * of its own (the Figma profile chip's chevron implies a menu that doesn't exist).
  */
 export function NurseSidebar({ clinicName, clinicPhone }: NurseSidebarProps) {
-  const pathname = usePathname()
+  const pathname = usePathname() ?? ''
 
   return (
     <aside className="sticky top-0 hidden h-dvh w-66 shrink-0 flex-col justify-between border-r border-border bg-surface px-4 pb-7 pt-9 md:flex">
@@ -27,7 +30,7 @@ export function NurseSidebar({ clinicName, clinicPhone }: NurseSidebarProps) {
           <BrandMark />
           <div className="flex flex-col">
             <span className="font-display text-[22px] font-semibold text-ink">Smart Clinic</span>
-            <span className="text-base text-muted">{clinicName ?? 'Riverside Clinic'}</span>
+            <span className="text-base text-muted">{clinicName ?? 'Clinic'}</span>
           </div>
         </div>
 

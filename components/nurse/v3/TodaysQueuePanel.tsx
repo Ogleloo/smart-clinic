@@ -31,7 +31,12 @@ function WaitCell({ row }: { row: DashboardQueueRow }) {
   if (row.status === 'in_progress') return <span className="text-muted">—</span>
   return (
     <span className="flex flex-col leading-4">
-      <span className="text-ink">{row.elapsedMinutes ?? 0} min elapsed</span>
+      {/* An unknown wait is shown as unknown — never as 0 minutes. */}
+      {row.elapsedMinutes === null ? (
+        <span className="text-muted">Wait time unavailable</span>
+      ) : (
+        <span className="text-ink">{row.elapsedMinutes} min elapsed</span>
+      )}
       {row.estimatedMinutes !== null && <span className="text-muted">~{row.estimatedMinutes} min to go</span>}
     </span>
   )

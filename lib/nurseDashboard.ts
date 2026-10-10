@@ -47,7 +47,15 @@ export interface NurseDashboardData {
   serviceAverageMinutes: number | null
   activity: DashboardActivityEvent[] | null
   /** One message per section whose read failed — the section shows it instead of a made-up zero. */
-  errors: { queue?: string; stats?: string; activity?: string; current?: string }
+  errors: {
+    queue?: string
+    /** The nurse's own consultation figures (Completed Today, personal average). */
+    stats?: string
+    /** The service-wide average only. Independent of `stats`: either can fail without hiding the other. */
+    serviceAverage?: string
+    activity?: string
+    current?: string
+  }
 }
 
 // ---------------------------------------------------------------- pure mapping
@@ -81,7 +89,8 @@ export function buildQueueRows(
       patientName: r.patient_name,
       isEmergency: r.priority > 0,
       status: waiting ? 'waiting' : 'in_progress',
-      elapsedMinutes: waiting ? r.waiting_minutes : null,
+      // `?? null` guards a value the typings call a number but the database could still leave empty: an unknown wait is not zero.
+      elapsedMinutes: waiting ? (r.waiting_minutes ?? null) : null,
       estimatedMinutes: waiting ? (estimates[r.queue_entry_id] ?? null) : null,
     }
   })
@@ -145,7 +154,12 @@ export function buildActivityEvents(
  *
  * A failed profile read throws: without it nothing else can be scoped.
  */
-export async function getNurseDashboardData(supabase: SupabaseClient<Database>, authUserId: string): Promise<NurseDashboardData> {
+export async function getNurseDashboardData(
+  supabase: SupabaseClient<Database>,
+  authUserId: string,
+  /** Injectable for tests only: the real one needs a live request (cookies), so a test client can't call it. */
+  deps: { getCurrentState: typeof getNurseCurrentState } = { getCurrentState: getNurseCurrentState }
+): Promise<NurseDashboardData> {
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, full_name, is_on_duty, current_service_id, clinic_id')
@@ -164,7 +178,7 @@ export async function getNurseDashboardData(supabase: SupabaseClient<Database>, 
     serviceId
       ? supabase.from('services').select('name').eq('id', serviceId).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    getNurseCurrentState(),
+    deps.getCurrentState(),
     getSeenTodayStatsChecked(supabase, profile.id),
     supabase
       .from('consultations')
@@ -179,7 +193,7 @@ export async function getNurseDashboardData(supabase: SupabaseClient<Database>, 
 
   if (current.error) errors.current = current.error
   if (seen.error) errors.stats = seen.error
-  if (statsRes?.error) errors.stats = errors.stats ?? statsRes.error.message
+  if (statsRes?.error) errors.serviceAverage = statsRes.error.message
 
   let activity: DashboardActivityEvent[] | null = null
   if (activityRes.error) errors.activity = activityRes.error.message

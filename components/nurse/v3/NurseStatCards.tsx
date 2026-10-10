@@ -26,16 +26,19 @@ export function buildStatCards(data: NurseDashboardData): Card[] {
         ? 'No service assigned'
         : 'Off duty — no queue'
 
+  // Two independent reads feed this card: the nurse's own figures (errors.stats) and the service-wide average
+  // (errors.serviceAverage). One failing never hides the other.
   const serviceAvg = serviceAverageMinutes !== null ? Math.round(serviceAverageMinutes) : null
+  const serviceText = errors.serviceAverage ? 'service avg unavailable' : serviceAvg !== null ? `service avg ${serviceAvg} min` : null
   let avgValue = '—'
   let avgCaption: string
   if (errors.stats || !seenToday) {
-    avgCaption = 'Couldn’t load'
+    avgCaption = serviceText ? `Yours unavailable · ${serviceText}` : 'Couldn’t load'
   } else if (seenToday.avgMinutes !== null) {
     avgValue = `${seenToday.avgMinutes} min`
-    avgCaption = serviceAvg !== null ? `Yours today · service avg ${serviceAvg} min` : 'Yours today'
+    avgCaption = serviceText ? `Yours today · ${serviceText}` : 'Yours today'
   } else {
-    avgCaption = serviceAvg !== null ? `None yet · service avg ${serviceAvg} min` : 'No completed consultations yet'
+    avgCaption = serviceText ? `None yet · ${serviceText}` : 'No completed consultations yet'
   }
 
   return [
