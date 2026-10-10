@@ -4,6 +4,50 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
+## Latest checkpoint — Reception V3 Phase 4: Profile Settings
+
+**Date:** 2026-10-10
+**Branch:** `feat/reception-v3-profile-settings` (from `main` at `8ec98dd`). **Not merged — awaiting review.**
+(The "Last checkpoint" section below is the Phase 3 closing report from PR #28, which was still open when this was written.)
+
+### What exists now
+
+`/reception/profile/settings` (Figma frame `222:1755`): two panels from 1280px (680 + 416 at 1440), stacked below. Header with the real receptionist chip; Profile Information form (photo block, full name, role, clinic, email, phone, Cancel/Save); Avatar Preview with live initials; "Photo and initials" note; Quick Actions (Change Password as an inline expandable panel, Sign Out via the existing `logout()` action). Every measured offset at 1440 matches the Figma coordinates (cards at y=104/440/600, fields at 264/344/424/504, buttons at 596, title y=22, chip y=14).
+
+Reachable from the Dashboard and Queue header chips (now links; no chevron, since Figma's would promise a dropdown that doesn't exist), a "Profile Settings" row in the sidebar, and the mobile top bar. The mobile bar now pins **Profile** and **Sign Out** on the right: before, Sign Out sat at x≈654 scrolled out of sight inside the page-link strip on a 390px phone.
+
+### Backend findings (read-only, against the shared project)
+
+- **Name and phone are safely editable by a receptionist.** `profiles_update_own` (own row, not role-restricted) + column UPDATE grants limited to `full_name`, `phone`, `date_of_birth`, `id_number` (migration `20261006151206`). Role, clinic_id, is_active etc. cannot be written whatever the browser sends. New `updateStaffProfile` (`app/actions/receptionProfile.ts`) writes only name and phone, finds the row by the signed-in user's own `auth_user_id`, and uses `.select()` so a silently filtered update is an error, not a false "saved". The existing patient `updateProfile` was NOT reused: it also writes `date_of_birth` and `id_number`, so it would blank them for a form that doesn't show them.
+- **Email is read-only.** It belongs to Supabase Auth; no email-change/verification flow exists anywhere in the app. Not added (needs its own security review).
+- **Photo: no backend at all** — no bucket, no Storage policies, 0 objects, no avatar column. Upload / Change Photo and Remove Photo are disabled and say "Photo upload isn't available yet"; initials show. The exact proposed migration, Storage policies, server flow and open decisions are in `docs/PROPOSAL_profile_photos.md` — **nothing was applied**, and it is deliberately not under `supabase/migrations/`.
+- **Password:** reuses the existing `changePassword` (re-authenticates with the current password first), wrapped by `changeStaffPassword`, which then signs out every other session (`signOut({scope:'others'})`) because clinic computers are shared. Not exercised for real (see below).
+
+### Deviations from Figma (deliberate)
+
+Save/Cancel are disabled until something changed (Figma shows them enabled); email is grey read-only with a one-line note in the label row (Figma shows it editable-looking); no chevrons on the chip or Sign Out; Change Password's chevron is real (it expands a panel); Sign Out uses the accessible `text-danger` token (#B42318) rather than Figma's #E53935 (4.2:1 on white); avatar preview is centred (Figma's is 12px left of centre); Save uses Figma's #08B9A8 fill, which is only ~2.3:1 against white text (a property of the design, shared with the Phase 3 filter pills); a sidebar "Profile Settings" row and mobile pinned buttons were added for reachability.
+
+### Tests
+
+- `e2e/reception-profile-validation.spec.ts` — 11 pure-logic tests (name, phone, avatar file incl. 5 MB boundary, wrong MIME/extension, a renamed `.exe`/HTML rejected by magic bytes, JPEG-as-PNG).
+- `e2e/reception-profile.spec.ts` — live, strictly **read-only** against the shared DB: access (signed-out, patient), real data, role/clinic/email read-only and only `full_name`/`phone` submitted, initials + live preview + Cancel, Save/Cancel availability, photo honestly disabled, name/phone rejection and password rejection (all invalid input, rejected before any database or auth call), double-submit (1 request for 3 same-tick clicks with the first held in flight), nav entry points, layout at 1440/1280/1024/900/768/390 (no horizontal scroll; two panels from 1280), mobile pinned Profile/Sign Out, Sign Out lands on /login.
+- **Write paths verified on a throwaway harness with injected mock actions (not committed, 24 checks, all passing):** save success (stored values adopted, no reload, preview updates, message hides on next edit), save error (values kept, Cancel restores the saved name), double-submit (1 call), password wrong/right/cleared/double-click, photo (renamed `.exe`, `.gif`, >5 MB rejected with nothing sent; backend failure keeps no photo; local preview while uploading; photo in form and preview on success; Remove only enabled with a photo; Remove restores initials).
+- **NOT verified:** a real profile save, a real password change (so `signOut({scope:'others'})` is untested live), a real upload — all would mutate the shared project. The Server Action wiring for those is reviewed, not exercised.
+
+### Things worth knowing
+
+- Reception pages take 8–29s per cold load in dev here (Dashboard 17–24s, Queue 16s, Appointments up to 29s; the new page is one of the faster ones), so the live suite uses long timeouts and a local `loginAs` wrapper that waits for the post-login redirect. The shared `loginAs` can return before that redirect lands on a slow server and make the next `goto` abort.
+- React 19 clears all uncontrolled fields after a form action, so after a *wrong current password* all three password fields must be retyped (same as the patient form).
+- `lib/profileValidation.ts` gained `parseStaffName` and `parsePhone` (SA formats, stored as `+27 82 123 4567`); existing phone data is free text and is not rewritten.
+
+### Needs your decision
+
+1. Approve, change or reject the photo storage proposal (`docs/PROPOSAL_profile_photos.md`) — in particular who may see a photo (owner-only vs clinic-wide) and whether to re-encode images to strip metadata.
+2. Whether to add a verified email-change flow (Supabase secure email change needs SMTP + confirmation settings reviewed).
+3. Whether the sidebar "Profile Settings" row should stay (it is not in Figma).
+
+---
+
 ## Last checkpoint
 
 **Date:** 2026-10-10
