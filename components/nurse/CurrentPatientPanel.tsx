@@ -1,19 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useState } from 'react'
 import { Clock3, UserPlus } from 'lucide-react'
-import {
-  nextPatient,
-  undoAction,
-  getNurseCurrentState,
-  type NurseCurrentEntry,
-  type CalledResult,
-  type QueueEmptyResult,
-  type LongDecision,
-} from '@/app/actions/nurse'
+import { type NurseCurrentEntry, type CalledResult, type QueueEmptyResult } from '@/app/actions/nurse'
 import { createClient } from '@/lib/supabase/client'
 import { useQueueBroadcast } from '@/lib/hooks/useQueueBroadcast'
+import { useNextPatientFlow, type CompletedTransient } from '@/lib/hooks/useNextPatientFlow'
 import { CLINIC_TIMEZONE } from '@/lib/clinicTime'
 import { Button } from '@/components/ui/Button'
 import { QueueToken } from '@/components/ui/QueueToken'
@@ -38,32 +30,10 @@ function formatClockTime(iso: string): string {
 }
 
 /**
- * The five-state nurse workflow model:
- *   IDLE                 baseEntry is null, transient is NONE
- *   IN_PROGRESS           baseEntry is set, transient is NONE
- *   SUBMITTING             transient.kind === 'SUBMITTING'
- *   NEEDS_LONG_DECISION    transient.kind === 'NEEDS_LONG_DECISION'
- *   COMPLETED_WITH_UNDO    transient.kind === 'COMPLETED_WITH_UNDO'
- *
- * Represented as two independent pieces rather than one five-way union
- * so SUBMITTING/NEEDS_LONG_DECISION never have to duplicate whatever
- * entry data is already sitting in baseEntry — they just overlay it.
+ * The Next patient / Undo state machine lives in useNextPatientFlow
+ * (shared with the Nurse V3 My Queue screen); this component is its
+ * working-screen presentation.
  */
-type Transient =
-  | { kind: 'NONE' }
-  | { kind: 'SUBMITTING'; actionId: string; longDecision?: LongDecision }
-  | { kind: 'NEEDS_LONG_DECISION'; actionId: string; durationMinutes: number; thresholdMinutes: number }
-  | {
-      kind: 'COMPLETED_WITH_UNDO'
-      actionId: string
-      result: CalledResult | QueueEmptyResult
-      deadline: number
-      disabledReason?: string
-      undoSubmitting?: boolean
-    }
-
-const UNDO_DISABLED_LINGER_MS = 3000
-
 export function CurrentPatientPanel({
   initialEntry,
   serviceId,
@@ -71,13 +41,12 @@ export function CurrentPatientPanel({
   serviceAverageMinutes,
   initialNextToken,
 }: CurrentPatientPanelProps) {
-  const router = useRouter()
   const [supabase] = useState(() => createClient())
-  const [baseEntry, setBaseEntry] = useState<NurseCurrentEntry | null>(initialEntry)
-  const [transient, setTransient] = useState<Transient>({ kind: 'NONE' })
-  const [error, setError] = useState<string | null>(null)
-  const [now, setNow] = useState(() => Date.now())
   const [nextToken, setNextToken] = useState<string | null>(initialNextToken)
+  const { baseEntry, transient, error, now, isSubmitting, submit, handleUndo } = useNextPatientFlow({
+    initialEntry,
+    undoWindowSeconds,
+  })
 
   const refreshNextToken = useCallback(async () => {
     const { data } = await supabase.rpc('get_service_queue', { p_service_id: serviceId })
@@ -86,164 +55,6 @@ export function CurrentPatientPanel({
 
   useQueueBroadcast(serviceId, refreshNextToken)
 
-  // action_id is generated ONCE per logical "advance the queue" gesture
-  // and reused across every retry of that gesture (network timeout, or
-  // a long_consultation confirmation) until a terminal result lands —
-  // see ADR (nurse workflow idempotency). Held in a ref, not state: it
-  // must survive across renders without itself triggering one.
-  const pendingActionId = useRef<string | null>(null)
-  const transientRef = useRef(transient)
-  useEffect(() => {
-    transientRef.current = transient
-  })
-
-  // True for the entire span of a submit()/handleUndo() call, including
-  // its own follow-up re-fetch. Without this, the focus/visibility
-  // reconciliation effect below can interleave with that follow-up
-  // fetch — e.g. a focus event firing mid-mutation reads the
-  // not-yet-committed old state and, if it resolves after the
-  // mutation's own correct re-fetch, silently overwrites it with stale
-  // data. Whichever fetch is "ours" for this action must be the one
-  // that wins.
-  const busyRef = useRef(false)
-
-  // Ticks once a second so the elapsed-time display and the undo
-  // countdown stay live without polling the server.
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [])
-
-  const submit = useCallback(async (longDecision?: LongDecision) => {
-    busyRef.current = true
-    const actionId = pendingActionId.current ?? crypto.randomUUID()
-    pendingActionId.current = actionId
-    setError(null)
-    setTransient({ kind: 'SUBMITTING', actionId, longDecision })
-
-    const { data, error: submitError } = await nextPatient(actionId, longDecision)
-
-    if (submitError) {
-      // Deliberately do NOT clear pendingActionId: a retry (clicking the
-      // same button again) must reuse this exact id, not mint a new one.
-      setError(submitError)
-      setTransient({ kind: 'NONE' })
-      busyRef.current = false
-      return
-    }
-
-    if (data!.status === 'long_consultation') {
-      // No ledger write happened for this branch, so the same actionId
-      // stays valid to resubmit with a decision — nothing to clear.
-      setTransient({
-        kind: 'NEEDS_LONG_DECISION',
-        actionId,
-        durationMinutes: data!.duration_minutes,
-        thresholdMinutes: data!.threshold_minutes,
-      })
-      busyRef.current = false
-      return
-    }
-
-    // Terminal outcome — the ledger now holds this actionId, so it's
-    // done being "pending" regardless of whether this was a fresh
-    // dispatch or a replay.
-    pendingActionId.current = null
-
-    if (data!.status === 'called') {
-      // next_patient's own result doesn't carry checked_in_at,
-      // appointment_id or service_id — re-read the authoritative row
-      // rather than guess at them (same principle handleUndo already
-      // follows below: don't reconstruct what a fresh read can give
-      // exactly).
-      const { entry } = await getNurseCurrentState()
-      setBaseEntry(entry)
-    } else {
-      setBaseEntry(null)
-    }
-
-    setTransient({
-      kind: 'COMPLETED_WITH_UNDO',
-      actionId,
-      result: data as CalledResult | QueueEmptyResult,
-      deadline: Date.now() + undoWindowSeconds * 1000,
-    })
-    busyRef.current = false
-    // revalidatePath ran server-side, but this action was invoked as a
-    // plain function call, not dispatched through a form/useActionState
-    // — that's what normally carries the auto-refresh. router.refresh()
-    // re-runs the Server Component so WaitingList's initialQueue (and
-    // anything else server-derived on this page) picks up the change.
-    router.refresh()
-  }, [undoWindowSeconds, router])
-
-  const handleUndo = useCallback(async (actionId: string) => {
-    busyRef.current = true
-    setTransient((t) => (t.kind === 'COMPLETED_WITH_UNDO' ? { ...t, undoSubmitting: true } : t))
-    const { error: undoError } = await undoAction(actionId)
-
-    if (undoError) {
-      setTransient((t) =>
-        t.kind === 'COMPLETED_WITH_UNDO' ? { ...t, undoSubmitting: false, disabledReason: undoError } : t
-      )
-      busyRef.current = false
-      return
-    }
-
-    // undo_next_patient only returns the restored token, not full
-    // patient details — re-read current state rather than guess them.
-    setTransient({ kind: 'NONE' })
-    const { entry } = await getNurseCurrentState()
-    setBaseEntry(entry)
-    busyRef.current = false
-    router.refresh()
-  }, [router])
-
-  // Collapse COMPLETED_WITH_UNDO once its window closes: show it
-  // disabled with a reason briefly, then fall back to plain
-  // IN_PROGRESS/IDLE.
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    if (transient.kind !== 'COMPLETED_WITH_UNDO' || transient.disabledReason) return
-    const msLeft = transient.deadline - now
-    if (msLeft > 0) return
-
-    const actionId = transient.actionId
-    setTransient((t) =>
-      t.kind === 'COMPLETED_WITH_UNDO' && t.actionId === actionId
-        ? { ...t, disabledReason: 'Undo window has closed' }
-        : t
-    )
-  }, [transient, now])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  useEffect(() => {
-    if (transient.kind !== 'COMPLETED_WITH_UNDO' || !transient.disabledReason) return
-    const timer = setTimeout(() => setTransient({ kind: 'NONE' }), UNDO_DISABLED_LINGER_MS)
-    return () => clearTimeout(timer)
-  }, [transient])
-
-  // Two tabs is a known limitation, not something this can prevent
-  // (two different action_ids are two real, independent transitions
-  // server-side) — but when this tab regains focus, reconcile its
-  // display to whatever the server now says is current, rather than
-  // silently keep showing a patient another tab already advanced past.
-  useEffect(() => {
-    function reconcile() {
-      if (document.visibilityState !== 'visible') return
-      if (transientRef.current.kind !== 'NONE') return
-      if (busyRef.current) return
-      getNurseCurrentState().then(({ entry }) => setBaseEntry(entry))
-    }
-    document.addEventListener('visibilitychange', reconcile)
-    window.addEventListener('focus', reconcile)
-    return () => {
-      document.removeEventListener('visibilitychange', reconcile)
-      window.removeEventListener('focus', reconcile)
-    }
-  }, [])
-
-  const isSubmitting = transient.kind === 'SUBMITTING'
   const nextActionHint =
     nextToken === null ? 'No one is waiting.' : `ends this consultation and calls ${nextToken}`
 
@@ -423,7 +234,7 @@ function UndoStrip({
   now,
   onUndo,
 }: {
-  t: Extract<Transient, { kind: 'COMPLETED_WITH_UNDO' }>
+  t: CompletedTransient
   now: number
   onUndo: (actionId: string) => void
 }) {
@@ -454,7 +265,7 @@ function UndoButton({
   now,
   onUndo,
 }: {
-  t: Extract<Transient, { kind: 'COMPLETED_WITH_UNDO' }>
+  t: CompletedTransient
   now: number
   onUndo: (actionId: string) => void
 }) {
@@ -463,9 +274,16 @@ function UndoButton({
   }
   const secondsLeft = Math.max(0, Math.floor((t.deadline - now) / 1000))
   return (
-    <Button variant="secondary" loading={t.undoSubmitting} onClick={() => onUndo(t.actionId)}>
-      Undo ({secondsLeft}s)
-    </Button>
+    <div className="flex flex-col items-end gap-1">
+      <Button variant="secondary" loading={t.undoSubmitting} onClick={() => onUndo(t.actionId)}>
+        Undo ({secondsLeft}s)
+      </Button>
+      {t.undoError && (
+        <p role="alert" className="text-xs text-primary-100">
+          {t.undoError}
+        </p>
+      )}
+    </div>
   )
 }
 

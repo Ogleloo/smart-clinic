@@ -3,8 +3,16 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
+import { waitingSkipRefusal } from '@/lib/nurseQueue'
 
 export type LongDecision = 'record' | 'break'
+
+/** The working screen and the Nurse V3 screens all render queue/duty state, so every nurse mutation refreshes all of them. */
+function revalidateNurseScreens() {
+  revalidatePath('/nurse')
+  revalidatePath('/nurse/queue')
+  revalidatePath('/nurse/dashboard')
+}
 
 // next_patient/undo_next_patient/end_shift all return `jsonb`, which
 // Supabase's generator can only type as `Json` — these are the actual
@@ -149,7 +157,7 @@ export async function nextPatient(
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as NextPatientResult }
 }
 
@@ -159,7 +167,7 @@ export async function undoAction(actionId: string): Promise<{ data?: UndoResult;
   const { data, error } = await supabase.rpc('undo_next_patient', { p_action_id: actionId })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as UndoResult }
 }
 
@@ -173,7 +181,7 @@ export async function endShift(longDecision?: LongDecision): Promise<{ data?: En
   const { data, error } = await supabase.rpc('end_shift', { p_long_decision: longDecision })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as EndShiftResult }
 }
 
@@ -228,7 +236,7 @@ export async function setDuty(_prev: DutyState, formData: FormData): Promise<Dut
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return {}
 }
 
@@ -242,7 +250,7 @@ export async function skipPatient(_prev: SkipState, formData: FormData): Promise
   const { error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { skipped: true }
 }
 
@@ -263,6 +271,48 @@ export async function setEmergencyPriority(
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { success: true }
+}
+
+export type WaitingSkipState = { error?: string; skippedToken?: string }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Skip from a *waiting-list row* (Nurse V3 My Queue). For a nurse,
+ * skip_patient() also accepts an in_progress entry and closes its open
+ * consultation — that is how a current patient who walked out is handled,
+ * and it must not be reachable from a waiting row. So the entry's status
+ * is read first (RLS: queue_select_staff, the nurse's own clinic) and the
+ * skip only proceeds while it is still 'waiting'.
+ *
+ * Residual gap, documented rather than hidden: the check and the RPC are
+ * two statements, so a next_patient() landing for this same patient in the
+ * milliseconds between them would still be skipped (and that new
+ * consultation closed). Closing it fully needs an expected-status
+ * parameter on skip_patient() — a migration, out of scope here.
+ *
+ * No p_no_show, and no reason/notes: skip_patient() has nowhere to store
+ * a reason.
+ */
+export async function skipWaitingPatient(_prev: WaitingSkipState, formData: FormData): Promise<WaitingSkipState> {
+  const queueEntryId = String(formData.get('queue_entry_id') ?? '')
+  if (!UUID_RE.test(queueEntryId)) return { error: 'Missing or invalid queue entry.' }
+
+  const supabase = await createClient()
+  const { data: entry, error: readError } = await supabase
+    .from('queue_entries')
+    .select('id, status')
+    .eq('id', queueEntryId)
+    .maybeSingle()
+  if (readError) return { error: readError.message }
+  const refusal = waitingSkipRefusal(entry?.status ?? null)
+  if (refusal) return { error: refusal }
+
+  const { data, error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
+  if (error) return { error: error.message }
+
+  revalidateNurseScreens()
+  return { skippedToken: data.token }
 }
