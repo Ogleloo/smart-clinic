@@ -8,7 +8,14 @@ Latest development checkpoint. Read this when continuing previous work.
 
 **Date:** 2026-10-11 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge; Phase 3 not started) · companion **Draft PR #32** `chore/skip-waiting-patient-migration` (migration prepared, **NOT applied**). Nothing written to the shared project; no live call/undo/skip/duty/emergency test run.
 
-### Final safety review (latest)
+### next_patient concurrency review (latest) — Draft PR #33
+
+- **Confirmed production defect (pre-existing):** `notify_you_are_next()` / `notify_emergency_ahead()` insert notifications whose FK check holds `FOR KEY SHARE` on a waiting entry until commit. `next_patient()`'s `FOR UPDATE SKIP LOCKED` skips such rows, so a call made at the same moment as another call, a skip or an emergency change passes over the real next patient or returns `queue_empty` with a patient waiting.
+- **Fix prepared, NOT applied:** `fix/next-patient-no-key-update` (PR #33, stacked on #32; the migration itself is independent). `20261011010000_next_patient_no_key_update.sql` is the deployed definition (md5 `08dd4ed0…`) with only `for update` → `for no key update` in the claim. Rollback is the exact original; `verify.sql` is a read-only preflight/post-check (production currently `state = original`).
+- **Evidence (local Supabase stack, real RPCs, `supabase/tests/next_patient_lock/concurrency_check.mjs`, 4 runs per variant):** original fails all 4 DEFECT checks (S1 third patient called, S2 false queue_empty, S3 skip in flight, S4 emergency in flight) with invariants 24/24; fixed passes 4/4 and 25/25: no duplicate claims, no deadlocks, Undo/action-id replay intact, emergency order unchanged, concurrent check-in fine. K2 tightened to require the second patient (fails on original, passes on fixed).
+- Local test infrastructure: scratch Supabase project (not in the repo) and the worktrees `../smart-clinic-skip-migration` (#32) and `../smart-clinic-next-patient-lock` (#33).
+
+### Final safety review
 
 - **Fail closed when the current consultation is unknown** (`lib/hooks/useNextPatientFlow.ts`, shared by classic `/nurse` and V3). A failed read of the nurse's open consultation is no longer treated as "no patient" (`currentStateOrNull` replaced by a typed read: success, possibly with no consultation, vs failure). While unknown, `submit()` refuses and Next patient / long-consultation buttons are disabled, with a warning and a read-only **Check again** (`retryStateRead`; a successful focus reconciliation also clears it). The initial page read error starts the hook in that state; `app/nurse/page.tsx` now passes its read error too. After `next_patient()` or undo succeeds but the follow-up read fails, the confirmed result, action UUID and Undo window are kept, the previous patient is not shown as current, and nothing is re-sent. V3 also hides the In Consultation row and the "other nurses" footnote while unknown.
 - **Tests:** 12 new harness tests (V3 + classic): initial failure → disabled → retry fails → retry succeeds (no patient / open patient); a legitimate empty read stays enabled; post-call read failure (returned error and thrown) keeps result, Undo and id, blocks Next, sends no second call, then reconciles; Undo from the unknown state uses the original id; Undo expiry while unknown stays paused; post-undo read failure. Negative controls: reverting "failure = unknown", ignoring the initial error, or removing the guard each makes tests fail.
@@ -45,8 +52,8 @@ No per-row Start Consult / Start Consultation (`next_patient()` picks the patien
 
 ### Next
 
-1. Approve (or not) applying PR #32's migration per its runbook; then, separately, re-enable V3 Skip and move classic Skip onto it.
-   Separately consider: a replayable demo seed, and `FOR NO KEY UPDATE SKIP LOCKED` in `next_patient()`.
+1. Approve (or not) applying PR #33's `next_patient` fix and PR #32's migration, each per its runbook (independent; either order). Then, separately, re-enable V3 Skip and move classic Skip onto it.
+   Separately consider: a replayable demo seed (migrations don't replay from empty).
 2. With approval: a controlled live test on a preview with one synthetic patient (call, undo, call) — no skip until (1).
 3. Then review/merge PR #31. Phase 3 (patient details / vitals / notes) needs the RLS/privacy review noted below.
 
