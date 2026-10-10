@@ -4,7 +4,36 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 1: Dashboard
+## Latest checkpoint — Nurse V3 Phase 2: My Queue
+
+**Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-my-queue` (from `main` after PR #30 merged). **Not merged — awaiting review.** No migrations, no RLS change, nothing written to the shared project.
+
+### What exists
+
+- **`/nurse/queue`** (Figma `161:170`, with `162:534` Queue Updated, `164:192` Patient Called, `164:268` Skip Patient as interaction states) inside the `(v3)` shell. Sidebar/mobile **My Queue → `/nurse/queue`**; dashboard "View all", "Open My Queue" and "Go on duty in My Queue" point there too. `/nurse` is unchanged and linked from My Queue ("Open the classic nurse screen"); `homeForRole('nurse')` is still `/nurse`.
+- **State machine extracted, not duplicated:** `lib/hooks/useNextPatientFlow.ts` holds the Next patient / long-consultation / Undo machine moved out of `CurrentPatientPanel`, which now uses it with identical rendering. V3's `CallNextPanel` uses the same hook. Additions (both screens): an in-flight guard on submit/undo (same-tick clicks sent 3 requests with the same action id before; now 1), a thrown Server Action call (connection lost) becomes a retryable error with the **same** action id instead of sticking on "Please wait…", an undo that never reached the server stays retryable, and a failed focus-reconcile read no longer blanks the current patient.
+- **Data:** `lib/nurseQueue.ts` — pure row building/filtering plus `loadQueueSnapshot` (read-only, used by the server page and every client refresh). Waiting rows = `get_service_queue` in DB order (emergency first); In Consultation = the nurse's own open consultation only; Completed = the nurse's own consultations ended today (RLS `consultations_nurse_write`, filtered explicitly by `nurse_id`), excluding `patient_skipped` / `patient_no_show` / `demo_reset` / `orphaned_test_data`; a `staff_break` close is listed as completed, flagged "Break · not in average". Other nurses' in-progress patients are counted in a footnote, not shown as this nurse's. The nurse's own current patient is never also shown as waiting (stale read just after a call).
+- **Refresh:** realtime ping, window focus and every completed call/undo/skip re-read the whole snapshot; reads are numbered and an older read that lands late is dropped. Tab, search and filter are local and survive refreshes. A failed refresh keeps the last list and says so.
+- **Skip:** new `skipWaitingPatient` Server Action re-checks the entry is `waiting` (rule in pure `waitingSkipRefusal`) before `skip_patient()`, because a nurse's `skip_patient` also accepts `in_progress` and closes that consultation. **Residual race:** check and RPC are two statements; a `next_patient` for the same patient in between would still be skipped. Closing it needs an expected-status parameter on `skip_patient()` (migration, not done).
+- **Reused unchanged:** `NurseHeader` (duty, Switch service, End session), `DutyControl`, `EndSessionControl`, `CoverageWarning`, `EmergencyToggle` (only sized down via a wrapper), Reception's `QueueUpdatedToast`.
+
+### Deviations from Figma (deliberate)
+
+No per-row Start Consult / Start Consultation (`next_patient()` picks the patient and opens the consultation atomically) — one **Call next patient / Next patient** control, next token shown as "Next" on position 1 and in the hint (informational). Patient Called (164:192) is shown inline above the queue (not a separate page) so the action id and Undo survive; its Start Consultation slot is **Next patient** with a consequence line. No View Details (no details screen). Skip modal: Reason and Notes omitted (`skip_patient` cannot store them); copy says the patient is removed from the waiting queue (Figma's "will remain in the queue" is false). Subtitle says "shared waiting queue for <service>…" not "Patients assigned to you". Duty bar + current-patient panel inserted between header and tabs (no Figma slot; essential workflow). Filters = "Emergency priority only". Contrast: active tab/primary #037F74, Waiting #8A5600/#FFF5DB, Completed #067647/#ECFDF3, danger #B42318. Table from 1280px (Service column from 1400px), cards below. Toast at the bottom (Reception's position would cover the duty bar).
+
+### Tests (`e2e/nurse-v3-queue.spec.ts`)
+
+- **Pure (24) + isolated harness (48)**: `e2e/support/nurse-queue-harness` bundles the real components with esbuild, swapping only Server Actions, the Supabase client, the realtime hook and Next router for in-page mocks; it fails the build if server modules are bundled, aborts+records any non-static request, and the mocks throw on writes or unconfigured calls. Covers ordering/emergency, tabs+search+filter, empty/off-duty/no-service/read-failure, current-patient recovery, call idempotency and same-id retry (incl. thrown requests), long-consultation decision, Undo success/refusal/expiry/network retry, Skip (wording, cancel/Escape/close, focus trap, one request for same-tick clicks, error), emergency toggle wiring, realtime refresh preserving tab/search, queue emptying, out-of-order reads, multi-tab focus reconciliation, offline banner, responsive at 1440/1280/1024/900/768/390, Figma geometry at 1440, accessibility structure. Negative controls run: removing the submit guard, the read-sequence guard, the skip ref guard, the throw handling or the duplicate-row fix each makes its test fail.
+- **Live read-only (12)**: access (signed out, patient, receptionist), real nurse data with no Figma examples, Waiting count equals the classic screen, sidebar + classic link, no horizontal scroll at six widths. No mutating control is clicked.
+- **Not run (write against shared DB):** `nurse-v2`, `nurse-undo`, `dashboard-guard`, reception walk-in/check-in live tests. **Not verified live:** a real call/undo/skip/emergency/duty change from `/nurse/queue` — the wiring is the same Server Actions as `/nurse`, exercised only through mocks.
+
+### Next
+
+Review/merge; then a controlled live test on a preview (one synthetic patient: call, undo, call, skip) with approval. Phase 3 (patient details / vitals / notes) needs the RLS/privacy review noted below.
+
+---
+
+## Previous checkpoint — Nurse V3 Phase 1: Dashboard
 
 **Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-dashboard` (from `main` after PR #29 merged). **Not merged — awaiting review.** Phase 2 not started.
 
