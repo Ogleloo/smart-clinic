@@ -4,11 +4,59 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Reception V3 Phase 4: Profile Settings
+## Latest checkpoint — Nurse V3 Phase 1: Dashboard
 
-**Date:** 2026-10-10
-**Branch:** `feat/reception-v3-profile-settings` (PR #29, from `main` at `8ec98dd`; `main` merged back in after PR #28, no conflicts). **Not merged — awaiting review.**
-(The "Last checkpoint" section below is the Phase 3 closing report from PR #28, now merged; it is kept unchanged.)
+**Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-dashboard` (from `main` after PR #29 merged). **Not merged — awaiting review.** Phase 2 not started.
+
+### What exists
+
+- **`/nurse/dashboard`** (Figma `05 · Nurse V3`, frame `161:3`): sidebar (264px), hero with the real nurse's name and chip, four stat cards, Today's Queue (730px) and Recent Activity (380px) side by side from 1280px, stacked below.
+- **`/nurse` is untouched** and stays the working screen (call next, undo, current patient, waiting list, duty, end session). Nothing redirects to the dashboard; `homeForRole('nurse')` is still `/nurse`. **There is no link from `/nurse` back to the dashboard yet** (adding one would modify the working screen; decide in Phase 2).
+- **Routing:** the V3 shell is `app/nurse/(v3)/layout.tsx`. The `(v3)` route group means it wraps `/nurse/dashboard` and later V3 routes but not `/nurse` itself. `requireRole('nurse')` runs in both the layout and the page.
+- **New code:** `components/nurse/v3/*` (sidebar, mobile nav, hero, stat cards, queue panel, activity panel, view), `lib/nurseDashboard.ts` (read-only loader plus pure mapping functions). `.theme-nurse` shares the `.theme-reception` token block in `globals.css` (identical Figma palette); `BrandMark` is now exported from the Reception sidebar and reused.
+- **Small shared changes:** `lib/nurseStats.ts` gained a pure `summariseSeenToday()`; `getSeenTodayStats` now delegates to it with identical behaviour, so the working screen and dashboard cannot disagree on "seen today".
+
+### Data mapping (all read-only; nothing here writes)
+
+| Figma | Source | Notes |
+|---|---|---|
+| My Queue | `get_service_queue` for the nurse's `current_service_id`, waiting rows | "—" and a reason when off duty / no service / read failed |
+| In Consultation | the nurse's own open consultation (`getNurseCurrentState`) | 0 or 1, never inferred from queue status |
+| Completed Today | `summariseSeenToday` over the nurse's own consultations | personal; excludes breaks, skips and no-shows (they set `exclude_from_prediction`) |
+| Avg. Consult Time | same rule (personal), with `service_consultation_stats` shown as "service avg" | the two are labelled apart; no value borrowed from the other |
+| Today's Queue | `get_service_queue` (waiting + in-progress, backend order, emergency first) | Position = rank among waiting; elapsed = `waiting_minutes`; "to go" = `get_wait_estimate`, only for waiting rows shown, absent when the engine declines |
+| Recent Activity | the nurse's own `consultations` rows today (RLS `consultations_nurse_write`) | one event per consultation: completed / in consultation / skipped / no-show / ended. Patients shown as "S. Ndlovu" |
+
+Figma's trend lines ("+3 from earlier", "+4/-4 from yesterday") are **not shown**: nothing compares with yesterday. Figma's example patients, tokens and times are not used.
+
+### Deviations from Figma (deliberate)
+
+Sidebar shows only working routes (Dashboard, My Queue → `/nurse`) plus Sign Out; Current Patient, Patient History and Reports are not linked. A duty line ("On duty · <service>" / "Off duty" + link to My Queue) was added under the hero text. The hero image is the approved Riverside illustration (same as Reception), not the Figma photo. The profile chip is not a link (no nurse Profile Settings yet; Figma's chevron implies a menu that doesn't exist). Contrast: chip avatar `#037F74` (white on `#08B9A8` is 2.47:1), teal text/borders `#037F74`, Waiting pill `#8A5600` on `#FFF5DB` (Figma's amber is far below 4.5:1). Wait Time shows elapsed and estimate on two lines; Service column hidden between 1280 and 1400px.
+
+### Figma Nurse workflow vs. what the database does (for Phase 2+)
+
+Figma has 13 frames: dashboard, my-queue, patient-details, record-vitals, consultation, complete-consultation, consultation-completed, patient-history, queue-updated, next-patient, patient-called, skip-patient, profile-settings.
+
+- **Next Patient / Patient Called / Undo Call** ↔ `next_patient()` + `undo_next_patient()` (action-specific id, limited window). There is no separate "call". Do not substitute `call_next_patient()`.
+- **Start Consultation** has no equivalent: `next_patient` opens the consultation atomically with the call. A Figma "Start" button would have nothing to call (or must be a no-op acknowledgement).
+- **Complete Consultation / Consultation Completed** ↔ no standalone complete action in the working flow: a consultation ends when the next patient is called (`ended_counted`, long-consultation record/break decision) or on `end_shift`. `end_consultation()` exists but the nurse screen deliberately does not use it. The completed frame's "You're ready for the next patient" maps to the `queue_empty` result.
+- **Skip Patient** ↔ `skip_patient()` (already used by `SkipButton`; closes any open consultation as `patient_skipped`/`patient_no_show`).
+- **Record Vitals / Notes / Patient Details / Patient History:** tables and RLS exist (`20261001211949_consultation_notes_and_vitals`, `…v2`, `20261006100008_consolidate_clinical_notes_rls`) but there is no nurse UI today. Needs an RLS/privacy review before Phase 3 (history across visits is a new read).
+- **Emergency priority** (`set_emergency_priority`, `EmergencyToggle`) has no Figma frame; keep it.
+- **Duty / End Session / coverage warning** have no Figma frame; they stay on `/nurse` until Phase 2 designs a home for them.
+
+### Tests
+
+- `e2e/nurse-v3-dashboard.spec.ts`: pure logic (queue order/position/elapsed-vs-estimate, activity events and clinic-day boundary, seen-today rule, stat cards, no trend text), real components rendered for each duty/failure state via `e2e/support/render-nurse-dashboard-states.tsx` (run with `tsx`, no database), contrast of the new colours, and a live **read-only** group (sign in, look; asserts no Server Action is invoked by loading the dashboard).
+- **Not run on purpose:** `nurse-v2`, `nurse-undo`, `dashboard-guard` (they call `next_patient`/undo or `resetDemoState()`); nothing here starts a shift, skips, or writes. No migrations.
+- Existing working-screen behaviour is checked read-only: `/nurse` still loads and its Waiting / Seen-today tiles equal the dashboard's My Queue / Completed Today.
+- A sign-in occasionally fails transiently on the slow demo backend ("Those details don't match an account" once, with correct credentials); the live tests retry the sign-in once.
+
+---
+
+## Previous checkpoint — Reception V3 Phase 4: Profile Settings
+
+**Date:** 2026-10-10 · PR #29 — **merged** (all review corrections in; photo backend still not applied).
 
 ### What exists now
 
