@@ -7,32 +7,44 @@ Latest development checkpoint. Read this when continuing previous work.
 ## Last checkpoint
 
 **Date:** 2026-10-10
-**Branch:** `fix/skip-queue-toast-and-double-submit-test` (from `main` at `4598e55`; PR #25 and the Skip wiring are merged, PR #26 is deployed but still open)
-**Session:** Reception V3 Phase 3 — the approved controlled end-to-end Skip test, and what it found.
+**Branch:** `main` at `8ec98dd` (Vercel production deployment of that commit: success)
+**Session:** Reception V3 Phase 3 (Queue Management) closing report. Phase 4 not started.
 
-### Controlled live test (one synthetic fixture, one real Skip)
+### Merge status
 
-Pre-checks: `skip_patient()` migration live (`20261010003117`, body fingerprint unchanged, `anon` cannot execute), production deployment `4598e55` contains PR #25, receptionist and all services in the same clinic, no existing "ZZ Skip Test". Fixture created through the real check-in wizard: patient **"ZZ Skip Test"** (walk-in, no phone/ID), service **Chronic** (no nurse on duty, so nobody could call it), token **CHR-001**. Rows created: 1 `profiles`, 1 `queue_entries`; 0 consultations, 0 appointments.
+| PR | What | State |
+|---|---|---|
+| #25 | Queue Management UI + Skip wiring | merged |
+| #26 | `skip_patient()` clinic-isolation migration file + disposable-Postgres test harness | merged 2026-10-10 |
+| #27 | Skip toast position/Figma fidelity, header overflow at 768px, double-submit test fix | merged 2026-10-10 |
 
-The one real Skip succeeded: exactly 1 Server Action request carrying the recorded queue-entry id (a fail-closed interceptor aborts any action request with a different UUID), HTTP 200, entry now `skipped` with `completed_at` set, **no consultation created**, toast "CHR-001 skipped. The queue has been updated.", list already empty by the time the toast appeared (no reload — a window marker survived), Chronic filter still selected, `waiting_today` 1 → 0. Dashboard: "Currently Waiting" 1 → 0; "Today's Check-ins" stays 1 (a skipped patient did check in); in-consultation and scheduled unchanged. `queue_entries` 2736 → 2737, `skipped` 4 → 5, `profiles` 93 → 94; every other record's fingerprint is identical to the pre-test baseline.
+### The security migration is live (and was not re-applied)
 
-**The fixture was left in place (skipped).** Cleanup — deleting the `ZZ Skip Test` profile and its skipped queue entry — is NOT done and needs separate approval. Find them by name ("ZZ Skip Test") / token CHR-001 dated 2026-10-10. Until then, tests that need a waiting patient self-skip.
+`20261010003117_skip_patient_clinic_isolation` was applied once to project `bffhjvpkfivtbzqielve` via `apply_migration` (no `db push`, nothing replayed or repaired). Before merging #26 it was re-checked read-only: the file's SQL hash equals the statements stored in `schema_migrations` for that version, the filename version equals the deployed version, the live function body is unchanged, history is 61 rows, and #26 only *adds* files. `skip_patient()` now authenticates an active profile, resolves the queue entry only inside the caller's clinic (entry and service clinic must both match), locks the row, lets receptionists skip only `waiting` entries (never `p_no_show`), and returns the same "Queue entry not found" for missing and cross-clinic ids. Re-run the harness with `bash supabase/tests/skip_patient_authorization/run.sh` (needs Docker; 27 cases + 11 concurrency checks must pass, exit 0).
 
-### Defects found by the test, and fixed on this branch
+### Controlled live test: passed
 
-1. **Toast covered the profile chip** (desktop, 9,108 px²) and the sticky mobile nav (13,246 px²). Figma frame 114:1353 has the same flaw (it moves the chip down and puts the toast on top). Now pinned under the chip band from 1280px up and at the bottom of the screen below that, `pointer-events: none`; also brought to the real Figma node (380×76, 12px radius, teal badge, 16/12px type — it had been built from a screenshot as a pill). Copy deliberately differs from Figma ("Next patient is now GC-014" would predict a patient).
-2. **Queue header overflowed at 768px** (fixed 480px title block squeezed the photo to 0px and scrolled the page ~32px). Pre-existing since Phase 3, missed because the width list skipped tablet portrait. Header now stacks below `lg`; regression tests at 768/900/1024/1280.
-3. **Double-submit test was wrong, not the app.** It used Playwright `click()` twice; `click()` waits for the button to be enabled, so the "second click" landed after the first request settled (a legitimate retry) — 2 requests in 4/10 runs. Instrumented: second click at +3.6s. Now three same-tick DOM clicks; negative control with the ref guard removed gives 3 requests, with it 1 (React queues extra submissions and runs them after the first settles). The guard in `SkipPatientModal` is necessary and works.
+One synthetic walk-in ("ZZ Skip Test", Chronic, token CHR-001) went through the real check-in wizard and was skipped once through the real UI: exactly one request carrying the recorded id (fail-closed interceptor), HTTP 200, entry `skipped` with `completed_at` set, no consultation created, success toast shown, list refreshed with no page reload, Chronic filter preserved. Every other record's fingerprint was identical to the pre-test baseline. Dashboard: "Currently Waiting" 1 to 0, "Today's Check-ins" unchanged (a skipped patient did check in).
 
-### Known limits
-- Toast placement was verified by measurement (`getBoundingClientRect` at 1440/1280/1279/1024/900/768/390) on a throwaway page rendering the real components, and visually on the real page for the pre-fix layout; the post-fix toast has not been seen on the real queue page after a real skip (that would need a second live write).
-- The double-submit spec showed 1 locator timeout in 33 runs (15s wait for the error alert, not reproduced in the following 26; timeouts since widened to 30s, not re-run because nothing is waiting any more). Cause not established; most likely dev-server latency.
-- `scripts/verify.ts` lint errors are pre-existing and unrelated.
+### Corrections the test led to (PR #27)
 
-### Next
-- Review this PR; decide whether to clean up the fixture.
-- PR #26 (migration already deployed) can be merged whenever convenient — it only adds the file and the disposable-Postgres harness.
-- Phase 4 (Profile Settings) not started.
+- **Toast** covered the profile chip (desktop) and the sticky nav (mobile). Now under the chip from 1280px, at the bottom of the screen below that, non-blocking; brought to the real Figma node (380x76, 12px radius, teal badge). Figma frame 114:1353 itself covers the chip; deliberately not copied. Copy differs on purpose (no predicted "next patient").
+- **Queue header overflowed at 768px** (photo squeezed to 0px, page scrolled sideways). Pre-existing since Phase 3. Now stacks below 1024px; regression tests at 768/900/1024/1280. Confirmed on production after deploy: no overflow at 1440/1280/768/390.
+- **Double-submit test was wrong, not the app.** Playwright `click()` waits for the button to be enabled, so its "second click" was a legitimate retry after the first request settled. Now three same-tick DOM clicks (without the ref guard in `SkipPatientModal`: 3 requests; with it: 1).
+
+### Known limitations
+
+- **Intermittent test:** the final double-submit spec hit 1 locator timeout (15s waiting for the error alert) in 33 repeats; it did not recur in the next 26 runs and the cause is unproven (likely dev-server latency). Timeouts were then widened to 30s and not re-run, because nothing is waiting any more. The five specs that need a waiting patient (waiting-rows, modal, Escape, forged id, double submit) self-skip whenever the clinic's queue is empty, so a green run does not prove them. Re-run them when a waiting patient exists.
+- **Visual verification still open:** the post-fix toast has been measured (zero overlap at 1440/1280/1279/1024/900/768/390) and viewed on a throwaway page rendering the real components, but not seen on the real page after a real skip. That needs a second live write, so it is left for the next time a patient is legitimately skipped. Production was smoke-tested read-only (queue page loads, subtitle updated, no Next buttons, no writes). Screenshots from the test are held locally, not in the repo.
+- Pre-existing, unrelated: `scripts/verify.ts` lint errors; migration filename drift for three older files (executable SQL verified identical to what is deployed).
+
+### Pending: synthetic test-record cleanup (NOT done; needs separate approval)
+
+The profile named `ZZ Skip Test` (role patient, no login, no phone/ID/DOB, no clinic) and its `skipped` queue entry `CHR-001` dated 2026-10-10 are still in the shared database. Read-only analysis found: the entry is the only row referencing the profile (`queue_entries.patient_id` is ON DELETE RESTRICT, so the profile cannot be deleted without deleting the entry; keeping the entry and deleting the profile is not possible); one `you_are_next` notification references both and would cascade; no consultations, appointments, vitals or nurse actions reference them; there are no references outside declared foreign keys. Tokens come from `max(token_number)+1` over *today's* entries, so there is no reservation to preserve: deleting frees CHR-001 for the rest of today only, and keeping it makes the next Chronic check-in today CHR-002. The delete would append one `queue_events` row and fire one realtime ping (that table stores no entry id). No admin or dashboard figure counts skipped entries. Leaving the records costs: the name appears in patient search, `skipped` total reads 5 instead of 4, and "Today's Check-ins" shows 1 for the rest of today. `reset_demo_state()` would not pick the profile up (it takes the first 7 no-login patients by name; this one sorts last). Proposed SQL and expected effects were given in the review message for this checkpoint, and need approval before running. Do not call `reset_demo_state()`.
+
+### Phase 3 status
+
+Ready to close, with the two open items above (fixture cleanup decision; post-fix toast seen on the real page once a patient is next legitimately skipped) tracked rather than blocking. Phase 4 (Profile Settings) is next and has not been started.
 
 ---
 
