@@ -28,7 +28,7 @@ Per the Phase 3 brief's explicit instruction for this situation ("STOP the Skip 
 
 ### What remains / next session
 
-- **Fix `skip_patient()`'s clinic isolation** (needs an approved migration — see blocker above), then wire `SkipPatientModal`'s Confirm button to a real Server Action and `QueueUpdatedToast` to its real success response.
+- **`skip_patient()` fix is written, tested, NOT applied — PR #26** (`fix/skip-patient-clinic-authorization`, 2026-10-10). Migration `20261010120000_skip_patient_clinic_isolation.sql` adds clinic isolation, an active-profile check, a row lock, receptionist waiting-only rules, and closes a NULL-role bypass found during review. Disposable-Postgres harness (`supabase/tests/skip_patient_authorization/run.sh`): deployed definition fails 13 cases, the fix passes 31/31, including concurrency. **Blocked on the user's approval of the exact SQL** — do not apply it to `bffhjvpkfivtbzqielve` without that. After approval and apply: re-verify the live definition, then wire `SkipPatientModal`'s Confirm button to a new receptionist Server Action, show `QueueUpdatedToast` on real success, and remove the temporary warning (this branch / PR #25).
 - Phase 4 (Profile Settings) is next per the original Reception V3 plan — not started.
 - Patients/Reports nav items remain absent (no V3 page design exists yet).
 
