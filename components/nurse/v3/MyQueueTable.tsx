@@ -19,7 +19,7 @@ export const SKIP_UNAVAILABLE_NOTE_ID = 'my-queue-skip-unavailable'
  * Skip is disabled fail-closed on Nurse V3. A nurse's skip_patient() also accepts an in-progress entry and
  * closes its consultation, and a separate "is it still waiting?" read before the call cannot stop another nurse
  * calling the patient in between (time-of-check/time-of-use). Until an atomic backend check is approved
- * (docs/proposals/skip_waiting_patient_atomic.md) this control does nothing and no skip action is wired to
+ * (PR #32: skip_waiting_patient, docs/proposals/skip_waiting_patient_atomic.md) this control does nothing and no skip action is wired to
  * this screen at all. aria-disabled (not disabled) keeps it focusable so keyboard and screen-reader users
  * reach the explanation.
  */
