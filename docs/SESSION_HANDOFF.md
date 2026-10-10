@@ -8,7 +8,21 @@ Latest development checkpoint. Read this when continuing previous work.
 
 **Date:** 2026-10-11 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge; Phase 3 not started) · companion **Draft PR #32** `chore/skip-waiting-patient-migration` (migration prepared, **NOT applied**). Nothing written to the shared project; no live call/undo/skip/duty/emergency test run.
 
-### next_patient concurrency review (latest) — Draft PR #33
+### Production deployment record (2026-10-10 UTC) — #32 and #33 APPLIED
+
+| | #32 `skip_waiting_patient` | #33 `next_patient` FOR NO KEY UPDATE |
+|---|---|---|
+| Merge commit (merge, not squash) | `12e9d90` | `ad1689d` (S7 test-only fix `359ab7e` first; retargeted to main) |
+| Applied (`apply_migration`) | version `20261010231805` | version `20261010232531` |
+| Stored SQL sha256 = file | `be0938810a03f54a…` ✅ | `a316c815154c89ac…` ✅ |
+| Post-deploy verification | `post_deploy_verify.sql` 16/16 ✅; anonymous PostgREST probe → 42501 (function visible, anon refused) | `verify.sql` `state = fixed`, 11/11 ✅ (production md5 `df0e7850…` = locally tested) |
+| Health checks after | v1 13 PASS + 1 INFO, v2 10/10 | v1 13 PASS + 1 INFO, v2 10/10 |
+
+- Preflight before each: baseline unchanged, zero activity (no open consultations, no waiting/in-progress entries, no queue changes or nurse actions in the previous 15 min). No queue, patient, consultation or auth data changed; 0 queue changes, nurse actions or notifications in the 30 minutes covering the deployment.
+- Follow-up **PR #34** `chore/migration-version-names`: pure renames of both files to the recorded versions (blobs byte-identical to the stored SQL), plus test/doc references. Not merged.
+- Still NOT done (needs separate approval): re-enabling V3 Skip on `skip_waiting_patient`, moving classic Skip onto it, merging #31, Phase 3.
+
+### next_patient concurrency review — PR #33 (merged and applied)
 
 - **Confirmed production defect (pre-existing):** `notify_you_are_next()` / `notify_emergency_ahead()` insert notifications whose FK check holds `FOR KEY SHARE` on a waiting entry until commit. `next_patient()`'s `FOR UPDATE SKIP LOCKED` skips such rows, so a call made at the same moment as another call, a skip or an emergency change passes over the real next patient or returns `queue_empty` with a patient waiting.
 - **Fix prepared, NOT applied:** `fix/next-patient-no-key-update` (PR #33, stacked on #32; the migration itself is independent). `20261011010000_next_patient_no_key_update.sql` is the deployed definition (md5 `08dd4ed0…`) with only `for update` → `for no key update` in the claim. Rollback is the exact original; `verify.sql` is a read-only preflight/post-check (production currently `state = original`).
