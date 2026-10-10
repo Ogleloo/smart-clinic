@@ -7,15 +7,32 @@ Latest development checkpoint. Read this when continuing previous work.
 ## Last checkpoint
 
 **Date:** 2026-10-10
-**Branch:** `feat/reception-v3-queue` (PR #25, not merged)
-**Session:** Reception V3 Phase 3 final step — Skip patient wired.
+**Branch:** `fix/skip-queue-toast-and-double-submit-test` (from `main` at `4598e55`; PR #25 and the Skip wiring are merged, PR #26 is deployed but still open)
+**Session:** Reception V3 Phase 3 — the approved controlled end-to-end Skip test, and what it found.
 
-- PR #26 is deployed: migration `20261010003117_skip_patient_clinic_isolation` is live on the shared Supabase project (clinic isolation, receptionists waiting-only, no `p_no_show`, row locked). PR #26 itself is not merged.
-- Skip is now wired: `skipQueueEntry` Server Action (`app/actions/reception.ts`, caller's own session, UUID-shape check only, DB error shown verbatim, no `p_no_show`), `SkipPatientModal` submits it via `useActionState` (Confirm uses `loading={pending}` plus an in-flight ref against double clicks; Cancel/X/Escape/backdrop ignored while pending; error in `role="alert"`, modal stays open), `QueueManagementView` shows `QueueUpdatedToast` ("{token} skipped. The queue has been updated.", 5 s) and bumps a per-service `refreshNonce` so `ServiceQueueSync` re-fetches `get_service_queue` immediately. Filter selection is preserved. No next-patient naming anywhere; no Next button for receptionists.
-- Verified live (read-only): tsc and eslint clean; `reception-queue.spec.ts` 4 passed, 5 skipped (today's queue had no patients, so the Skip-modal, Cancel/Escape-no-POST, forged-ID and double-submit specs self-skipped); 4 mocked check-in specs passed. A temporary harness route (deleted) rendered the modal with a fake nonexistent entry id against the live Server Action: DB returned "Queue entry not found", modal stayed open, exactly 1 Server Action POST for a double click, Escape worked once pending cleared.
-- NOT verified: a real successful skip (would mutate shared data), the success toast/refresh path end-to-end, the in-spec forged-ID/double-submit tests against a real waiting row.
-- Proposed success-path fixture, awaiting approval: check in ONE clearly named walk-in (e.g. "ZZ Skip Test") to one service via the existing check-in flow (creates 1 patients row, 1 queue_entries row `waiting`), skip only that entry from `/reception/queue` (row becomes `skipped`, token consumed), confirm toast + row removal, then leave or remove the test patient with approval.
-- Phase 4 is not started. Dev note: `pending` can stay true for several seconds in dev while the page re-renders after the action; the modal cannot be dismissed during that window.
+### Controlled live test (one synthetic fixture, one real Skip)
+
+Pre-checks: `skip_patient()` migration live (`20261010003117`, body fingerprint unchanged, `anon` cannot execute), production deployment `4598e55` contains PR #25, receptionist and all services in the same clinic, no existing "ZZ Skip Test". Fixture created through the real check-in wizard: patient **"ZZ Skip Test"** (walk-in, no phone/ID), service **Chronic** (no nurse on duty, so nobody could call it), token **CHR-001**. Rows created: 1 `profiles`, 1 `queue_entries`; 0 consultations, 0 appointments.
+
+The one real Skip succeeded: exactly 1 Server Action request carrying the recorded queue-entry id (a fail-closed interceptor aborts any action request with a different UUID), HTTP 200, entry now `skipped` with `completed_at` set, **no consultation created**, toast "CHR-001 skipped. The queue has been updated.", list already empty by the time the toast appeared (no reload — a window marker survived), Chronic filter still selected, `waiting_today` 1 → 0. Dashboard: "Currently Waiting" 1 → 0; "Today's Check-ins" stays 1 (a skipped patient did check in); in-consultation and scheduled unchanged. `queue_entries` 2736 → 2737, `skipped` 4 → 5, `profiles` 93 → 94; every other record's fingerprint is identical to the pre-test baseline.
+
+**The fixture was left in place (skipped).** Cleanup — deleting the `ZZ Skip Test` profile and its skipped queue entry — is NOT done and needs separate approval. Find them by name ("ZZ Skip Test") / token CHR-001 dated 2026-10-10. Until then, tests that need a waiting patient self-skip.
+
+### Defects found by the test, and fixed on this branch
+
+1. **Toast covered the profile chip** (desktop, 9,108 px²) and the sticky mobile nav (13,246 px²). Figma frame 114:1353 has the same flaw (it moves the chip down and puts the toast on top). Now pinned under the chip band from 1280px up and at the bottom of the screen below that, `pointer-events: none`; also brought to the real Figma node (380×76, 12px radius, teal badge, 16/12px type — it had been built from a screenshot as a pill). Copy deliberately differs from Figma ("Next patient is now GC-014" would predict a patient).
+2. **Queue header overflowed at 768px** (fixed 480px title block squeezed the photo to 0px and scrolled the page ~32px). Pre-existing since Phase 3, missed because the width list skipped tablet portrait. Header now stacks below `lg`; regression tests at 768/900/1024/1280.
+3. **Double-submit test was wrong, not the app.** It used Playwright `click()` twice; `click()` waits for the button to be enabled, so the "second click" landed after the first request settled (a legitimate retry) — 2 requests in 4/10 runs. Instrumented: second click at +3.6s. Now three same-tick DOM clicks; negative control with the ref guard removed gives 3 requests, with it 1 (React queues extra submissions and runs them after the first settles). The guard in `SkipPatientModal` is necessary and works.
+
+### Known limits
+- Toast placement was verified by measurement (`getBoundingClientRect` at 1440/1280/1279/1024/900/768/390) on a throwaway page rendering the real components, and visually on the real page for the pre-fix layout; the post-fix toast has not been seen on the real queue page after a real skip (that would need a second live write).
+- The double-submit spec showed 1 locator timeout in 33 runs (15s wait for the error alert, not reproduced in the following 26; timeouts since widened to 30s, not re-run because nothing is waiting any more). Cause not established; most likely dev-server latency.
+- `scripts/verify.ts` lint errors are pre-existing and unrelated.
+
+### Next
+- Review this PR; decide whether to clean up the fixture.
+- PR #26 (migration already deployed) can be merged whenever convenient — it only adds the file and the disposable-Postgres harness.
+- Phase 4 (Profile Settings) not started.
 
 ---
 

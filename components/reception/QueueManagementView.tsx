@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/Button'
 import { queueEntryStatusToChip } from '@/lib/queueEntryStatus'
 import { ServiceQueueSync, type QueueRow } from './ServiceQueueSync'
 import { SkipPatientModal } from './SkipPatientModal'
-import { QueueUpdatedToast } from './QueueUpdatedToast'
+import { QueueToastViewport } from './QueueUpdatedToast'
 
 interface Service {
   id: string
@@ -90,13 +90,7 @@ export function QueueManagementView({ services, initialQueues }: QueueManagement
 
   return (
     <div className="flex flex-col gap-5">
-      {toastToken && (
-        <div className="pointer-events-none fixed inset-x-4 top-4 z-40 flex justify-end md:inset-x-auto md:right-8 md:top-6">
-          <div className="pointer-events-auto w-full max-w-[380px]">
-            <QueueUpdatedToast message={`${toastToken} skipped. The queue has been updated.`} />
-          </div>
-        </div>
-      )}
+      {toastToken && <QueueToastViewport message={`${toastToken} skipped. The queue has been updated.`} />}
 
       {services.map((s) => (
         <ServiceQueueSync

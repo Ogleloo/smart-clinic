@@ -21,20 +21,20 @@ export function QueueHeader({ fullName, clinicName }: QueueHeaderProps) {
   const firstInitials = initials(fullName)
 
   return (
-    <div className="flex flex-col gap-6 rounded-xl md:flex-row md:items-start md:justify-between">
-      <div className="flex flex-col gap-2 md:w-[480px] md:shrink-0 md:pt-1">
+    <div className="flex flex-col gap-6 rounded-xl lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-2 lg:w-[480px] lg:shrink-0 lg:pt-1">
         <h1 className={TYPE.pageTitle}>Queue management</h1>
         <p className="max-w-[455px] text-base text-muted">
           View the live queue, skip a waiting patient who has left, and track service flow.
         </p>
       </div>
 
-      <div className="relative min-h-[140px] flex-1 overflow-hidden rounded-xl bg-subtle md:min-h-[174px] md:max-w-[590px]">
+      <div className="relative min-h-[140px] flex-1 overflow-hidden rounded-xl bg-subtle md:min-h-[174px] lg:max-w-[590px]">
         <Image
           src="/images/clinic/riverside-reception.webp"
           alt=""
           fill
-          sizes="(min-width: 768px) 590px, 100vw"
+          sizes="(min-width: 1024px) 590px, 100vw"
           className="object-cover"
         />
         <div className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_5px_12px_rgba(5,48,46,0.09)] sm:max-w-[320px]">
