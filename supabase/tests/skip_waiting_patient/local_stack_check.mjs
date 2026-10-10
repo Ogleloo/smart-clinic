@@ -164,12 +164,12 @@ const HOLD = 6
 }
 {
   // K2: nurse A's skip runs first inside a held transaction (via psql, same function, same JWT claims); the real
-  // next_patient() over HTTP passes over the locked row at once and calls someone else.
+  // next_patient() over HTTP must pass over the row being skipped and call the SECOND patient — not the third.
   //
-  // Pre-existing behaviour observed here (not caused by this function): the skip's UPDATE fires
-  // notify_you_are_next(), which inserts a notification for the patient who becomes next; that FK check holds
-  // FOR KEY SHARE on their entry until commit, and next_patient()'s FOR UPDATE SKIP LOCKED skips it too. So
-  // with three patients waiting, next_patient calls the THIRD. Three are created so a patient remains callable.
+  // The skip's UPDATE fires notify_you_are_next(), which inserts a notification for the patient who becomes next;
+  // that FK check holds FOR KEY SHARE on their entry until commit. With next_patient() claiming FOR UPDATE SKIP
+  // LOCKED (deployed before 20261011010000_next_patient_no_key_update) the second patient is wrongly skipped too
+  // and the third is called — this check fails then (negative control). With FOR NO KEY UPDATE it passes.
   const head = await entry(CLINIC_A, SVC_A, 'waiting', new Date(Date.now() - 60_000))
   const second = await entry(CLINIC_A, SVC_A, 'waiting', new Date(Date.now() - 30_000))
   const third = await entry(CLINIC_A, SVC_A)
@@ -183,7 +183,7 @@ const HOLD = 6
   check(h.code === 0 && h.out.includes('skipped'), 'K2 skip (held) succeeded')
   check(!r.error && r.data?.status === 'called' && r.data?.queue_entry_id !== head, `K2 real next_patient over HTTP did not call the patient being skipped: ${r.error?.message ?? r.data?.status}`)
   const calledWho = r.data?.queue_entry_id === second ? 'second' : r.data?.queue_entry_id === third ? 'third' : 'unexpected'
-  check(calledWho !== 'unexpected', `K2 next_patient called the ${calledWho} patient${calledWho === 'third' ? ' (the second was KEY SHARE-locked by the skip’s you_are_next notification — pre-existing, see readiness report)' : ''}`)
+  check(calledWho === 'second', `K2 next_patient called the SECOND patient (called: ${calledWho})`)
   check(ms < 2500, `K2 next_patient did not wait (${ms}ms)`)
   check((await statusOf(head)) === 'skipped' && (await openConsultations(head)) === 0, 'K2 final: head skipped, no consultation')
   psql(`update public.consultations set ended_at = greatest(now(), started_at + interval '1 second') where ended_at is null;
