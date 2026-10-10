@@ -181,7 +181,7 @@ function MyQueueBody({
     [refresh, showToast]
   )
 
-  const flow = useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitted })
+  const flow = useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitted, initialStateError: currentError })
 
   useEffect(() => {
     if (!toast) return
@@ -207,12 +207,13 @@ function MyQueueBody({
       buildMyQueueRows({
         queue: snapshot.queue,
         estimates: snapshot.estimates,
-        currentEntry: flow.baseEntry,
+        // Unknown state: show no In Consultation row rather than a guess.
+        currentEntry: flow.stateError ? null : flow.baseEntry,
         completed: snapshot.completed,
         serviceNames,
         currentServiceId: nurse.serviceId,
       }),
-    [snapshot, flow.baseEntry, serviceNames, nurse.serviceId]
+    [snapshot, flow.baseEntry, flow.stateError, serviceNames, nurse.serviceId]
   )
   const counts = countMyQueueTabs(rows)
   const visible = filterMyQueueRows(rows, { tab, search, emergencyOnly })
@@ -243,10 +244,19 @@ function MyQueueBody({
         </>
       )}
 
-      {currentError && (
-        <p role="alert" className="rounded-md bg-danger-bg px-4 py-3 text-sm font-semibold text-[#B42318]">
-          We couldn’t check whether you have a consultation open. Reload the page before calling the next patient.
-        </p>
+      {/* Off duty there is no call panel to carry the warning, so it is shown here (with the same read-only retry). */}
+      {!scoped && flow.stateError && (
+        <div role="alert" className="flex flex-col gap-3 rounded-md bg-warning-bg px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-semibold">{flow.stateError}</p>
+          <button
+            type="button"
+            disabled={flow.retrying}
+            onClick={() => flow.retryStateRead()}
+            className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-sm border-[1.2px] border-[#037F74] bg-surface px-5 text-sm font-semibold text-[#037F74] hover:bg-primary-50 disabled:opacity-60"
+          >
+            {flow.retrying ? 'Checking…' : 'Check again'}
+          </button>
+        </div>
       )}
 
       <section aria-label="Queue" className="flex flex-col gap-4">
@@ -334,10 +344,11 @@ function MyQueueBody({
             scoped={scoped}
             isOnDuty={nurse.isOnDuty}
             errors={snapshot.errors}
+            stateUnknown={!!flow.stateError}
             serviceLabel={serviceLabel}
             onClearSearch={() => setSearch('')}
           />
-          {scoped && othersInConsultation > 0 && (
+          {scoped && !flow.stateError && othersInConsultation > 0 && (
             <p className="px-0 text-xs text-muted xl:px-5">
               {othersInConsultation} other patient{othersInConsultation === 1 ? ' is' : 's are'} in consultation with
               another nurse on {serviceLabel}.
@@ -372,6 +383,7 @@ function PanelBody({
   scoped,
   isOnDuty,
   errors,
+  stateUnknown,
   serviceLabel,
   onClearSearch,
 }: {
@@ -382,6 +394,7 @@ function PanelBody({
   scoped: boolean
   isOnDuty: boolean
   errors: QueueSnapshot['errors']
+  stateUnknown: boolean
   serviceLabel: string
   onClearSearch: () => void
 }) {
@@ -427,6 +440,9 @@ function PanelBody({
   } else if (tab === 'waiting') {
     title = 'No one is waiting'
     detail = `New check-ins for ${serviceLabel} will appear here automatically.`
+  } else if (tab === 'in_consultation' && stateUnknown) {
+    title = 'Your current consultation couldn’t be confirmed'
+    detail = 'Use Check again above. Nothing is shown here until it is confirmed.'
   } else if (tab === 'in_consultation') {
     title = 'No patient in consultation'
     detail = 'Use Call next patient to start the next consultation.'

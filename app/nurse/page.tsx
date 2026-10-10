@@ -42,7 +42,7 @@ export default async function NursePage() {
     .eq('is_active', true)
     .order('name')
 
-  const [{ entry: currentEntry }, { data: settings }] = await Promise.all([
+  const [{ entry: currentEntry, error: currentError }, { data: settings }] = await Promise.all([
     getNurseCurrentState(),
     profile?.clinic_id
       ? supabase
@@ -107,6 +107,8 @@ export default async function NursePage() {
               undoWindowSeconds={settings?.undo_window_seconds ?? DEFAULT_UNDO_WINDOW_SECONDS}
               serviceAverageMinutes={serviceAverageMinutes}
               initialNextToken={initialNextToken}
+              // A failed read must not look like "no patient": the panel starts with Next patient paused.
+              initialStateError={currentError ?? null}
             />
           </div>
           <WaitingList

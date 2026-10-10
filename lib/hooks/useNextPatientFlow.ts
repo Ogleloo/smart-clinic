@@ -52,11 +52,23 @@ const UNDO_DISABLED_LINGER_MS = 3000
  */
 export const UNREACHABLE_MESSAGE = 'Couldn’t reach the server. Check your connection and try again.'
 
-async function currentStateOrNull(): Promise<NurseCurrentEntry | null> {
+/** Shown whenever the nurse's current consultation could not be read: the state is unknown, not "no patient". */
+export const STATE_UNKNOWN_MESSAGE =
+  'We couldn’t confirm your current consultation. Next patient is paused until it is checked again.'
+
+/**
+ * Two different outcomes, never conflated: a successful read (which may legitimately find no open
+ * consultation — entry null) and a failed read (the state is unknown). Only the first may drive the screen as
+ * "no current patient".
+ */
+type StateRead = { ok: true; entry: NurseCurrentEntry | null } | { ok: false; error: string }
+
+async function readCurrentState(): Promise<StateRead> {
   try {
-    return (await getNurseCurrentState()).entry
+    const { entry, error } = await getNurseCurrentState()
+    return error ? { ok: false, error } : { ok: true, entry }
   } catch {
-    return null
+    return { ok: false, error: UNREACHABLE_MESSAGE }
   }
 }
 
@@ -64,8 +76,13 @@ interface UseNextPatientFlowOptions {
   initialEntry: NurseCurrentEntry | null
   /** clinic_settings.undo_window_seconds — needed because a queue_empty result doesn't carry its own copy (only 'called' does). */
   undoWindowSeconds: number
-  /** Called after a call or an undo has landed and the authoritative state has been re-read — e.g. to re-read a queue list. Never called for a failed or long-consultation attempt. */
+  /** Called after a call or an undo has landed (whether or not the follow-up read succeeded) — e.g. to re-read a queue list. Never called for a failed or long-consultation attempt. */
   onCommitted?: (event: CommittedEvent) => void
+  /**
+   * Set when the page's own server-side read of the current consultation failed. The state then starts as
+   * unknown: Next patient is refused until retryStateRead() (or a focus reconciliation) succeeds.
+   */
+  initialStateError?: string | null
 }
 
 /**
@@ -74,9 +91,18 @@ interface UseNextPatientFlowOptions {
  * drift apart. Moved here unchanged from CurrentPatientPanel, plus an
  * in-flight guard on submit/undo (see busyRef).
  */
-export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitted }: UseNextPatientFlowOptions) {
+export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitted, initialStateError }: UseNextPatientFlowOptions) {
   const router = useRouter()
-  const [baseEntry, setBaseEntry] = useState<NurseCurrentEntry | null>(initialEntry)
+  const [baseEntry, setBaseEntry] = useState<NurseCurrentEntry | null>(initialStateError ? null : initialEntry)
+  // Non-null while the nurse's current consultation is UNKNOWN (the last authoritative read failed). Fail
+  // closed: next_patient() is never sent from an unknown state, because it would end whatever consultation is
+  // really open. A confirmed call result and its Undo window are kept; only advancing is blocked.
+  const [stateError, setStateError] = useState<string | null>(initialStateError ? STATE_UNKNOWN_MESSAGE : null)
+  const stateErrorRef = useRef(stateError)
+  useEffect(() => {
+    stateErrorRef.current = stateError
+  })
+  const [retrying, setRetrying] = useState(false)
   const [transient, setTransient] = useState<Transient>({ kind: 'NONE' })
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -120,8 +146,21 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
     return () => clearInterval(interval)
   }, [])
 
+  /** Apply an authoritative read: a success establishes the state (even "no patient"); a failure marks it unknown. */
+  const applyRead = useCallback((read: StateRead) => {
+    if (read.ok) {
+      setBaseEntry(read.entry)
+      setStateError(null)
+    } else {
+      // Never keep showing a patient the read could not confirm (it may be the consultation that just ended).
+      setBaseEntry(null)
+      setStateError(STATE_UNKNOWN_MESSAGE)
+    }
+  }, [])
+
   const submit = useCallback(async (longDecision?: LongDecision) => {
     if (busyRef.current) return
+    if (stateErrorRef.current) return
     busyRef.current = true
     const actionId = pendingActionId.current ?? crypto.randomUUID()
     pendingActionId.current = actionId
@@ -168,10 +207,12 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
       // appointment_id or service_id — re-read the authoritative row
       // rather than guess at them (same principle handleUndo already
       // follows below: don't reconstruct what a fresh read can give
-      // exactly).
-      setBaseEntry(await currentStateOrNull())
+      // exactly). If that read fails, the call still happened: the result
+      // below and its Undo window are kept, and the state is marked unknown.
+      applyRead(await readCurrentState())
     } else {
       setBaseEntry(null)
+      setStateError(null)
     }
 
     setTransient({
@@ -188,7 +229,7 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
     // page picks up the change.
     router.refresh()
     onCommittedRef.current?.({ kind: 'advanced', result: data as CalledResult | QueueEmptyResult })
-  }, [undoWindowSeconds, router])
+  }, [undoWindowSeconds, router, applyRead])
 
   const handleUndo = useCallback(async (actionId: string) => {
     if (busyRef.current) return
@@ -217,11 +258,21 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
     // undo_next_patient only returns the restored token, not full
     // patient details — re-read current state rather than guess them.
     setTransient({ kind: 'NONE' })
-    setBaseEntry(await currentStateOrNull())
+    applyRead(await readCurrentState())
     busyRef.current = false
     router.refresh()
     onCommittedRef.current?.({ kind: 'undone' })
-  }, [router])
+  }, [router, applyRead])
+
+  /** Read-only: re-reads the current consultation. Never calls next_patient() or undo. */
+  const retryStateRead = useCallback(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setRetrying(true)
+    applyRead(await readCurrentState())
+    setRetrying(false)
+    busyRef.current = false
+  }, [applyRead])
 
   // Collapse COMPLETED_WITH_UNDO once its window closes: show it
   // disabled with a reason briefly, then fall back to plain
@@ -257,16 +308,16 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
       if (document.visibilityState !== 'visible') return
       if (transientRef.current.kind !== 'NONE') return
       if (busyRef.current) return
-      getNurseCurrentState()
-        .then(({ entry, error }) => {
-          // A failed read is not "no patient": keep what is on screen.
-          if (error) return
-          // A call or undo that started while this read was in flight owns
-          // the result; this older read must not overwrite it.
-          if (busyRef.current || transientRef.current.kind !== 'NONE') return
-          setBaseEntry(entry)
-        })
-        .catch(() => {})
+      readCurrentState().then((read) => {
+        // A failed read is not "no patient": keep what is on screen (and an
+        // unknown state stays unknown).
+        if (!read.ok) return
+        // A call or undo that started while this read was in flight owns
+        // the result; this older read must not overwrite it.
+        if (busyRef.current || transientRef.current.kind !== 'NONE') return
+        setBaseEntry(read.entry)
+        setStateError(null)
+      })
     }
     document.addEventListener('visibilitychange', reconcile)
     window.addEventListener('focus', reconcile)
@@ -282,6 +333,11 @@ export function useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitte
     error,
     now,
     isSubmitting: transient.kind === 'SUBMITTING',
+    /** Non-null while the current consultation is unknown; Next patient is refused until a read succeeds. */
+    stateError,
+    canAdvance: stateError === null,
+    retrying,
+    retryStateRead,
     submit,
     handleUndo,
   }

@@ -89,10 +89,34 @@ function NextButton({ flow, hasPatient, nextToken }: { flow: Flow; hasPatient: b
       : 'No one is waiting.'
   return (
     <div className="flex flex-col gap-1.5 sm:items-end">
-      <button type="button" className={`${PRIMARY_BTN} sm:min-w-[220px]`} disabled={flow.isSubmitting} onClick={() => flow.submit()}>
+      <button
+        type="button"
+        className={`${PRIMARY_BTN} sm:min-w-[220px]`}
+        disabled={flow.isSubmitting || !flow.canAdvance}
+        aria-describedby={flow.canAdvance ? undefined : 'state-unknown-hint'}
+        onClick={() => flow.submit()}
+      >
         {flow.isSubmitting ? 'Please wait…' : hasPatient ? 'Next patient' : 'Call next patient'}
       </button>
-      <p className="text-xs text-muted sm:max-w-[300px] sm:text-right">{hint}</p>
+      <p id={flow.canAdvance ? undefined : 'state-unknown-hint'} className="text-xs text-muted sm:max-w-[300px] sm:text-right">
+        {flow.canAdvance ? hint : 'Paused until your current consultation is confirmed.'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * The current consultation could not be read, so Next patient is paused (fail closed). "Check again" only
+ * re-reads; it never calls next_patient() or undo.
+ */
+function StateUnknownAlert({ flow }: { flow: Flow }) {
+  if (!flow.stateError) return null
+  return (
+    <div role="alert" className="flex flex-col gap-3 rounded-md bg-warning-bg px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
+      <p className="font-semibold">{flow.stateError}</p>
+      <button type="button" className={`${OUTLINE_BTN} min-h-11 shrink-0`} disabled={flow.retrying} onClick={() => flow.retryStateRead()}>
+        {flow.retrying ? 'Checking…' : 'Check again'}
+      </button>
     </div>
   )
 }
@@ -173,12 +197,13 @@ export function CallNextPanel({ flow, nextToken, serviceName, serviceAverageMinu
             </p>
           </div>
         </div>
+        <StateUnknownAlert flow={flow} />
         <ErrorAlert message={error} />
         <div className="flex flex-col gap-3 sm:flex-row">
-          <button type="button" className={PRIMARY_BTN} disabled={flow.isSubmitting} onClick={() => flow.submit('record')}>
+          <button type="button" className={PRIMARY_BTN} disabled={flow.isSubmitting || !flow.canAdvance} onClick={() => flow.submit('record')}>
             {flow.isSubmitting ? 'Please wait…' : `Record ${minutes} min`}
           </button>
-          <button type="button" className={OUTLINE_BTN} disabled={flow.isSubmitting} onClick={() => flow.submit('break')}>
+          <button type="button" className={OUTLINE_BTN} disabled={flow.isSubmitting || !flow.canAdvance} onClick={() => flow.submit('break')}>
             Break occurred
           </button>
         </div>
@@ -232,6 +257,7 @@ export function CallNextPanel({ flow, nextToken, serviceName, serviceAverageMinu
         )}
 
         {ended && <p className="text-sm text-muted">{ended}</p>}
+        <StateUnknownAlert flow={flow} />
         <ErrorAlert message={error} />
 
         <div className="flex w-full max-w-[580px] flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -251,12 +277,15 @@ export function CallNextPanel({ flow, nextToken, serviceName, serviceAverageMinu
           </h2>
           {baseEntry ? (
             <CurrentPatientSummary entry={baseEntry} now={now} serviceName={serviceName} serviceAverageMinutes={serviceAverageMinutes} />
+          ) : flow.stateError ? (
+            <p className="text-base text-ink">Current consultation not confirmed.</p>
           ) : (
             <p className="text-base text-ink">No patient in consultation.</p>
           )}
         </div>
         <NextButton flow={flow} hasPatient={!!baseEntry} nextToken={nextToken} />
       </div>
+      <StateUnknownAlert flow={flow} />
       <ErrorAlert message={error} />
     </section>
   )

@@ -19,6 +19,8 @@ interface CurrentPatientPanelProps {
   serviceAverageMinutes: number | null
   /** The token "Next patient" will call, so the consequence line can name it. Purely informational — next_patient's own atomic pick is what actually happens, so a token that goes stale between broadcasts is a display nicety, never a correctness risk. */
   initialNextToken: string | null
+  /** The page's server-side read of the current consultation failed: start with the state unknown (Next patient paused). */
+  initialStateError?: string | null
 }
 
 function formatClockTime(iso: string): string {
@@ -40,13 +42,12 @@ export function CurrentPatientPanel({
   undoWindowSeconds,
   serviceAverageMinutes,
   initialNextToken,
+  initialStateError,
 }: CurrentPatientPanelProps) {
   const [supabase] = useState(() => createClient())
   const [nextToken, setNextToken] = useState<string | null>(initialNextToken)
-  const { baseEntry, transient, error, now, isSubmitting, submit, handleUndo } = useNextPatientFlow({
-    initialEntry,
-    undoWindowSeconds,
-  })
+  const flow = useNextPatientFlow({ initialEntry, undoWindowSeconds, initialStateError })
+  const { baseEntry, transient, error, now, isSubmitting, submit, handleUndo, canAdvance } = flow
 
   const refreshNextToken = useCallback(async () => {
     const { data } = await supabase.rpc('get_service_queue', { p_service_id: serviceId })
@@ -76,16 +77,17 @@ export function CurrentPatientPanel({
         <p className="text-sm font-semibold text-ink">
           This consultation has been open for {minutes} minutes. Was this continuous patient care?
         </p>
+        <StateUnknownNotice flow={flow} />
         {error && (
           <p role="alert" className="text-sm text-danger">
             {error}
           </p>
         )}
         <div className="flex gap-2">
-          <Button variant="primary" loading={isSubmitting} onClick={() => submit('record')}>
+          <Button variant="primary" loading={isSubmitting} disabled={!canAdvance} onClick={() => submit('record')}>
             Record {minutes} min
           </Button>
-          <Button variant="tertiary" loading={isSubmitting} onClick={() => submit('break')}>
+          <Button variant="tertiary" loading={isSubmitting} disabled={!canAdvance} onClick={() => submit('break')}>
             Break occurred
           </Button>
         </div>
@@ -102,6 +104,7 @@ export function CurrentPatientPanel({
           <p className="text-xs font-semibold tracking-wide text-primary-100">CURRENT PATIENT</p>
           <p className="text-lg font-semibold">Consultation completed. No patients waiting.</p>
           <UndoStrip t={transient} now={now} onUndo={handleUndo} />
+          <StateUnknownNotice flow={flow} />
         </section>
       )
     }
@@ -117,12 +120,13 @@ export function CurrentPatientPanel({
         {baseEntry && <CheckInLine entry={baseEntry} />}
         <StatsRow elapsedStartedAt={baseEntry?.startedAt ?? null} now={now} serviceAverageMinutes={serviceAverageMinutes} />
         <div>
-          <Button variant="primary" loading={isSubmitting} onClick={() => submit()}>
+          <Button variant="primary" loading={isSubmitting} disabled={!canAdvance} onClick={() => submit()}>
             Next patient
           </Button>
           <p className="mt-1.5 text-xs text-primary-100">{nextActionHint}</p>
         </div>
         <UndoStrip t={transient} now={now} onUndo={handleUndo} />
+        <StateUnknownNotice flow={flow} />
       </section>
     )
   }
@@ -142,8 +146,12 @@ export function CurrentPatientPanel({
           <StatsRow elapsedStartedAt={baseEntry.startedAt} now={now} serviceAverageMinutes={serviceAverageMinutes} />
         </>
       ) : (
-        <p className="text-sm text-primary-100">No patient in consultation.</p>
+        <p className="text-sm text-primary-100">
+          {flow.stateError ? 'Current consultation not confirmed.' : 'No patient in consultation.'}
+        </p>
       )}
+
+      <StateUnknownNotice flow={flow} />
 
       {error && (
         <p role="alert" className="rounded-md bg-danger-bg px-3 py-2 text-sm font-semibold text-danger">
@@ -152,7 +160,7 @@ export function CurrentPatientPanel({
       )}
 
       <div>
-        <Button variant="primary" loading={isSubmitting} onClick={() => submit()}>
+        <Button variant="primary" loading={isSubmitting} disabled={!canAdvance} onClick={() => submit()}>
           {baseEntry ? 'Next patient' : 'Call next patient'}
         </Button>
         <p className="mt-1.5 text-xs text-primary-100">
@@ -160,6 +168,19 @@ export function CurrentPatientPanel({
         </p>
       </div>
     </section>
+  )
+}
+
+/** Fail closed when the current consultation is unknown: Next patient is disabled; "Check again" only re-reads. */
+function StateUnknownNotice({ flow }: { flow: ReturnType<typeof useNextPatientFlow> }) {
+  if (!flow.stateError) return null
+  return (
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-warning-bg px-3 py-2 text-sm font-semibold text-ink">
+      <p>{flow.stateError}</p>
+      <Button variant="secondary" loading={flow.retrying} onClick={() => flow.retryStateRead()}>
+        Check again
+      </Button>
+    </div>
   )
 }
 
