@@ -13,18 +13,28 @@ function trackServerActions(page: Page) {
   return posts
 }
 
-/** Replaces the real queue_entry_id in the Server Action body with a nonexistent UUID, so the real RPC rejects it and nothing is mutated. */
+/**
+ * Swaps the real queue_entry_id in every Server Action POST for a nonexistent UUID, so the real RPC
+ * rejects it and nothing is mutated. Fails closed: matches any URL, and aborts any action POST it can't
+ * prove it rewrote (not exactly one UUID, or the real id survives) — a real id must never reach the server.
+ */
 async function forgeSkipId(page: Page) {
   const posts: string[] = []
-  await page.route('**/reception/queue', async (route) => {
+  const aborted: string[] = []
+  await page.route('**/*', async (route) => {
     const req = route.request()
     if (req.method() !== 'POST' || !req.headers()['next-action']) return route.continue()
     const body = req.postData() ?? ''
-    expect(body).toMatch(UUID_RE)
+    const ids = body.match(new RegExp(UUID_RE.source, 'gi')) ?? []
+    const forged = ids.length === 1 ? body.split(ids[0]).join(NONEXISTENT_ID) : ''
+    if (ids.length !== 1 || ids[0].toLowerCase() === NONEXISTENT_ID || forged.includes(ids[0]) || !forged.includes(NONEXISTENT_ID)) {
+      aborted.push(req.url())
+      return route.abort()
+    }
     posts.push(req.url())
-    await route.continue({ postData: body.replace(UUID_RE, NONEXISTENT_ID) })
+    await route.continue({ postData: forged })
   })
-  return posts
+  return Object.assign(posts, { aborted })
 }
 
 /**
@@ -153,6 +163,7 @@ test.describe('Queue Management', () => {
 
     await expect(dialog.getByRole('alert')).toContainText(/Queue entry not found/i)
     await expect(dialog).toBeVisible()
+    expect(actionPosts.aborted).toEqual([])
     expect(actionPosts.length).toBe(1)
     expect(await page.locator('table tbody tr').count()).toBe(rowsBefore)
     await expect(page.getByRole('button', { name: 'Skip' }).first()).toBeVisible()
@@ -169,6 +180,7 @@ test.describe('Queue Management', () => {
     await Promise.all([confirm.click(), confirm.click({ force: true, noWaitAfter: true }).catch(() => {})])
 
     await expect(dialog.getByRole('alert')).toContainText(/Queue entry not found/i)
+    expect(actionPosts.aborted).toEqual([])
     expect(actionPosts.length).toBe(1)
   })
 
