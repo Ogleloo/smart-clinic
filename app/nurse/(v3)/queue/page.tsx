@@ -11,7 +11,7 @@ const DEFAULT_UNDO_WINDOW_SECONDS = 60
 
 /**
  * Nurse V3 My Queue (Figma frame 161:170), Phase 2. Loading is read-only; every change goes through the
- * existing nurse Server Actions (next_patient, undo_next_patient, skip_patient, set_emergency_priority, set_duty,
+ * existing nurse Server Actions (next_patient, undo_next_patient, set_emergency_priority, set_duty,
  * end_shift) from the client, exactly as on the working screen at /nurse, which stays available.
  *
  * Like /nurse, the current consultation is read off the nurse's open consultations row on every load — a reload
@@ -22,7 +22,7 @@ const DEFAULT_UNDO_WINDOW_SECONDS = 60
 export default async function NurseQueuePage() {
   const { supabase, user } = await requireRole('nurse')
 
-  let props: MyQueueViewProps & { key: string }
+  let props: MyQueueViewProps
   try {
     props = await loadMyQueue(supabase, user.id)
   } catch {
@@ -43,14 +43,12 @@ export default async function NurseQueuePage() {
     )
   }
 
-  // The key remounts the view when duty or service changes, resetting its state to the new props.
-  const { key, ...viewProps } = props
-  return <MyQueueView key={key} {...viewProps} />
+  return <MyQueueView {...props} />
 }
 
 type ServerClient = Awaited<ReturnType<typeof requireRole>>['supabase']
 
-async function loadMyQueue(supabase: ServerClient, authUserId: string): Promise<MyQueueViewProps & { key: string }> {
+async function loadMyQueue(supabase: ServerClient, authUserId: string): Promise<MyQueueViewProps> {
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('id, full_name, is_on_duty, current_service_id, clinic_id')
@@ -80,7 +78,6 @@ async function loadMyQueue(supabase: ServerClient, authUserId: string): Promise<
   const activeServices = allServices.filter((s) => s.is_active).map(({ id, name }) => ({ id, name }))
 
   return {
-    key: `${profile.is_on_duty ? 'on' : 'off'}:${serviceId ?? 'none'}`,
     nurse: {
       profileId: profile.id,
       fullName: profile.full_name,

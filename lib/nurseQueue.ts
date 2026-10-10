@@ -172,18 +172,6 @@ export function buildMyQueueRows(input: {
   return { rows, othersInConsultation, nextToken }
 }
 
-/**
- * Why a waiting-row Skip must be refused, or null when it may proceed. A nurse's skip_patient() also accepts an
- * in_progress entry (and closes its consultation), so the waiting-row action checks the status first.
- * `status` null means the entry could not be found in the nurse's clinic.
- */
-export function waitingSkipRefusal(status: string | null): string | null {
-  if (status === null) return 'Queue entry not found'
-  if (status === 'waiting') return null
-  if (status === 'in_progress') return 'This patient is already in consultation, so they can’t be skipped from the waiting list.'
-  return 'That patient is no longer waiting.'
-}
-
 /** Token search ignores case and punctuation, so "gc113" finds "GC-113". */
 function normalise(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, '')

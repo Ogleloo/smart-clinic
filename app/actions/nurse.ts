@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
-import { waitingSkipRefusal } from '@/lib/nurseQueue'
 
 export type LongDecision = 'record' | 'break'
 
@@ -273,46 +272,4 @@ export async function setEmergencyPriority(
 
   revalidateNurseScreens()
   return { success: true }
-}
-
-export type WaitingSkipState = { error?: string; skippedToken?: string }
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/**
- * Skip from a *waiting-list row* (Nurse V3 My Queue). For a nurse,
- * skip_patient() also accepts an in_progress entry and closes its open
- * consultation — that is how a current patient who walked out is handled,
- * and it must not be reachable from a waiting row. So the entry's status
- * is read first (RLS: queue_select_staff, the nurse's own clinic) and the
- * skip only proceeds while it is still 'waiting'.
- *
- * Residual gap, documented rather than hidden: the check and the RPC are
- * two statements, so a next_patient() landing for this same patient in the
- * milliseconds between them would still be skipped (and that new
- * consultation closed). Closing it fully needs an expected-status
- * parameter on skip_patient() — a migration, out of scope here.
- *
- * No p_no_show, and no reason/notes: skip_patient() has nowhere to store
- * a reason.
- */
-export async function skipWaitingPatient(_prev: WaitingSkipState, formData: FormData): Promise<WaitingSkipState> {
-  const queueEntryId = String(formData.get('queue_entry_id') ?? '')
-  if (!UUID_RE.test(queueEntryId)) return { error: 'Missing or invalid queue entry.' }
-
-  const supabase = await createClient()
-  const { data: entry, error: readError } = await supabase
-    .from('queue_entries')
-    .select('id, status')
-    .eq('id', queueEntryId)
-    .maybeSingle()
-  if (readError) return { error: readError.message }
-  const refusal = waitingSkipRefusal(entry?.status ?? null)
-  if (refusal) return { error: refusal }
-
-  const { data, error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
-  if (error) return { error: error.message }
-
-  revalidateNurseScreens()
-  return { skippedToken: data.token }
 }

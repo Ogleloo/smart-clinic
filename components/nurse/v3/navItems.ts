@@ -8,7 +8,7 @@ export type NurseNavItem = { href: string; label: string; icon: LucideIcon }
  */
 export const NURSE_WORKSPACE_HREF = '/nurse'
 export const NURSE_DASHBOARD_HREF = '/nurse/dashboard'
-/** Nurse V3 My Queue (Phase 2): the queue, duty, Call next, Undo and Skip in the V3 design. */
+/** Nurse V3 My Queue (Phase 2): the queue, duty, Call next and Undo in the V3 design (Skip disabled for now). */
 export const NURSE_QUEUE_HREF = '/nurse/queue'
 
 /**

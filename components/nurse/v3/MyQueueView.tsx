@@ -25,8 +25,7 @@ import { EndSessionControl } from '@/components/nurse/EndSessionControl'
 import { CoverageWarning } from '@/components/nurse/CoverageWarning'
 import { NurseProfileChip } from './NurseProfileChip'
 import { CallNextPanel } from './CallNextPanel'
-import { MyQueueTable } from './MyQueueTable'
-import { NurseSkipModal } from './NurseSkipModal'
+import { MyQueueTable, SKIP_UNAVAILABLE_NOTE_ID } from './MyQueueTable'
 import { formatActivityTime } from './RecentActivityPanel'
 import { NURSE_WORKSPACE_HREF } from './navItems'
 
@@ -65,20 +64,57 @@ function QueueBroadcastSync({ serviceId, onChange, onOnline }: { serviceId: stri
 }
 
 /**
- * Nurse V3 My Queue (Figma frame 161:170, with 162:534 / 164:192 / 164:268 as its interaction states).
+ * Nurse V3 My Queue (Figma frame 161:170, with 162:534 / 164:192 as its interaction states). The Skip Patient
+ * modal (164:268) is not wired: Skip is disabled fail-closed until an atomic backend check is approved.
  *
  * The service's waiting queue is shared by every nurse on that service, so it is labelled as the service queue,
  * not as patients assigned to this nurse. "In Consultation" is this nurse's own open consultation (from
  * useNextPatientFlow, the same state machine as the working screen); "Completed" is this nurse's own
  * consultations ended today.
  *
- * Every refresh — realtime ping, window focus, a completed call/undo/skip — re-reads the whole snapshot. Each
+ * Every refresh — realtime ping, window focus, a completed call or undo — re-reads the whole snapshot. Each
  * read is numbered and an older read that resolves late is dropped, so it can never overwrite newer state.
  * Search, tab and filter are local state and survive refreshes.
+ *
+ * Split in two on purpose. The outer part (heading, chip, duty bar with End session) is never remounted, so
+ * EndSessionControl's "Session ended" report survives going off duty. The body below it is keyed on duty and
+ * service, so a duty or service change starts it from the new server props.
  */
-export function MyQueueView({
+export function MyQueueView(props: MyQueueViewProps) {
+  const { nurse, services } = props
+  const scoped = nurse.isOnDuty && !!nurse.serviceId
+  const serviceLabel = nurse.serviceName ?? 'your service'
+  return (
+    <main className="mx-auto flex w-full max-w-[1176px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+      <div className="flex flex-col-reverse gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex flex-col gap-1.5">
+          <h1 className={TYPE.pageTitle}>My Queue</h1>
+          <p className="text-base text-muted">
+            {scoped
+              ? `The shared waiting queue for ${serviceLabel}, your current patient and the consultations you completed today.`
+              : 'Go on duty to see your service’s queue. Consultations you completed today are listed below.'}
+          </p>
+        </div>
+        <div className="self-start xl:-mt-4 xl:w-[250px] xl:shrink-0">
+          <NurseProfileChip fullName={nurse.fullName} clinicName={nurse.clinicName} />
+        </div>
+      </div>
+
+      <NurseHeader
+        services={services}
+        isOnDuty={nurse.isOnDuty}
+        currentServiceId={nurse.serviceId}
+        currentServiceName={nurse.serviceName}
+        endSession={<EndSessionControl isOnDuty={nurse.isOnDuty} currentServiceId={nurse.serviceId} />}
+      />
+
+      <MyQueueBody key={`${nurse.isOnDuty ? 'on' : 'off'}:${nurse.serviceId ?? 'none'}`} {...props} />
+    </main>
+  )
+}
+
+function MyQueueBody({
   nurse,
-  services,
   serviceNames,
   initialSnapshot,
   initialEntry,
@@ -96,7 +132,6 @@ export function MyQueueView({
   const [search, setSearch] = useState('')
   const [emergencyOnly, setEmergencyOnly] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [skipTarget, setSkipTarget] = useState<MyQueueRow | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   const requestSeq = useRef(0)
@@ -182,16 +217,6 @@ export function MyQueueView({
   const counts = countMyQueueTabs(rows)
   const visible = filterMyQueueRows(rows, { tab, search, emergencyOnly })
 
-  const onSkipped = useCallback(
-    (token: string) => {
-      setSkipTarget(null)
-      showToast(`${token} was skipped and removed from the waiting queue.`)
-      void refresh()
-    },
-    [refresh, showToast]
-  )
-  const closeSkip = useCallback(() => setSkipTarget(null), [])
-
   function onTabKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
     e.preventDefault()
@@ -203,29 +228,7 @@ export function MyQueueView({
   const serviceLabel = nurse.serviceName ?? 'your service'
 
   return (
-    <main className="mx-auto flex w-full max-w-[1176px] flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
-      <div className="flex flex-col-reverse gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="flex flex-col gap-1.5">
-          <h1 className={TYPE.pageTitle}>My Queue</h1>
-          <p className="text-base text-muted">
-            {scoped
-              ? `The shared waiting queue for ${serviceLabel}, your current patient and the consultations you completed today.`
-              : 'Go on duty to see your service’s queue. Consultations you completed today are listed below.'}
-          </p>
-        </div>
-        <div className="self-start xl:-mt-4 xl:w-[250px] xl:shrink-0">
-          <NurseProfileChip fullName={nurse.fullName} clinicName={nurse.clinicName} />
-        </div>
-      </div>
-
-      <NurseHeader
-        services={services}
-        isOnDuty={nurse.isOnDuty}
-        currentServiceId={nurse.serviceId}
-        currentServiceName={nurse.serviceName}
-        endSession={<EndSessionControl isOnDuty={nurse.isOnDuty} currentServiceId={nurse.serviceId} />}
-      />
-
+    <>
       {nurse.isOnDuty && !nurse.serviceId && (
         <p role="status" className="rounded-md border border-border bg-subtle p-4 text-sm text-ink">
           You’re on duty without an assigned service. Choose a service above to see its queue and call patients.
@@ -333,7 +336,6 @@ export function MyQueueView({
             errors={snapshot.errors}
             serviceLabel={serviceLabel}
             onClearSearch={() => setSearch('')}
-            onSkip={setSkipTarget}
           />
           {scoped && othersInConsultation > 0 && (
             <p className="px-0 text-xs text-muted xl:px-5">
@@ -352,14 +354,13 @@ export function MyQueueView({
         .
       </p>
 
-      {skipTarget && <NurseSkipModal row={skipTarget} onClose={closeSkip} onSkipped={onSkipped} />}
       {/* Figma 162:534. Bottom of the screen, not under the chip as on Reception: here the duty bar sits there, and the toast must never sit over its controls. */}
       {toast && (
         <div className="pointer-events-none fixed inset-x-4 bottom-4 z-40 flex justify-center md:left-[280px] xl:left-auto xl:right-8 xl:w-[380px]">
           <QueueUpdatedToast message={toast} />
         </div>
       )}
-    </main>
+    </>
   )
 }
 
@@ -373,7 +374,6 @@ function PanelBody({
   errors,
   serviceLabel,
   onClearSearch,
-  onSkip,
 }: {
   rows: MyQueueRow[]
   tab: MyQueueTab
@@ -384,7 +384,6 @@ function PanelBody({
   errors: QueueSnapshot['errors']
   serviceLabel: string
   onClearSearch: () => void
-  onSkip: (row: MyQueueRow) => void
 }) {
   const wantsQueue = tab === 'all' || tab === 'waiting'
   const wantsCompleted = tab === 'all' || tab === 'completed'
@@ -406,7 +405,13 @@ function PanelBody({
     return (
       <>
         {alertNodes}
-        <MyQueueTable rows={rows} caption={caption} canAct={scoped} onSkip={onSkip} />
+        {scoped && rows.some((r) => r.status === 'waiting') && (
+          <p id={SKIP_UNAVAILABLE_NOTE_ID} className="rounded-md bg-subtle px-4 py-3 text-sm text-ink xl:mx-4 xl:mt-4">
+            <span className="font-semibold">Skip is temporarily unavailable on My Queue</span> while a safety fix is
+            reviewed. If a waiting patient needs to be skipped, ask reception to skip them.
+          </p>
+        )}
+        <MyQueueTable rows={rows} caption={caption} canAct={scoped} />
       </>
     )
   }
