@@ -864,6 +864,197 @@ test.describe('harness: End session report survives going off duty', () => {
   })
 })
 
+test.describe('harness: unknown consultation state fails closed (V3 My Queue)', () => {
+  test.afterEach(() => expect(escapes, 'a request escaped the harness').toEqual([]))
+  const UNKNOWN = 'We couldn’t confirm your current consultation'
+  const readFailed = { value: { entry: null, error: 'network' } }
+  const cp = (page: Page) => page.locator('#current-patient')
+  const nextBtn = (page: Page) => cp(page).getByRole('button', { name: /^(Next patient|Call next patient)$/ })
+
+  test('initial read failed: Call next disabled, explained, and inert; a read-only retry that succeeds with no patient enables it', async ({ page }) => {
+    await open(page, { props: queueProps({ currentError: 'boom' }) as never, defaults: { ...readDefaults(), getNurseCurrentState: { value: { entry: null } } } })
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await expect(cp(page)).toContainText('Current consultation not confirmed.')
+    await expect(cp(page)).not.toContainText('No patient in consultation.')
+    await expect(nextBtn(page)).toBeDisabled()
+    await nextBtn(page).click({ force: true })
+    await tab(page, /^In Consultation/).click()
+    await expect(panel(page)).toContainText('Your current consultation couldn’t be confirmed')
+    expect(await calls(page, 'nextPatient')).toHaveLength(0)
+    const readsBefore = (await calls(page, 'getNurseCurrentState')).length
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page).getByRole('alert')).toHaveCount(0)
+    expect((await calls(page, 'getNurseCurrentState')).length).toBe(readsBefore + 1)
+    await expect(cp(page)).toContainText('No patient in consultation.')
+    await expect(cp(page).getByRole('button', { name: 'Call next patient' })).toBeEnabled()
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } })
+    await cp(page).getByRole('button', { name: 'Call next patient' }).click()
+    await expect(cp(page).getByRole('heading', { name: 'Patient called successfully' })).toBeVisible()
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+  })
+
+  test('initial read failed, retry fails again (stays paused), then succeeds with an open consultation (shown)', async ({ page }) => {
+    await open(page, { props: queueProps({ currentError: 'boom' }) as never })
+    await queueResponse(page, 'getNurseCurrentState', { throws: 'Failed to fetch' }, { value: { entry: CURRENT } })
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page).getByRole('button', { name: 'Check again' })).toBeEnabled()
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await expect(nextBtn(page)).toBeDisabled()
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page).getByRole('alert')).toHaveCount(0)
+    await expect(cp(page)).toContainText('GC-101')
+    await expect(cp(page).getByRole('button', { name: 'Next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(0)
+  })
+
+  test('a legitimate read with no open consultation (no error) allows calling', async ({ page }) => {
+    await open(page, { props: queueProps({ initialEntry: null }) as never, defaults: readDefaults(snapshot(), null) })
+    await expect(cp(page).getByRole('alert')).toHaveCount(0)
+    await expect(cp(page).getByRole('button', { name: 'Call next patient' })).toBeEnabled()
+  })
+
+  test('call succeeded but the follow-up read failed: result, action id and Undo kept; Next blocked; no second call; a later retry reconciles', async ({ page }) => {
+    await open(page)
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', readFailed, { value: { entry: NEXT_IN_ROOM } })
+    await cp(page).getByRole('button', { name: 'Next patient' }).click()
+    await expect(cp(page).getByRole('heading', { name: 'Patient called successfully' })).toBeVisible()
+    await expect(cp(page)).toContainText('GC-107 — Harness Emergency is now in consultation.')
+    await expect(cp(page)).toContainText('Consultation status unavailable')
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await expect(cp(page).locator('button[aria-label^="Undo call"]')).toBeEnabled()
+    await expect(nextBtn(page)).toBeDisabled()
+    await nextBtn(page).click({ force: true })
+    await page.waitForTimeout(200)
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+    // The previous patient is not shown as current, and no row claims to be this nurse's consultation.
+    await tab(page, /^In Consultation \(0\)$/).click()
+    await expect(panel(page)).toContainText('couldn’t be confirmed')
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page).getByRole('alert')).toHaveCount(0)
+    await expect(cp(page)).toContainText('In consultation')
+    await expect(cp(page)).not.toContainText('Consultation status unavailable')
+    await expect(cp(page).getByRole('button', { name: 'Next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+  })
+
+  test('the same when the follow-up read throws (connection lost)', async ({ page }) => {
+    await open(page)
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { throws: 'Failed to fetch' })
+    await cp(page).getByRole('button', { name: 'Next patient' }).click()
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await expect(nextBtn(page)).toBeDisabled()
+  })
+
+  test('Undo still works from the unknown state, with the original action id, and its read re-establishes the state', async ({ page }) => {
+    await open(page)
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', readFailed, { value: { entry: CURRENT } })
+    await queueResponse(page, 'undoAction', { value: { data: { status: 'undone', restored_token: 'GC-101' } } })
+    await cp(page).getByRole('button', { name: 'Next patient' }).click()
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await cp(page).locator('button[aria-label^="Undo call"]').click()
+    await expect(cp(page)).toContainText('GC-101')
+    await expect(cp(page).getByRole('alert')).toHaveCount(0)
+    expect((await calls(page, 'undoAction'))[0]!.args[0]).toBe((await calls(page, 'nextPatient'))[0]!.args[0])
+  })
+
+  test('Undo window expires while the state is unknown: still paused (never "no patient"), nothing sent; retry reconciles', async ({ page }) => {
+    await open(page, { props: queueProps({ undoWindowSeconds: 2 }) as never })
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', readFailed, { value: { entry: NEXT_IN_ROOM } })
+    await cp(page).getByRole('button', { name: 'Next patient' }).click()
+    await expect(cp(page)).toContainText('Undo window has closed', { timeout: 6000 })
+    await expect(cp(page).getByText('Current patient', { exact: true })).toBeVisible({ timeout: 6000 })
+    await expect(cp(page)).toContainText('Current consultation not confirmed.')
+    await expect(cp(page)).not.toContainText('No patient in consultation.')
+    await expect(nextBtn(page)).toBeDisabled()
+    expect(await calls(page, 'undoAction')).toHaveLength(0)
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page)).toContainText('GC-107')
+    await expect(cp(page).getByRole('button', { name: 'Next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+  })
+
+  test('Undo succeeded but its follow-up read failed: paused with a warning, not "no patient"; retry reconciles', async ({ page }) => {
+    await open(page)
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } }, readFailed, { value: { entry: CURRENT } })
+    await queueResponse(page, 'undoAction', { value: { data: { status: 'undone', restored_token: 'GC-101' } } })
+    await cp(page).getByRole('button', { name: 'Next patient' }).click()
+    await cp(page).locator('button[aria-label^="Undo call"]').click()
+    await expect(cp(page).getByRole('alert')).toContainText(UNKNOWN)
+    await expect(cp(page)).toContainText('Current consultation not confirmed.')
+    await expect(nextBtn(page)).toBeDisabled()
+    await cp(page).getByRole('button', { name: 'Check again' }).click()
+    await expect(cp(page)).toContainText('GC-101')
+    await expect(cp(page).getByRole('button', { name: 'Next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+  })
+
+  test('off duty with a failed read: the warning and read-only retry are still offered', async ({ page }) => {
+    const off = queueProps({ nurse: { ...queueProps().nurse, isOnDuty: false, serviceId: null, serviceName: null }, initialSnapshot: snapshot({ queue: [] }), initialEntry: null, currentError: 'boom' })
+    await open(page, { props: off as never, defaults: { ...readDefaults(snapshot({ queue: [] }), null) } })
+    await expect(page.getByRole('alert').filter({ hasText: UNKNOWN })).toBeVisible()
+    await page.getByRole('button', { name: 'Check again' }).click()
+    await expect(page.getByRole('alert').filter({ hasText: UNKNOWN })).toHaveCount(0)
+  })
+})
+
+test.describe('harness: unknown consultation state fails closed (classic CurrentPatientPanel)', () => {
+  test.afterEach(() => expect(escapes, 'a request escaped the harness').toEqual([]))
+  const UNKNOWN = 'We couldn’t confirm your current consultation'
+  const classic = (over: Record<string, unknown> = {}): Partial<HarnessConfig> => ({
+    mode: 'classic',
+    props: { initialEntry: CURRENT, serviceId: SERVICE_ID, undoWindowSeconds: 60, serviceAverageMinutes: 11, initialNextToken: 'GC-107', ...over },
+  })
+
+  test('initial read failed: Next disabled with a warning; a successful read-only retry enables it', async ({ page }) => {
+    await open(page, { ...classic({ initialStateError: 'boom' }), defaults: { getNurseCurrentState: { value: { entry: null } } } })
+    await expect(page.getByRole('alert')).toContainText(UNKNOWN)
+    await expect(page.getByText('Current consultation not confirmed.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Call next patient' })).toBeDisabled()
+    await page.getByRole('button', { name: 'Check again' }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Call next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(0)
+  })
+
+  test('call succeeded, follow-up read failed: Undo kept with the original id, Next blocked, no second call; retry reconciles', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: null, error: 'network' } }, { value: { entry: NEXT_IN_ROOM } })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await expect(page.getByText('Harness Emergency')).toBeVisible()
+    await expect(page.getByRole('alert')).toContainText(UNKNOWN)
+    await expect(page.getByRole('button', { name: /^Undo \(\d+s\)$/ })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Next patient' })).toBeDisabled()
+    // The ended patient's check-in time must not be shown under the new patient's name.
+    await expect(page.getByText('Checked in')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Check again' }).click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Next patient' })).toBeEnabled()
+    expect(await calls(page, 'nextPatient')).toHaveLength(1)
+  })
+
+  test('undo succeeded, follow-up read failed: paused, not "no patient"; retry reconciles', async ({ page }) => {
+    await open(page, classic())
+    await queueResponse(page, 'nextPatient', { value: { data: CALLED } })
+    await queueResponse(page, 'getNurseCurrentState', { value: { entry: NEXT_IN_ROOM } }, { value: { entry: null, error: 'network' } }, { value: { entry: CURRENT } })
+    await queueResponse(page, 'undoAction', { value: { data: { status: 'undone', restored_token: 'GC-101' } } })
+    await page.getByRole('button', { name: 'Next patient' }).click()
+    await page.getByRole('button', { name: /^Undo/ }).click()
+    await expect(page.getByRole('alert')).toContainText(UNKNOWN)
+    await expect(page.getByText('No patient in consultation.')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^(Next patient|Call next patient)$/ })).toBeDisabled()
+    await page.getByRole('button', { name: 'Check again' }).click()
+    await expect(page.getByText('Harness Current')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Next patient' })).toBeEnabled()
+  })
+})
+
 test.describe('harness: fail-closed interception', () => {
   test('a request to Supabase or a Server Action POST from the page is aborted and recorded', async ({ page }) => {
     await open(page)
