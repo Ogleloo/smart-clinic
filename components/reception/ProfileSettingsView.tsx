@@ -41,6 +41,14 @@ const INPUT_BASE = 'h-12 w-full rounded-sm border border-border px-3.5 text-base
 const FIELD_INPUT = `${INPUT_BASE} bg-surface text-ink`
 const READONLY_INPUT = `${INPUT_BASE} bg-subtle text-muted`
 const BTN_SM = '!h-10 !min-h-10 !rounded-sm !px-4 !text-sm'
+// Figma's #08B9A8 fill gives white text only 2.47:1 (and the theme's #039486, used by the shared primary
+// Button, 3.76:1). #037F74 is the nearest shade of the same teal that clears WCAG AA for 14px text: 4.89:1
+// (hover #026B62, 6.40:1). Scoped to this screen; the app-wide button colour is a separate decision.
+const PRIMARY_ACTION = '!bg-[#037F74] hover:!bg-[#026B62] !text-white'
+const SECONDARY_ACTION = '!border-[#037F74] !text-[#037F74]'
+// Same reasoning for text: the theme's danger #FF4D4D is 3.27:1 on white and #039486 3.76:1.
+const DANGER_TEXT = 'text-[#D12F2F]' // 5.05:1 on white
+const SUCCESS_TEXT = 'text-[#037F74]' // 4.89:1 on white, 4.54:1 on primary-50
 
 function Avatar({ name, photoUrl, className }: { name: string; photoUrl?: string | null; className: string }) {
   return photoUrl ? (
@@ -59,14 +67,14 @@ function Avatar({ name, photoUrl, className }: { name: string; photoUrl?: string
 function ResultMessage({ state }: { state: { error?: string; success?: string } }) {
   if (state.error) {
     return (
-      <p role="alert" className="text-sm font-semibold text-danger">
+      <p role="alert" className={`text-sm font-semibold ${DANGER_TEXT}`}>
         {state.error}
       </p>
     )
   }
   if (state.success) {
     return (
-      <p role="status" className="text-sm font-semibold text-primary-700">
+      <p role="status" className={`text-sm font-semibold ${SUCCESS_TEXT}`}>
         {state.success}
       </p>
     )
@@ -122,7 +130,21 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const photoErrorId = useId()
 
-  useEffect(() => () => { if (localPreview) URL.revokeObjectURL(localPreview) }, [localPreview])
+  // Object URLs this component created. One is released only when it stops being shown: replaced by a newer
+  // photo, removed, a failed upload's preview, or on unmount — never at the moment it is promoted from
+  // "uploading preview" to "saved photo" (an earlier version did exactly that and left the saved photo
+  // pointing at a revoked URL). URLs from the server (signed URLs) are never in this set, so never revoked.
+  const ownedUrls = useRef(new Set<string>())
+  const release = (url: string | null) => {
+    if (url && ownedUrls.current.delete(url)) URL.revokeObjectURL(url)
+  }
+  useEffect(() => {
+    const urls = ownedUrls.current
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u))
+      urls.clear()
+    }
+  }, [])
 
   async function onFile(file: File | undefined) {
     if (!file || !props.onUploadPhoto) return
@@ -132,19 +154,23 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
       setPhotoError(check.error)
       return
     }
-    // Local preview only: nothing counts as saved until the backend says so.
+    // Local preview only: nothing counts as saved until the backend says so. The buttons are disabled while
+    // busy, so photoUrl can't change underneath this await.
+    const previous = photoUrl
     const preview = URL.createObjectURL(file)
+    ownedUrls.current.add(preview)
     setLocalPreview(preview)
     setPhotoBusy(true)
     const result = await props.onUploadPhoto(file)
     setPhotoBusy(false)
+    setLocalPreview(null)
     if (result.error) {
       setPhotoError(result.error)
-      setLocalPreview(null)
+      release(preview)
       return
     }
     setPhotoUrl(preview)
-    setLocalPreview(null)
+    release(previous)
   }
 
   async function onRemove() {
@@ -153,8 +179,12 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
     setPhotoBusy(true)
     const result = await props.onRemovePhoto()
     setPhotoBusy(false)
-    if (result.error) setPhotoError(result.error)
-    else setPhotoUrl(null)
+    if (result.error) {
+      setPhotoError(result.error)
+      return
+    }
+    release(photoUrl)
+    setPhotoUrl(null)
   }
 
   const canUpload = props.photoUploadAvailable && !!props.onUploadPhoto
@@ -190,7 +220,7 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
               />
               <Button
                 type="button"
-                className={`${BTN_SM} !bg-primary-500 hover:!bg-primary-600 sm:w-[200px]`}
+                className={`${BTN_SM} ${PRIMARY_ACTION} sm:w-[200px]`}
                 disabled={!canUpload || photoBusy}
                 loading={photoBusy}
                 aria-describedby={photoErrorId}
@@ -214,7 +244,7 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
                 Photo upload isn&rsquo;t available yet. Your initials are shown instead.
               </p>
             )}
-            <p id={photoErrorId} role="alert" className={photoError ? 'text-xs font-semibold text-danger' : 'sr-only'}>
+            <p id={photoErrorId} role="alert" className={photoError ? `text-xs font-semibold ${DANGER_TEXT}` : 'sr-only'}>
               {photoError ?? ''}
             </p>
           </div>
@@ -291,12 +321,12 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
           </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-x-3 gap-y-3 border-t border-border pt-[19px]">
-            <Button type="button" variant="secondary" className="!h-12 !rounded-sm w-[148px]" disabled={!dirty || pending} onClick={cancel}>
+            <Button type="button" variant="secondary" className={`!h-12 !rounded-sm w-[148px] ${SECONDARY_ACTION}`} disabled={!dirty || pending} onClick={cancel}>
               Cancel
             </Button>
             <Button
               type="submit"
-              className="!h-12 !rounded-sm !bg-primary-500 hover:!bg-primary-600 w-[220px]"
+              className={`!h-12 !rounded-sm w-[220px] ${PRIMARY_ACTION}`}
               disabled={!dirty}
               loading={pending}
             >
@@ -322,7 +352,7 @@ export function ProfileSettingsView(props: ProfileSettingsViewProps) {
             {roleLabel}
             {clinicName ? ` • ${clinicName}` : ''}
           </p>
-          <span className="mt-2.5 rounded-[12px] bg-primary-50 px-4 py-1 text-xs leading-[18px] text-primary-700">
+          <span className={`mt-2.5 rounded-[12px] bg-primary-50 px-4 py-1 text-xs leading-[18px] ${SUCCESS_TEXT}`}>
             Initials: {initials(previewName) || '–'}
           </span>
         </section>
@@ -373,7 +403,7 @@ function QuickActions({ passwordAction }: { passwordAction: PasswordAction }) {
 
         {/* Same logout() Server Action the sidebar uses. No chevron: Figma's would promise a menu that doesn't exist. */}
         <form action={logout}>
-          <button type="submit" className={`${row} text-danger`}>
+          <button type="submit" className={row}>
             <LogOut size={22} aria-hidden className="shrink-0" />
             Sign Out
           </button>
@@ -413,7 +443,7 @@ function PasswordPanel({ action }: { action: PasswordAction }) {
         <Input label="Confirm new password" name="confirm_password" type="password" autoComplete="new-password" required />
       </div>
       <ResultMessage state={state} />
-      <Button type="submit" className="!rounded-sm" loading={pending}>
+      <Button type="submit" className={`!rounded-sm ${PRIMARY_ACTION}`} loading={pending}>
         Update password
       </Button>
     </form>

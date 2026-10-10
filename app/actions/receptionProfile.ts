@@ -55,8 +55,13 @@ export async function updateStaffProfile(_prev: StaffProfileState, formData: For
  * Same re-authenticating password change patients use (current password is
  * checked first, so an unattended signed-in session can't be used to take the
  * account over), plus one staff-specific step: sign out every OTHER session.
- * Clinic computers are shared, and a password change that leaves an old
- * session on the front-desk machine signed in hasn't revoked anything.
+ * Clinic computers are shared.
+ *
+ * What signOut({ scope: 'others' }) actually does: it revokes the other
+ * sessions' refresh tokens, so they can't renew. An access token already issued
+ * to another device stays valid until it expires (the project's JWT expiry —
+ * Supabase's default is one hour). The messages say that, rather than
+ * implying the other devices are cut off this instant.
  */
 export async function changeStaffPassword(prev: ActionState, formData: FormData): Promise<ActionState> {
   const result = await changePassword(prev, formData)
@@ -65,7 +70,13 @@ export async function changeStaffPassword(prev: ActionState, formData: FormData)
   const supabase = await createClient()
   const { error } = await supabase.auth.signOut({ scope: 'others' })
   if (error) {
-    return { success: 'Password changed. We couldn’t sign out your other devices — sign out on any shared computer you used.' }
+    return {
+      success:
+        'Password changed. We couldn’t end your sessions on other devices — sign out on any shared computer you used.',
+    }
   }
-  return { success: 'Password changed. Your other devices have been signed out.' }
+  return {
+    success:
+      'Password changed. Other devices can no longer renew their sign-in and will be signed out when their current session expires. To be sure, sign out on any shared computer you used.',
+  }
 }
