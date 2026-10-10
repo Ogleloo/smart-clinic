@@ -7,7 +7,7 @@
 #      (20260809125334_skip_patient_closes_consultation.sql). Assertion
 #      failures are EXPECTED here — they demonstrate the defects being fixed —
 #      and at least one is required, proving the cases can detect them.
-#   2. FIX: applies 20261010120000_skip_patient_clinic_isolation.sql verbatim.
+#   2. FIX: applies 20261010003117_skip_patient_clinic_isolation.sql verbatim.
 #      Every case and every concurrency check must pass.
 #
 # Exit codes:  0 = fix passes everything, harness healthy
@@ -27,7 +27,7 @@ export MSYS_NO_PATHCONV=1
 C=skip-patient-authz-test
 T=tests/skip_patient_authorization
 BASELINE_MIGRATION=20260809125334_skip_patient_closes_consultation.sql
-FIX_MIGRATION="${FIX_MIGRATION:-20261010120000_skip_patient_clinic_isolation.sql}"
+FIX_MIGRATION="${FIX_MIGRATION:-20261010003117_skip_patient_clinic_isolation.sql}"
 CASES_FILE="${CASES_FILE:-$T/cases.sql}"
 HOSTDIR="$(pwd -W 2>/dev/null || pwd)"
 OUT="$(mktemp -d)"
