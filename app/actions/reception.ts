@@ -72,3 +72,25 @@ export async function checkInPatient(
   revalidatePath('/reception')
   return { token: data.token }
 }
+
+export type SkipState = { error?: string; skippedToken?: string }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Runs as the caller's own session; skip_patient() enforces clinic
+ * isolation and the receptionist waiting-only rule in the database, so its
+ * message is shown verbatim. No p_no_show — receptionists can't set it.
+ */
+export async function skipQueueEntry(_prev: SkipState, formData: FormData): Promise<SkipState> {
+  const queueEntryId = String(formData.get('queue_entry_id') ?? '')
+  if (!UUID_RE.test(queueEntryId)) return { error: 'Missing or invalid queue entry.' }
+
+  const supabase = await createClient()
+  const { data, error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
+  if (error) return { error: error.message }
+
+  revalidatePath('/reception/queue')
+  revalidatePath('/reception')
+  return { skippedToken: data.token }
+}

@@ -6,9 +6,20 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ## Last checkpoint
 
-**Date:** 2026-10-09
-**Branch:** `feat/reception-v3-check-in`
-**Session:** Reception V3 — Phase 2 (unified check-in wizard) built, stopped for review before continuing. Phase 1 (PR #19) and the shared image assets (PR #20) are merged to `main`.
+**Date:** 2026-10-10
+**Branch:** `feat/reception-v3-queue` (PR #25, not merged)
+**Session:** Reception V3 Phase 3 final step — Skip patient wired.
+
+- PR #26 is deployed: migration `20261010003117_skip_patient_clinic_isolation` is live on the shared Supabase project (clinic isolation, receptionists waiting-only, no `p_no_show`, row locked). PR #26 itself is not merged.
+- Skip is now wired: `skipQueueEntry` Server Action (`app/actions/reception.ts`, caller's own session, UUID-shape check only, DB error shown verbatim, no `p_no_show`), `SkipPatientModal` submits it via `useActionState` (Confirm uses `loading={pending}` plus an in-flight ref against double clicks; Cancel/X/Escape/backdrop ignored while pending; error in `role="alert"`, modal stays open), `QueueManagementView` shows `QueueUpdatedToast` ("{token} skipped. The queue has been updated.", 5 s) and bumps a per-service `refreshNonce` so `ServiceQueueSync` re-fetches `get_service_queue` immediately. Filter selection is preserved. No next-patient naming anywhere; no Next button for receptionists.
+- Verified live (read-only): tsc and eslint clean; `reception-queue.spec.ts` 4 passed, 5 skipped (today's queue had no patients, so the Skip-modal, Cancel/Escape-no-POST, forged-ID and double-submit specs self-skipped); 4 mocked check-in specs passed. A temporary harness route (deleted) rendered the modal with a fake nonexistent entry id against the live Server Action: DB returned "Queue entry not found", modal stayed open, exactly 1 Server Action POST for a double click, Escape worked once pending cleared.
+- NOT verified: a real successful skip (would mutate shared data), the success toast/refresh path end-to-end, the in-spec forged-ID/double-submit tests against a real waiting row.
+- Proposed success-path fixture, awaiting approval: check in ONE clearly named walk-in (e.g. "ZZ Skip Test") to one service via the existing check-in flow (creates 1 patients row, 1 queue_entries row `waiting`), skip only that entry from `/reception/queue` (row becomes `skipped`, token consumed), confirm toast + row removal, then leave or remove the test patient with approval.
+- Phase 4 is not started. Dev note: `pending` can stay true for several seconds in dev while the page re-renders after the action; the modal cannot be dismissed during that window.
+
+---
+
+## Previous checkpoint — Reception V3 Phase 1–2, Dashboard visual fidelity, light-theme lock (2026-10-09, merged to `main`)
 
 ### What was done (Phase 2, this session)
 

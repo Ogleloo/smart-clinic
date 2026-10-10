@@ -13,8 +13,8 @@ import type { QueueEntryStatus } from '@/lib/types/database.types'
 //
 // Plain module (no 'use client') so a Server Component (the reception
 // dashboard's data-fetching) can call this directly — StatusChip.tsx
-// and ServiceQueuePanel.tsx both re-export from here rather than
-// defining their own copy, since ServiceQueuePanel is 'use client' and
+// and QueueManagementView.tsx both re-export from here rather than
+// defining their own copy, since QueueManagementView is 'use client' and
 // re-exporting a plain function from a client file makes it a
 // client-only reference, the exact trap this used to sit in.
 export function queueEntryStatusToChip(status: QueueEntryStatus): { variant: StatusChipVariant; label?: string } {
