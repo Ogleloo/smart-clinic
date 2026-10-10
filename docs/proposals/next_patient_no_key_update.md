@@ -1,10 +1,10 @@
 # `next_patient()` claims with `FOR NO KEY UPDATE SKIP LOCKED` — defect, fix, readiness
 
-**Status:** migration **prepared, NOT applied**. Branch `fix/next-patient-no-key-update`, stacked on `chore/skip-waiting-patient-migration` (#32). Only the tightened K2 test needs #32; **the migration itself is independent of #32**. Applying it needs explicit approval. Production was read only: `next_patient` there is still the original (`verify.sql` → `state = original`).
+**Status:** **APPLIED to production on 2026-10-10 (UTC)** as migration version `20261010232531` (`apply_migration`, name `next_patient_no_key_update`) after approval; merged in #33 (`ad1689d`). The stored SQL sha256 `a316c815154c89ac…` equals this file. `verify.sql` → `state = fixed` (production `next_patient` md5 `df0e7850…`), all checks true; both health checks passed. The sections below are the pre-deployment readiness record.
 
 | | |
 |---|---|
-| Migration | `supabase/migrations/20261011010000_next_patient_no_key_update.sql` |
+| Migration | `supabase/migrations/20261010232531_next_patient_no_key_update.sql` |
 | Rollback | `supabase/tests/next_patient_lock/rollback_original_next_patient.sql` (the deployed definition, md5 `08dd4ed0…`) |
 | Real-RPC concurrency suite | `supabase/tests/next_patient_lock/concurrency_check.mjs` (`VARIANT=original` / `fixed`) |
 | Read-only pre/post verification | `supabase/tests/next_patient_lock/verify.sql` |
@@ -84,7 +84,7 @@ Results on **4 runs per variant**, alternating:
 
 1. On a branch containing this migration, re-run locally: `concurrency_check.mjs` with `VARIANT=original` (must reproduce) and `VARIANT=fixed` (must pass), plus `run.sh` and `local_stack_check.mjs`.
 2. **Preflight, read-only:** run `verify.sql` against production. It must say `state = original`. Anything else (`unknown`) means the function has drifted: **stop**, re-derive the patch from the live definition.
-3. Apply **once** via the Supabase MCP `apply_migration` (name `next_patient_no_key_update`), with **LF** content from the merge commit (`git show <sha>:supabase/migrations/20261011010000_next_patient_no_key_update.sql`). **Never `supabase db push`.** It takes effect immediately for production *and* every preview (shared database). No app code change is needed: same signature and same result shape.
+3. Apply **once** via the Supabase MCP `apply_migration` (name `next_patient_no_key_update`), with **LF** content from the merge commit (`git show <sha>:supabase/migrations/20261010232531_next_patient_no_key_update.sql`). **Never `supabase db push`.** It takes effect immediately for production *and* every preview (shared database). No app code change is needed: same signature and same result shape.
 4. Rename the file to the version recorded in `supabase_migrations.schema_migrations`, and check the stored statements match.
 5. **Post-check, read-only:** `verify.sql` → `state = fixed`, all rows true. Run `system_health_check()` and `system_health_check_v2()`.
 6. Watch for any `next_patient` error reports; there's no behaviour change outside the concurrent case.

@@ -168,7 +168,7 @@ const HOLD = 6
   //
   // The skip's UPDATE fires notify_you_are_next(), which inserts a notification for the patient who becomes next;
   // that FK check holds FOR KEY SHARE on their entry until commit. With next_patient() claiming FOR UPDATE SKIP
-  // LOCKED (deployed before 20261011010000_next_patient_no_key_update) the second patient is wrongly skipped too
+  // LOCKED (deployed before 20261010232531_next_patient_no_key_update) the second patient is wrongly skipped too
   // and the third is called — this check fails then (negative control). With FOR NO KEY UPDATE it passes.
   const head = await entry(CLINIC_A, SVC_A, 'waiting', new Date(Date.now() - 60_000))
   const second = await entry(CLINIC_A, SVC_A, 'waiting', new Date(Date.now() - 30_000))

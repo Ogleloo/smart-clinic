@@ -1,4 +1,4 @@
--- READ-ONLY verification for 20261011000000_skip_waiting_patient. Every row must have ok = true.
+-- READ-ONLY verification for 20261010231805_skip_waiting_patient. Every row must have ok = true.
 -- Safe to run against production after the migration is applied (it only reads catalogs); also run before
 -- applying, where the function rows are expected to be false and the "unchanged" rows true.
 -- Uses no table data, calls no function under test, writes nothing.

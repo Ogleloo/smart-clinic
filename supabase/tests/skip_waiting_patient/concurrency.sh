@@ -5,7 +5,7 @@
 # The "caller" session reproduces next_patient()'s own claim exactly (as deployed, read 2026-10-10):
 #   select ... from queue_entries where service_id = <svc> and queue_date = current_date and status = 'waiting'
 #   order by priority desc, checked_in_at asc, token_number asc for no key update skip locked limit 1;
-#   (FOR UPDATE before 20261011010000_next_patient_no_key_update; the minimal schema has no notifications, so
+#   (FOR UPDATE before 20261010232531_next_patient_no_key_update; the minimal schema has no notifications, so
 #   both behave the same here — the KEY SHARE interaction is covered by supabase/tests/next_patient_lock.)
 #   update queue_entries set status = 'in_progress', called_at = ...;  insert into consultations ...;
 # (next_patient's other work — nurse_actions ledger, previous consultation, stats — does not touch the row.)
@@ -52,7 +52,7 @@ with picked as (
   select q.id from public.queue_entries q
    where q.service_id = '$SVC_A' and q.queue_date = current_date and q.status = 'waiting'
    order by q.priority desc, q.checked_in_at asc, q.token_number asc
-   for no key update skip locked limit 1  -- as next_patient() claims since 20261011010000
+   for no key update skip locked limit 1  -- as next_patient() claims since 20261010232531
 )
 update public.queue_entries q set status = 'in_progress', called_at = clock_timestamp()
   from picked where q.id = picked.id returning q.id \\gset

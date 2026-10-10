@@ -1,10 +1,10 @@
 # `skip_waiting_patient` — atomic "skip only if still waiting": migration readiness
 
-**Status:** migration **prepared, NOT applied**. Branch `chore/skip-waiting-patient-migration`. The design was approved in principle (PR #31 review); **applying it needs a separate, explicit approval**. Nothing here has written to project `bffhjvpkfivtbzqielve`.
+**Status:** **APPLIED to production on 2026-10-10 (UTC)** as migration version `20261010231805` (`apply_migration`, name `skip_waiting_patient`) after approval; merged in #32 (`12e9d90`). The stored SQL sha256 `be0938810a03f54a…` equals this file. Post-deploy verification 16/16 and both health checks passed. The sections below are the pre-deployment readiness record. Not yet used by any UI: V3 Skip stays disabled, and the classic nurse Skip is unchanged.
 
 | | |
 |---|---|
-| Migration | `supabase/migrations/20261011000000_skip_waiting_patient.sql` (additive; ends with `notify pgrst, 'reload schema'`) |
+| Migration | `supabase/migrations/20261010231805_skip_waiting_patient.sql` (additive; ends with `notify pgrst, 'reload schema'`) |
 | Disposable-Postgres harness | `bash supabase/tests/skip_waiting_patient/run.sh` (24 cases + 13 two-session concurrency checks) |
 | Real-stack end-to-end check | `supabase/tests/skip_waiting_patient/local_stack_check.mjs` (local `supabase start`: GoTrue, PostgREST, RLS, the real `next_patient()`) |
 | Read-only post-deploy verification | `supabase/tests/skip_waiting_patient/post_deploy_verify.sql` (16 catalog checks) |
@@ -72,7 +72,7 @@ No deadlock risk added: the function locks exactly one `queue_entries` row.
 
 1. Re-run `run.sh` and `local_stack_check.mjs`; both must pass.
 2. Run `post_deploy_verify.sql` against production (read-only). Expect: function rows false, last two rows true.
-3. Apply **once** with the Supabase MCP `apply_migration` (name `skip_waiting_patient`), using **LF** content: `git show <merge-sha>:supabase/migrations/20261011000000_skip_waiting_patient.sql`. A Windows `autocrlf` working copy would store CRLF in the function body. **Never `supabase db push`.**
+3. Apply **once** with the Supabase MCP `apply_migration` (name `skip_waiting_patient`), using **LF** content: `git show <merge-sha>:supabase/migrations/20261010231805_skip_waiting_patient.sql`. A Windows `autocrlf` working copy would store CRLF in the function body. **Never `supabase db push`.**
 4. Read the recorded version from `supabase_migrations.schema_migrations`, and rename the file to `<version>_skip_waiting_patient.sql` in the same PR/commit, so file and history agree. Check the stored statements match the file.
 5. Run `post_deploy_verify.sql`: all 16 rows true. Run `system_health_check()` and `system_health_check_v2()`: all pass.
 6. PostgREST: the migration issues `notify pgrst, 'reload schema'`. Optionally confirm reachability with a signed-in staff call using a non-existent id. It returns `Queue entry not found` and writes nothing (needs approval like any production call).
