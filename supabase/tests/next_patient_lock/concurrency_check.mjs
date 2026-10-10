@@ -230,11 +230,16 @@ commit;
     for (const r of rs) { if (r.error) errors++; else if (r.data?.status === 'called') called.push(r.data.queue_entry_id) }
   }
   const ids = patients.map((p) => p.id)
+  // Invariants in BOTH variants: no errors, and never two claims of one patient.
   check(errors === 0, `S7 no errors over 12 concurrent calls (${errors})`)
-  check(new Set(called).size === called.length && called.length === 12, `S7 12 calls, 12 distinct patients (got ${called.length}, distinct ${new Set(called).size})`)
+  check(new Set(called).size === called.length, `S7 no duplicate claims (${called.length} called, ${new Set(called).size} distinct)`)
+  // Invariant only for the corrected claim. On the original, a concurrent call can wrongly return queue_empty
+  // (the defect itself), so fewer than 12 may be called — observed and reported, not counted as an invariant.
+  const strict = VARIANT === 'fixed' ? 'invariant' : 'observe'
+  check(called.length === 12, `S7 all 12 patients called (got ${called.length})`, strict)
   // Strict order: after each round of 3, the called set is exactly the first 3k patients.
   const inOrder = [0, 1, 2, 3].every((k) => new Set(called.slice(0, 3 * (k + 1))).size === 3 * (k + 1) && called.slice(0, 3 * (k + 1)).every((id) => ids.indexOf(id) < 3 * (k + 1)))
-  check(inOrder, 'S7 each concurrent round called exactly the next patients in order (no one passed over)', VARIANT === 'fixed' ? 'invariant' : 'observe')
+  check(inOrder, 'S7 each concurrent round called exactly the next patients in order (no one passed over)', strict)
 }
 
 // ------------------------------------------------------------------ S8: mixed load — no deadlocks, no inconsistent state
@@ -282,7 +287,8 @@ const inv = results.filter((r) => r.kind === 'invariant')
 const def = results.filter((r) => r.kind === 'defect')
 const invOk = inv.every((r) => r.ok)
 const defPassed = def.filter((r) => r.ok).length
-console.log(`\n# ${VARIANT}: invariants ${inv.filter((r) => r.ok).length}/${inv.length} passed; DEFECT checks ${defPassed}/${def.length} passed${results.some((r) => r.kind === 'observe') ? `; observed: ${results.filter((r) => r.kind === 'observe').map((r) => (r.ok ? 'in order' : 'OUT OF ORDER')).join(',')}` : ''}`)
+const obs = results.filter((r) => r.kind === 'observe')
+console.log(`\n# ${VARIANT}: invariants ${inv.filter((r) => r.ok).length}/${inv.length} passed; DEFECT checks ${defPassed}/${def.length} passed${obs.length ? `; observed (not counted): ${obs.map((r) => `${r.ok ? 'ok' : 'DEFECT SEEN'} — ${r.msg}`).join(' | ')}` : ''}`)
 const ok = VARIANT === 'fixed' ? invOk && defPassed === def.length : invOk && defPassed === 0
 console.log(ok ? `RESULT: PASS (${VARIANT === 'fixed' ? 'correction verified' : 'defect reproduced by every DEFECT check'})` : 'RESULT: FAIL')
 process.exit(ok ? 0 : 1)
