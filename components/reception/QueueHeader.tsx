@@ -1,6 +1,8 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import { initials } from '@/lib/initials'
 import { TYPE } from './PageHeader'
+import { PROFILE_SETTINGS_HREF } from './ProfileChip'
 
 interface QueueHeaderProps {
   fullName: string
@@ -37,7 +39,10 @@ export function QueueHeader({ fullName, clinicName }: QueueHeaderProps) {
           sizes="(min-width: 1024px) 590px, 100vw"
           className="object-cover"
         />
-        <div className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_5px_12px_rgba(5,48,46,0.09)] sm:max-w-[320px]">
+        <Link
+          href={PROFILE_SETTINGS_HREF}
+          className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_5px_12px_rgba(5,48,46,0.09)] transition-shadow hover:shadow-[0_8px_18px_rgba(5,48,46,0.18)] sm:max-w-[320px]"
+        >
           <span className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full bg-primary-500 text-sm font-semibold text-white">
             {firstInitials}
           </span>
@@ -45,7 +50,8 @@ export function QueueHeader({ fullName, clinicName }: QueueHeaderProps) {
             <span className="text-sm font-semibold text-ink">{fullName}</span>
             <span className="text-xs text-muted">Receptionist{clinicName ? ` • ${clinicName}` : ''}</span>
           </span>
-        </div>
+          <span className="sr-only"> — open Profile Settings</span>
+        </Link>
       </div>
     </div>
   )

@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LogOut } from 'lucide-react'
+import { LogOut, UserRound } from 'lucide-react'
 import { logout } from '@/app/actions/auth'
 import { SIDEBAR_ITEMS, isActivePath } from './navItems'
+import { PROFILE_SETTINGS_HREF } from './ProfileChip'
 
 /**
  * No mobile frame exists in the Reception V3 Figma page (desktop-first,
@@ -20,29 +21,46 @@ import { SIDEBAR_ITEMS, isActivePath } from './navItems'
  */
 export function ReceptionMobileNav() {
   const pathname = usePathname()
+  const profileActive = isActivePath(pathname, PROFILE_SETTINGS_HREF)
 
   return (
+    // The page links scroll sideways; Profile and Sign Out are pinned on the right so a phone never has to
+    // discover that the strip scrolls just to find them.
     <nav
       aria-label="Main"
-      className="sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b border-border bg-surface px-3 py-2 md:hidden"
+      className="sticky top-0 z-10 flex items-center gap-1 border-b border-border bg-surface px-3 py-2 md:hidden"
     >
-      {SIDEBAR_ITEMS.map((item) => {
-        const isActive = isActivePath(pathname, item.href)
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={isActive ? 'page' : undefined}
-            className={`shrink-0 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
-              isActive ? 'bg-primary-50 text-primary-700' : 'text-muted hover:bg-paper'
-            }`}
-          >
-            {item.label}
-          </Link>
-        )
-      })}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        {SIDEBAR_ITEMS.map((item) => {
+          const isActive = isActivePath(pathname, item.href)
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              aria-current={isActive ? 'page' : undefined}
+              className={`shrink-0 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                isActive ? 'bg-primary-50 text-primary-700' : 'text-muted hover:bg-paper'
+              }`}
+            >
+              {item.label}
+            </Link>
+          )
+        })}
+      </div>
 
-      <form action={logout} className="ml-auto shrink-0">
+      <Link
+        href={PROFILE_SETTINGS_HREF}
+        aria-label="Profile Settings"
+        aria-current={profileActive ? 'page' : undefined}
+        className={`flex min-h-9 shrink-0 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+          profileActive ? 'bg-primary-50 text-primary-700' : 'text-muted hover:bg-paper hover:text-ink'
+        }`}
+      >
+        <UserRound size={16} aria-hidden />
+        <span className="sr-only sm:not-sr-only">Profile</span>
+      </Link>
+
+      <form action={logout} className="shrink-0">
         <button
           type="submit"
           aria-label="Sign Out"

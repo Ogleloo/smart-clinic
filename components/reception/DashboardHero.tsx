@@ -1,7 +1,9 @@
 import Image from 'next/image'
+import Link from 'next/link'
 import { initials } from '@/lib/initials'
 import { greetingForNow } from '@/lib/clinicTime'
 import { TYPE } from './PageHeader'
+import { PROFILE_SETTINGS_HREF } from './ProfileChip'
 
 interface DashboardHeroProps {
   fullName: string
@@ -56,7 +58,10 @@ export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
             className="object-cover"
             priority
           />
-          <div className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_12px_32px_rgba(5,48,46,0.08)] sm:max-w-[330px]">
+          <Link
+            href={PROFILE_SETTINGS_HREF}
+            className="absolute right-4 top-4 flex max-w-[calc(100%-2rem)] items-center gap-3 rounded-full bg-surface px-3 py-2 shadow-[0_12px_32px_rgba(5,48,46,0.08)] transition-shadow hover:shadow-[0_8px_18px_rgba(5,48,46,0.18)] sm:max-w-[330px]"
+          >
             <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-500 text-sm font-semibold text-white">
               {firstInitials}
             </span>
@@ -64,7 +69,8 @@ export function DashboardHero({ fullName, clinicName }: DashboardHeroProps) {
               <span className="text-sm font-semibold text-ink">{fullName}</span>
               <span className="text-xs text-muted">Receptionist{clinicName ? ` • ${clinicName}` : ''}</span>
             </span>
-          </div>
+            <span className="sr-only"> — open Profile Settings</span>
+          </Link>
         </div>
       </div>
     </section>
