@@ -6,6 +6,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createElement } from 'react'
 import { NurseDashboardView } from '../../components/nurse/v3/NurseDashboardView'
+import { NurseSidebar } from '../../components/nurse/v3/NurseSidebar'
 import { buildActivityEvents, buildQueueRows, type NurseDashboardData } from '../../lib/nurseDashboard'
 
 const base = (over: Partial<NurseDashboardData> = {}): NurseDashboardData => ({
@@ -35,6 +36,9 @@ const built = buildQueueRows(
   { b: 7 }
 )
 
+// A waiting row whose elapsed time the database left empty (typed as a number, but not guaranteed).
+const unknownWait = buildQueueRows([{ ...row('w', 'GC-150', 'Unknown Wait', 'waiting', 0, 0), waiting_minutes: null as unknown as number }], { w: 9 })
+
 const off = { ...base().nurse, isOnDuty: false, serviceId: null, serviceName: null }
 
 const states: Record<string, NurseDashboardData> = {
@@ -43,6 +47,9 @@ const states: Record<string, NurseDashboardData> = {
   noService: base({ nurse: { ...base().nurse, serviceId: null, serviceName: null }, queueScoped: false, waitingCount: null }),
   queueError: base({ waitingCount: null, errors: { queue: 'boom' } }),
   activityError: base({ activity: null, errors: { activity: 'boom' } }),
+  unknownWait: base({ queue: unknownWait.rows, queueTotal: 1, waitingCount: 1 }),
+  noClinic: base({ nurse: { ...base().nurse, clinicName: null } }),
+  serviceAverageFailed: base({ seenToday: { count: 4, avgMinutes: 11 }, errors: { serviceAverage: 'boom' } }),
   populated: base({
     queue: built.rows,
     queueTotal: built.total,
@@ -58,4 +65,6 @@ const states: Record<string, NurseDashboardData> = {
 
 const out: Record<string, string> = {}
 for (const [name, data] of Object.entries(states)) out[name] = renderToStaticMarkup(createElement(NurseDashboardView, { data }))
+out.sidebarNoClinic = renderToStaticMarkup(createElement(NurseSidebar, { clinicName: null, clinicPhone: null }))
+out.sidebarWithClinic = renderToStaticMarkup(createElement(NurseSidebar, { clinicName: 'Test Clinic', clinicPhone: null }))
 process.stdout.write(JSON.stringify(out))

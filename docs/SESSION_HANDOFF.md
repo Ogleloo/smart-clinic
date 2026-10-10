@@ -45,6 +45,14 @@ Figma has 13 frames: dashboard, my-queue, patient-details, record-vitals, consul
 - **Emergency priority** (`set_emergency_priority`, `EmergencyToggle`) has no Figma frame; keep it.
 - **Duty / End Session / coverage warning** have no Figma frame; they stay on `/nurse` until Phase 2 designs a home for them.
 
+### PR #30 review corrections
+
+1. **Independent statistics errors.** `errors.stats` is now only the nurse's own consultation read; a `service_consultation_stats` failure sets a separate `errors.serviceAverage`. Either can fail without hiding the other: a failed service average still shows Completed Today and the personal average ("Yours today · service avg unavailable"), and a failed personal read still shows a service average that loaded ("Yours unavailable · service avg 12 min"). `getNurseDashboardData` takes an optional injected `getCurrentState` (tests only) so the real loader can be run against a fake client.
+2. **Unknown wait time.** The `?? 0` display fallback is gone: an empty elapsed time renders "Wait time unavailable" (the engine's estimate, if any, is still shown). Never "0 min elapsed".
+3. **Missing clinic name.** The sidebar falls back to "Clinic", not "Riverside Clinic" (the hero chip already dropped the clinic part). The sidebar and mobile nav also tolerate a null pathname.
+
+Regression tests for each were checked by temporarily reintroducing the original defect: each fails, then passes with the fix.
+
 ### Tests
 
 - `e2e/nurse-v3-dashboard.spec.ts`: pure logic (queue order/position/elapsed-vs-estimate, activity events and clinic-day boundary, seen-today rule, stat cards, no trend text), real components rendered for each duty/failure state via `e2e/support/render-nurse-dashboard-states.tsx` (run with `tsx`, no database), contrast of the new colours, and a live **read-only** group (sign in, look; asserts no Server Action is invoked by loading the dashboard).

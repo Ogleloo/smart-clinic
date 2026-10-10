@@ -5,10 +5,12 @@ import {
   abbreviatePatientName,
   buildActivityEvents,
   buildQueueRows,
+  getNurseDashboardData,
   type ActivityConsultationRow,
   type NurseDashboardData,
 } from '../lib/nurseDashboard'
 import { summariseSeenToday } from '../lib/nurseStats'
+import { todayInClinicTimezone } from '../lib/clinicTime'
 import { buildStatCards } from '../components/nurse/v3/NurseStatCards'
 import { formatActivityTime } from '../components/nurse/v3/RecentActivityPanel'
 import { NURSE_NAV_ITEMS } from '../components/nurse/v3/navItems'
@@ -111,6 +113,11 @@ test.describe('queue rows: order, position, elapsed vs estimate', () => {
     expect(out[0]).toMatchObject({ elapsedMinutes: null, estimatedMinutes: null }) // being seen: neither applies
   })
 
+  test('a waiting row whose elapsed time is empty stays unknown (null), never 0', () => {
+    const { rows: out } = buildQueueRows([{ ...q('n', 'GC-150', 'No Clock', 'waiting', 0, 0), waiting_minutes: null as unknown as number }], { n: 9 })
+    expect(out[0]).toMatchObject({ elapsedMinutes: null, estimatedMinutes: 9 })
+  })
+
   test('only the first N rows are returned, with the true total and waiting count', () => {
     const many = Array.from({ length: 9 }, (_, i) => q(`w${i}`, `GC-${200 + i}`, `Patient ${i}`, 'waiting', 0, i))
     const out = buildQueueRows(many, {}, 6)
@@ -197,6 +204,97 @@ test.describe('seen today: the rule shared with the working screen', () => {
   })
   test('nothing seen means no average, not zero', () => {
     expect(summariseSeenToday([], today)).toEqual({ count: 0, avgMinutes: null })
+  })
+})
+
+// A minimal stand-in for the Supabase client: only what getNurseDashboardData touches. No network.
+type Reply = { data: unknown; error: { message: string } | null }
+function fakeSupabase(opts: { consultations?: Reply; serviceStats?: Reply }) {
+  const today = todayInClinicTimezone()
+  // 10:00 on the clinic's "today" (08:00 UTC is 10:00 SAST), so the test cannot straddle midnight.
+  const rows = [
+    {
+      id: 'c1',
+      started_at: `${today}T08:00:00Z`,
+      ended_at: `${today}T08:10:00Z`,
+      exclude_from_prediction: false,
+      exclusion_reason: null,
+      queue_entry: { token: 'GC-1', patient: { full_name: 'Sipho Ndlovu' } },
+    },
+  ]
+  const consultations: Reply = opts.consultations ?? { data: rows, error: null }
+  const chain = (reply: Reply) => {
+    const c: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'gte', 'not', 'in', 'is', 'order', 'limit']) c[m] = () => c
+    c.single = async () => reply
+    c.maybeSingle = async () => reply
+    c.then = (resolve: (r: Reply) => unknown) => resolve(reply)
+    return c
+  }
+  const tables: Record<string, Reply> = {
+    profiles: { data: { id: 'p1', full_name: 'Test Nurse', is_on_duty: true, current_service_id: 's1', clinic_id: 'c1' }, error: null },
+    clinics: { data: { name: 'Test Clinic' }, error: null },
+    services: { data: { name: 'General Consultation' }, error: null },
+    consultations,
+  }
+  const rpcs: Record<string, Reply> = {
+    get_service_queue: { data: [], error: null },
+    service_consultation_stats: opts.serviceStats ?? { data: { avg_minutes: 12.4, sample_count: 9, stddev_minutes: 1 }, error: null },
+  }
+  return {
+    from: (t: string) => chain(tables[t] ?? { data: null, error: null }),
+    rpc: (n: string) => chain(rpcs[n] ?? { data: null, error: null }),
+  } as unknown as Parameters<typeof getNurseDashboardData>[0]
+}
+const noOpenConsultation = { getCurrentState: async () => ({ entry: null }) }
+
+test.describe('independent statistics failures (regression)', () => {
+  const statCards = (d: NurseDashboardData) => Object.fromEntries(buildStatCards(d).map((c) => [c.key, c]))
+
+  test('a service-average failure does not hide the nurse’s own figures', async () => {
+    const data = await getNurseDashboardData(
+      fakeSupabase({ serviceStats: { data: null, error: { message: 'stats down' } } }),
+      'auth-1',
+      noOpenConsultation
+    )
+    expect(data.errors.serviceAverage).toBe('stats down')
+    expect(data.errors.stats, 'the nurse’s own query succeeded, so no personal-stats error').toBeUndefined()
+    expect(data.seenToday).toEqual({ count: 1, avgMinutes: 10 })
+    expect(data.serviceAverageMinutes).toBeNull()
+
+    const cards = statCards(data)
+    expect(cards.completed).toMatchObject({ value: '1', caption: 'Consultations you completed' })
+    expect(cards.avg).toMatchObject({ value: '10 min', caption: 'Yours today · service avg unavailable' })
+  })
+
+  test('the reverse: the nurse’s own read failing does not hide a service average that loaded', async () => {
+    const data = await getNurseDashboardData(
+      fakeSupabase({ consultations: { data: null, error: { message: 'consultations down' } } }),
+      'auth-1',
+      noOpenConsultation
+    )
+    expect(data.errors.stats).toBe('consultations down')
+    expect(data.errors.serviceAverage).toBeUndefined()
+    expect(data.seenToday).toBeNull()
+    expect(data.serviceAverageMinutes).toBe(12.4)
+
+    const cards = statCards(data)
+    expect(cards.completed).toMatchObject({ value: '—', caption: 'Couldn’t load' })
+    expect(cards.avg).toMatchObject({ value: '—', caption: 'Yours unavailable · service avg 12 min' })
+  })
+
+  test('both succeeding is unchanged, and both failing marks both', async () => {
+    const ok = await getNurseDashboardData(fakeSupabase({}), 'auth-1', noOpenConsultation)
+    expect(ok.errors).toEqual({})
+    expect(statCards(ok).avg).toMatchObject({ value: '10 min', caption: 'Yours today · service avg 12 min' })
+
+    const both = await getNurseDashboardData(
+      fakeSupabase({ consultations: { data: null, error: { message: 'a' } }, serviceStats: { data: null, error: { message: 'b' } } }),
+      'auth-1',
+      noOpenConsultation
+    )
+    expect(both.errors).toMatchObject({ stats: 'a', serviceAverage: 'b' })
+    expect(statCards(both).avg).toMatchObject({ value: '—', caption: 'Yours unavailable · service avg unavailable' })
   })
 })
 
@@ -303,10 +401,35 @@ test.describe('rendered states (real components, synthetic props)', () => {
     expect(t.match(/to go/g)).toHaveLength(2) // the desktop table and the mobile card list, for the one row that has an estimate — none invented for the other
   })
 
+  test('an unknown wait time says so; it is never shown as 0 minutes', () => {
+    const t = text(rendered.unknownWait!)
+    expect(t).toContain('Wait time unavailable')
+    expect(t).not.toMatch(/\b0 min elapsed/)
+    expect(t).toContain('~9 min to go') // the estimate is independent and still shown
+  })
+
+  test('a failed service average leaves the nurse’s own statistics on screen', () => {
+    const t = text(rendered.serviceAverageFailed!)
+    expect(t).toContain('Yours today · service avg unavailable')
+    expect(t).toMatch(/Completed Today\s+4\s+Consultations you completed/)
+    expect(t).toMatch(/Avg\. Consult Time\s+11 min/)
+  })
+
+  test('missing clinic name: the sidebar says "Clinic", the chip drops the clinic, and no example clinic appears', () => {
+    const side = text(rendered.sidebarNoClinic!)
+    expect(side).toMatch(/Smart Clinic\s+Clinic\s+Dashboard/)
+    expect(side).not.toContain('Riverside')
+    expect(text(rendered.sidebarWithClinic!)).toMatch(/Smart Clinic\s+Test Clinic\s+Dashboard/)
+    const chip = text(rendered.noClinic!)
+    expect(chip).toMatch(/Test Nurse\s+Nurse\s/)
+    expect(chip).not.toContain('Nurse •')
+    expect(chip).not.toContain('Riverside')
+  })
+
   test('nothing from the Figma example data leaks in', () => {
     for (const markup of Object.values(rendered)) {
       const t = text(markup)
-      for (const invented of ['Mkhize', 'Nomusa', 'Sipho Zulu', 'Thandiwe', 'GC-113', 'from yesterday', 'from earlier', '10:42', 'CityMD']) {
+      for (const invented of ['Mkhize', 'Nomusa', 'Sipho Zulu', 'Thandiwe', 'GC-113', 'from yesterday', 'from earlier', '10:42', 'CityMD', 'Riverside']) {
         expect(t).not.toContain(invented)
       }
     }
