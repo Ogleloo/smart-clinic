@@ -5,7 +5,7 @@
  * claims inside a transaction held open, to make the race windows deterministic.
  *
  *   VARIANT=original  installs supabase/tests/next_patient_lock/rollback_original_next_patient.sql (= production)
- *   VARIANT=fixed     installs supabase/migrations/20261011010000_next_patient_no_key_update.sql
+ *   VARIANT=fixed     installs supabase/migrations/20261010232531_next_patient_no_key_update.sql
  *
  * Checks tagged DEFECT encode the bug: on `original` they are expected to FAIL (negative control), on `fixed`
  * they must PASS. Every other check is an invariant that must pass on both. Exit 0 means: fixed → everything
@@ -44,7 +44,7 @@ async function must(p, what) {
 
 // ------------------------------------------------------------------ install the variant
 const sqlFile = VARIANT === 'fixed'
-  ? path.join(REPO, 'supabase/migrations/20261011010000_next_patient_no_key_update.sql')
+  ? path.join(REPO, 'supabase/migrations/20261010232531_next_patient_no_key_update.sql')
   : path.join(REPO, 'supabase/tests/next_patient_lock/rollback_original_next_patient.sql')
 execFileSync('docker', ['exec', '-i', DB, 'psql', '-U', 'postgres', '-d', 'postgres', '-X', '-q', '-v', 'ON_ERROR_STOP=1'], { input: readFileSync(sqlFile) })
 const installed = psql(`select position('for no key update skip locked' in pg_get_functiondef('public.next_patient(uuid,text)'::regprocedure)) > 0`)

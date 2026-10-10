@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Disposable-database tests for skip_waiting_patient() (supabase/migrations/20261011000000_skip_waiting_patient.sql).
+# Disposable-database tests for skip_waiting_patient() (supabase/migrations/20261010231805_skip_waiting_patient.sql).
 #
 # Starts a throwaway postgres:16 container (no connection to Supabase, nothing shared), builds the same minimal
 # Supabase-shaped schema as supabase/tests/skip_patient_authorization, installs the deployed skip_patient()
@@ -23,7 +23,7 @@ die() { echo "HARNESS ERROR: $*" >&2; exit 2; }
 SCHEMA=supabase/tests/skip_patient_authorization/schema.sql
 FIXTURES=supabase/tests/skip_patient_authorization/fixtures.sql
 SKIP_PATIENT=supabase/migrations/20261010003117_skip_patient_clinic_isolation.sql
-MIGRATION="${MIGRATION:-supabase/migrations/20261011000000_skip_waiting_patient.sql}"  # override for negative-control runs
+MIGRATION="${MIGRATION:-supabase/migrations/20261010231805_skip_waiting_patient.sql}"  # override for negative-control runs
 CASES=supabase/tests/skip_waiting_patient/cases.sql
 for f in "$SCHEMA" "$FIXTURES" "$SKIP_PATIENT" "$MIGRATION" "$CASES"; do [ -f "$f" ] || die "missing $f"; done
 

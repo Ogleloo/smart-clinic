@@ -1,4 +1,4 @@
--- ROLLBACK for 20261011010000_next_patient_no_key_update: restores next_patient() exactly as deployed before it
+-- ROLLBACK for 20261010232531_next_patient_no_key_update: restores next_patient() exactly as deployed before it
 -- (pg_get_functiondef md5 08dd4ed0cfeb73ac35a9243e82173edb, read from production 2026-10-11).
 -- Apply only with approval, the same way as the migration (apply_migration / SQL editor), never db push.
 

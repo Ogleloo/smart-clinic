@@ -1,4 +1,4 @@
--- READ-ONLY verification for 20261011010000_next_patient_no_key_update. Reads catalogs only; writes nothing.
+-- READ-ONLY verification for 20261010232531_next_patient_no_key_update. Reads catalogs only; writes nothing.
 --
 -- Before applying (production): expect state = 'original' — the deployed definition this patch was made from
 -- (md5 08dd4ed0cfeb73ac35a9243e82173edb). If state is 'unknown', production has drifted: STOP, do not apply.

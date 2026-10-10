@@ -1,4 +1,4 @@
--- Assertion cases for skip_waiting_patient() (supabase/migrations/20261011000000_skip_waiting_patient.sql).
+-- Assertion cases for skip_waiting_patient() (supabase/migrations/20261010231805_skip_waiting_patient.sql).
 -- Disposable database only. Each case prints "PASS [...]" or raises "FAIL [...]". Successful skips run inside
 -- BEGIN/ROLLBACK so every case starts from the same fixture state.
 
