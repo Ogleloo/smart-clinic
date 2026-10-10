@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Headphones, LogOut, Phone } from 'lucide-react'
+import { Headphones, LogOut, Phone, UserRound } from 'lucide-react'
 import { logout } from '@/app/actions/auth'
 import { SIDEBAR_ITEMS, isActivePath } from './navItems'
+import { PROFILE_SETTINGS_HREF } from './ProfileChip'
 
 interface ReceptionSidebarProps {
   clinicName: string | null
@@ -57,6 +58,22 @@ export function ReceptionSidebar({ clinicName, clinicPhone }: ReceptionSidebarPr
               </Link>
             )
           })}
+
+          {/* Not in the Figma sidebar either, but the profile chip only exists on some screens; this keeps Profile
+              Settings one click away from every reception page. */}
+          <Link
+            href={PROFILE_SETTINGS_HREF}
+            aria-current={isActivePath(pathname, PROFILE_SETTINGS_HREF) ? 'page' : undefined}
+            className={`relative flex h-[58px] items-center gap-4 overflow-hidden rounded-md pl-5 pr-4 text-base transition-colors ${
+              isActivePath(pathname, PROFILE_SETTINGS_HREF) ? 'bg-primary-50 text-primary-600' : 'text-muted hover:bg-paper hover:text-ink'
+            }`}
+          >
+            {isActivePath(pathname, PROFILE_SETTINGS_HREF) && (
+              <span aria-hidden className="absolute left-0 h-8 w-1 rounded-r-sm bg-primary-500" />
+            )}
+            <UserRound size={24} aria-hidden />
+            <span className="flex-1">Profile Settings</span>
+          </Link>
 
           {/* No nav-row equivalent in Figma (frame 111:2) — the profile chip's chevron implies a dropdown with
               sign-out, but no such menu exists yet. Kept here, same row styling, so every receptionist still has
