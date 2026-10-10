@@ -7,8 +7,8 @@ Latest development checkpoint. Read this when continuing previous work.
 ## Latest checkpoint — Reception V3 Phase 4: Profile Settings
 
 **Date:** 2026-10-10
-**Branch:** `feat/reception-v3-profile-settings` (from `main` at `8ec98dd`). **Not merged — awaiting review.**
-(The "Last checkpoint" section below is the Phase 3 closing report from PR #28, which was still open when this was written.)
+**Branch:** `feat/reception-v3-profile-settings` (PR #29, from `main` at `8ec98dd`; `main` merged back in after PR #28, no conflicts). **Not merged — awaiting review.**
+(The "Last checkpoint" section below is the Phase 3 closing report from PR #28, now merged; it is kept unchanged.)
 
 ### What exists now
 
@@ -20,18 +20,19 @@ Reachable from the Dashboard and Queue header chips (now links; no chevron, sinc
 
 - **Name and phone are safely editable by a receptionist.** `profiles_update_own` (own row, not role-restricted) + column UPDATE grants limited to `full_name`, `phone`, `date_of_birth`, `id_number` (migration `20261006151206`). Role, clinic_id, is_active etc. cannot be written whatever the browser sends. New `updateStaffProfile` (`app/actions/receptionProfile.ts`) writes only name and phone, finds the row by the signed-in user's own `auth_user_id`, and uses `.select()` so a silently filtered update is an error, not a false "saved". The existing patient `updateProfile` was NOT reused: it also writes `date_of_birth` and `id_number`, so it would blank them for a form that doesn't show them.
 - **Email is read-only.** It belongs to Supabase Auth; no email-change/verification flow exists anywhere in the app. Not added (needs its own security review).
-- **Photo: no backend at all** — no bucket, no Storage policies, 0 objects, no avatar column. Upload / Change Photo and Remove Photo are disabled and say "Photo upload isn't available yet"; initials show. The exact proposed migration, Storage policies, server flow and open decisions are in `docs/PROPOSAL_profile_photos.md` — **nothing was applied**, and it is deliberately not under `supabase/migrations/`.
-- **Password:** reuses the existing `changePassword` (re-authenticates with the current password first), wrapped by `changeStaffPassword`, which then signs out every other session (`signOut({scope:'others'})`) because clinic computers are shared. Not exercised for real (see below).
+- **Photo: no backend at all** — no bucket, no Storage policies, 0 objects, no avatar column. Upload / Change Photo and Remove Photo are disabled and say "Photo upload isn't available yet"; initials show. The revised design is in `docs/PROPOSAL_profile_photos.md` (revision 2) and the exact SQL in `docs/proposals/avatar_storage.sql` — **nothing was applied**, and it is deliberately not under `supabase/migrations/`.
+- **Password:** reuses the existing `changePassword` (re-authenticates with the current password first), wrapped by `changeStaffPassword`, which then signs out every other session (`signOut({scope:'others'})`) because clinic computers are shared. That revokes the other sessions' refresh tokens; access tokens already issued stay valid until they expire (default 1 h), and the success message now says so. Not exercised for real (see below).
 
 ### Deviations from Figma (deliberate)
 
-Save/Cancel are disabled until something changed (Figma shows them enabled); email is grey read-only with a one-line note in the label row (Figma shows it editable-looking); no chevrons on the chip or Sign Out; Change Password's chevron is real (it expands a panel); Sign Out uses the accessible `text-danger` token (#B42318) rather than Figma's #E53935 (4.2:1 on white); avatar preview is centred (Figma's is 12px left of centre); Save uses Figma's #08B9A8 fill, which is only ~2.3:1 against white text (a property of the design, shared with the Phase 3 filter pills); a sidebar "Profile Settings" row and mobile pinned buttons were added for reachability.
+Save/Cancel are disabled until something changed (Figma shows them enabled); email is grey read-only with a one-line note in the label row (Figma shows it editable-looking); no chevrons on the chip or Sign Out; Change Password's chevron is real (it expands a panel); the Quick Actions Sign Out renders in ink (#07172F, 17.9:1), as in the approved screenshots; avatar preview is centred (Figma's is 12px left of centre); primary buttons (Save, Upload, Update password) use #037F74 / hover #026B62 instead of Figma's #08B9A8 (white text 4.89:1 vs 2.47:1), Cancel's border and text likewise, and error/success text uses #D12F2F / #037F74 instead of the theme's #FF4D4D (3.27:1) / #039486 (3.76:1) — all scoped to this screen; a sidebar "Profile Settings" row and mobile pinned buttons were added for reachability.
 
 ### Tests
 
 - `e2e/reception-profile-validation.spec.ts` — 11 pure-logic tests (name, phone, avatar file incl. 5 MB boundary, wrong MIME/extension, a renamed `.exe`/HTML rejected by magic bytes, JPEG-as-PNG).
 - `e2e/reception-profile.spec.ts` — live, strictly **read-only** against the shared DB: access (signed-out, patient), real data, role/clinic/email read-only and only `full_name`/`phone` submitted, initials + live preview + Cancel, Save/Cancel availability, photo honestly disabled, name/phone rejection and password rejection (all invalid input, rejected before any database or auth call), double-submit (1 request for 3 same-tick clicks with the first held in flight), nav entry points, layout at 1440/1280/1024/900/768/390 (no horizontal scroll; two panels from 1280), mobile pinned Profile/Sign Out, Sign Out lands on /login.
 - **Write paths verified on a throwaway harness with injected mock actions (not committed, 24 checks, all passing):** save success (stored values adopted, no reload, preview updates, message hides on next edit), save error (values kept, Cancel restores the saved name), double-submit (1 call), password wrong/right/cleared/double-click, photo (renamed `.exe`, `.gif`, >5 MB rejected with nothing sent; backend failure keeps no photo; local preview while uploading; photo in form and preview on success; Remove only enabled with a photo; Remove restores initials).
+- **Latest run (after review corrections):** validation 11/11; reception-profile 25 run → 24 passed first time, 1 timed out waiting for a page load (dev recompile during the run), then passed 3/3 on re-run; reception-queue 8 passed, 5 skipped (the live queue had no waiting patient; not reset on purpose); mocked check-in 4/4.
 - **NOT verified:** a real profile save, a real password change (so `signOut({scope:'others'})` is untested live), a real upload — all would mutate the shared project. The Server Action wiring for those is reviewed, not exercised.
 
 ### Things worth knowing
@@ -40,11 +41,20 @@ Save/Cancel are disabled until something changed (Figma shows them enabled); ema
 - React 19 clears all uncontrolled fields after a form action, so after a *wrong current password* all three password fields must be retyped (same as the patient form).
 - `lib/profileValidation.ts` gained `parseStaffName` and `parsePhone` (SA formats, stored as `+27 82 123 4567`); existing phone data is free text and is not rewritten.
 
+### PR #29 review corrections (2026-10-10)
+
+Decided by the reviewer: keep the sidebar row; email stays read-only (verified email change is a future task); private, owner-only avatars, one model for all four roles, images re-encoded — and the design must not claim that if direct Storage API calls can bypass it.
+
+- **Photo proposal revision 2:** users get *no* write path at all (no INSERT/UPDATE/DELETE policy on the bucket, no grant on `avatar_path`); the only writer is the server, which re-encodes with `sharp` to 512×512 WebP with no metadata. Uuid filenames, compare-and-set on `avatar_path`, orphan sweeper, 600 s signed URLs, health assertions, expand-only deploy and rollback. Disposable-Postgres harness `supabase/tests/avatar_proposal/run.sh`: 20/20 pass; a negative control (revision 1's upload policy) makes it fail, so it really detects a bypass. Real-Storage tests still to do on a local stack or branch, never the shared project.
+- **Object-URL bug fixed:** the saved photo's blob URL was revoked the moment it was promoted, and Remove leaked its URL. Now owned URLs are released only when replaced, removed, failed or on unmount. Verified on a throwaway harness with mocked actions (saved photo renders; replaced URL revoked; Remove revokes). Photo buttons remain disabled in production.
+- **Contrast** fixed as listed under deviations. **Password message** corrected as above.
+- **1280px login timeout:** not a code defect. Login is a Server Action chaining several Supabase round trips, each 0.4–4.8 s from this machine; submit-to-redirect measured 8–21 s, settings load 6–11 s, and the same test took 27 s–1.3 min across runs. The local `loginAs` wrapper + long timeouts absorb it; re-runs passed 3/3.
+
 ### Needs your decision
 
-1. Approve, change or reject the photo storage proposal (`docs/PROPOSAL_profile_photos.md`) — in particular who may see a photo (owner-only vs clinic-wide) and whether to re-encode images to strip metadata.
-2. Whether to add a verified email-change flow (Supabase secure email change needs SMTP + confirmation settings reviewed).
-3. Whether the sidebar "Profile Settings" row should stay (it is not in Figma).
+1. Photo backend: Option A (Next.js + server-only `SUPABASE_SECRET_KEY`, recommended) or B (Edge Function); adding `sharp`; local stack vs Supabase branch for isolated tests; sweeper cron vs manual. See proposal §12.
+2. App-wide: the shared primary Button (`bg-primary-700` #039486, 3.76:1 with white) and the reception danger token (#FF4D4D, 3.27:1) fail WCAG AA outside this screen — a separate design decision.
+3. Pre-existing, for awareness: `logout()` calls `signOut()` with the default `global` scope, so signing out on one device signs the user out everywhere.
 
 ---
 
