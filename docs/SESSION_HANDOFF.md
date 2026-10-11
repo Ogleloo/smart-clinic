@@ -8,6 +8,14 @@ Latest development checkpoint. Read this when continuing previous work.
 
 **Date:** 2026-10-11 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge; Phase 3 not started) · companion **Draft PR #32** `chore/skip-waiting-patient-migration` (migration prepared, **NOT applied**). Nothing written to the shared project; no live call/undo/skip/duty/emergency test run.
 
+### Classic Nurse Skip hotfix — PR #35 (open, NOT merged)
+
+- PR #34 (migration renames) was merged by the owner (`9e461ff`); verified: `main` has 63 migration files matching the 63 production versions. Nothing re-applied.
+- **PR #35** `fix/classic-nurse-waiting-skip`: classic `/nurse` waiting-row Skip (`SkipButton` → `skipPatient`) now calls `skip_waiting_patient()` instead of `skip_patient()`, with no status pre-read. `SkipButton` gains a same-tick duplicate-submit guard, and the generated type entry is added. `skipPatient`'s only caller is the waiting-row button; Reception's skip is untouched. No migration.
+- Tests run against a **local isolated Supabase stack** with the real `/nurse` page and Server Action (`e2e/nurse-classic-skip.local.spec.ts`, self-skips unless pointed at localhost): 8/8. Reverting to `skip_patient` fails the race test; removing the guard sends 3 POSTs. DB suite 31/31. Safe regressions against the hotfix code: dashboard 64/64 (one transient network-suspend, passed on re-run), reception 44 passed / 5 skipped, check-in mocked 4/4.
+- Production read-only after testing: 0 writes of any kind since 23:30 UTC; still 63 migrations.
+- Still pending: wiring V3 Skip (#31) to `skip_waiting_patient`, and any decision on restricting direct nurse calls to `skip_patient()`.
+
 ### Production deployment record (2026-10-10 UTC) — #32 and #33 APPLIED
 
 | | #32 `skip_waiting_patient` | #33 `next_patient` FOR NO KEY UPDATE |
