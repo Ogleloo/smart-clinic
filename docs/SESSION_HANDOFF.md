@@ -4,7 +4,18 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 2: My Queue (ready for final review)
+## Latest checkpoint — Nurse V3 Phase 3: stopped at the security gate
+
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` (from `main` at `35c7ae9`, which contains Phase 2 / PR #31 squashed). **No feature code written.** Phase 3 (Patient Details Figma `161:339`, Patient History `162:437`) is blocked on review of `docs/proposals/clinical_records_access.md`.
+
+- **Gate result: access-control gap.** On the committed migrations (replayed on a local stack): receptionists/admins read all notes/vitals; any clinic nurse reads all notes/vitals; a nurse can forge notes/vitals onto another nurse's, another clinic's or another patient's consultation and re-point records; `anon`/`authenticated` hold TRUNCATE/DELETE etc. on both tables; admins read every clinic's profiles (ID numbers). Details, evidence and decisions D1–D4 are in the `.md`.
+- **Proposal (not applied):** `docs/proposals/clinical_records_access.sql`; verified only on the disposable local database, including positive controls for the author-nurse flow. Probe: `supabase/tests/clinical_records_access/probe.mjs`.
+- **Not verified:** production's live policies/grants (no Supabase connector this session); the Figma frames (no Figma connector — not inspected, so no screen was designed from them).
+- **Next:** reviewer answers D1–D4 → confirm production read-only → approve and apply the migration (commit it in the same change) → then build Patient Details/History (fields available: `full_name`, `phone`, `date_of_birth`, `id_number`; gender, allergies, alerts, reason for visit, prescriptions, documents are not in the database — show "Not recorded"). Re-inspect the Figma frames with the connector.
+
+---
+
+## Previous checkpoint — Nurse V3 Phase 2: My Queue (ready for final review)
 
 **Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge until the final Phase 2 review; Phase 3 not started). `main` already contains everything below it in the table; this branch was brought up to date by merging `main` (no conflicts beyond `app/actions/nurse.ts`, which auto-merged and was checked by hand).
 
