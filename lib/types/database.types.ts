@@ -1272,6 +1272,34 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      skip_waiting_patient: {
+        Args: { p_queue_entry_id: string }
+        Returns: {
+          appointment_id: string | null
+          called_at: string | null
+          checked_in_at: string
+          clinic_id: string
+          completed_at: string | null
+          created_at: string
+          id: string
+          patient_id: string
+          priority: number
+          priority_set_at: string | null
+          priority_set_by: string | null
+          queue_date: string
+          service_id: string
+          status: Database["public"]["Enums"]["queue_entry_status"]
+          token: string
+          token_number: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "queue_entries"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       start_consultation: {
         Args: { p_queue_entry_id: string }
         Returns: {
