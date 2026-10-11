@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useRef, useState } from 'react'
 import { skipPatient, type SkipState } from '@/app/actions/nurse'
 import { Button } from '@/components/ui/Button'
 
@@ -10,16 +10,20 @@ interface SkipButtonProps {
 }
 
 /**
- * Skip now applies only to waiting (not yet called) patients — see the
- * nurse-workflow ADR for why it can no longer safely target the current
- * in-progress one: next_patient always creates a consultation the
- * moment it calls someone, and skip_patient never touches consultations,
- * so skipping the current patient would leave that consultation open
- * and dangling.
+ * Skip applies only to waiting (not yet called) patients. The action calls
+ * skip_waiting_patient(), which refuses — atomically, under the row lock —
+ * any entry that is no longer waiting, including one another nurse has just
+ * called, and never touches consultations. Its refusal is shown here.
  */
 export function SkipButton({ queueEntryId, patientName }: SkipButtonProps) {
   const [confirming, setConfirming] = useState(false)
   const [state, formAction, pending] = useActionState<SkipState, FormData>(skipPatient, {})
+  // Two clicks can land before React re-renders `pending`; the ref closes that gap.
+  const inFlight = useRef(false)
+
+  useEffect(() => {
+    if (!pending) inFlight.current = false
+  }, [pending])
 
   // Reacting to the action's own result, not the click — see
   // EmergencyToggle for why (an onClick that also flips local state
@@ -38,7 +42,14 @@ export function SkipButton({ queueEntryId, patientName }: SkipButtonProps) {
   }
 
   return (
-    <form action={formAction} className="flex flex-col items-end gap-1.5">
+    <form
+      action={formAction}
+      onSubmit={(e) => {
+        if (inFlight.current) e.preventDefault()
+        else inFlight.current = true
+      }}
+      className="flex flex-col items-end gap-1.5"
+    >
       <input type="hidden" name="queue_entry_id" value={queueEntryId} />
       <p className="max-w-[180px] text-right text-xs text-muted">Skip {patientName}?</p>
       {state.error && (

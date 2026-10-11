@@ -234,12 +234,25 @@ export async function setDuty(_prev: DutyState, formData: FormData): Promise<Dut
 
 export type SkipState = { error?: string; skipped?: boolean }
 
+/**
+ * The working screen's waiting-list Skip (SkipButton, waiting rows only).
+ *
+ * Calls skip_waiting_patient(), not skip_patient(): for a nurse, skip_patient()
+ * also accepts an in_progress entry and closes its consultation, so a Skip
+ * clicked on a row another nurse had just called would close that nurse's
+ * consultation. skip_waiting_patient() (migration 20261010231805) checks the
+ * entry is still waiting under the same row lock as the transition, enforces
+ * role and clinic, and never touches consultations — so there is deliberately
+ * no status pre-read here (a separate read can't close that race). Its error
+ * messages ("already in consultation…", "no longer waiting", "Queue entry not
+ * found", "Not authorised") are shown as-is.
+ */
 export async function skipPatient(_prev: SkipState, formData: FormData): Promise<SkipState> {
   const queueEntryId = String(formData.get('queue_entry_id') ?? '')
   if (!queueEntryId) return { error: 'Missing queue entry.' }
 
   const supabase = await createClient()
-  const { error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
+  const { error } = await supabase.rpc('skip_waiting_patient', { p_queue_entry_id: queueEntryId })
   if (error) return { error: error.message }
 
   revalidatePath('/nurse')
