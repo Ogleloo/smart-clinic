@@ -10,36 +10,12 @@ interface MyQueueTableProps {
   caption: string
   /** Waiting-row actions need an on-duty nurse with a service; off duty the rows are read-only. */
   canAct: boolean
+  /** Opens the Skip Patient confirmation for a waiting row. Nothing is skipped until it is confirmed there. */
+  onSkip: (row: MyQueueRow) => void
 }
 
-/** The explanation every disabled Skip control points to (rendered once, above the list, by MyQueueView). */
-export const SKIP_UNAVAILABLE_NOTE_ID = 'my-queue-skip-unavailable'
-
-/**
- * Skip is disabled fail-closed on Nurse V3. A nurse's skip_patient() also accepts an in-progress entry and
- * closes its consultation, and a separate "is it still waiting?" read before the call cannot stop another nurse
- * calling the patient in between (time-of-check/time-of-use). Until an atomic backend check is approved
- * (PR #32: skip_waiting_patient, docs/proposals/skip_waiting_patient_atomic.md) this control does nothing and no skip action is wired to
- * this screen at all. aria-disabled (not disabled) keeps it focusable so keyboard and screen-reader users
- * reach the explanation.
- */
-function SkipUnavailable({ row }: { row: MyQueueRow }) {
-  return (
-    <button
-      type="button"
-      aria-disabled="true"
-      aria-describedby={SKIP_UNAVAILABLE_NOTE_ID}
-      aria-label={`Skip ${row.token}, ${row.patientName} — unavailable`}
-      title="Skip is temporarily unavailable on My Queue"
-      className={SKIP_BTN_DISABLED}
-    >
-      Skip
-    </button>
-  )
-}
-
-const SKIP_BTN_DISABLED =
-  'inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-sm border-[1.5px] border-dashed border-[#8A97B0] bg-subtle px-4 text-sm font-semibold text-muted'
+const SKIP_BTN =
+  'inline-flex min-h-11 items-center justify-center rounded-sm border-[1.5px] border-[#037F74] bg-surface px-4 text-sm font-semibold text-[#037F74] hover:bg-primary-50'
 
 function WaitCell({ row }: { row: MyQueueRow }) {
   if (row.status !== 'waiting') return <span className="text-muted">—</span>
@@ -66,7 +42,7 @@ function StatusCell({ row }: { row: MyQueueRow }) {
   )
 }
 
-function Actions({ row, canAct }: { row: MyQueueRow; canAct: boolean }) {
+function Actions({ row, canAct, onSkip }: { row: MyQueueRow; canAct: boolean; onSkip: (row: MyQueueRow) => void }) {
   if (row.status === 'in_consultation') {
     return (
       <a href="#current-patient" className="text-sm font-semibold text-[#037F74] underline underline-offset-2">
@@ -77,7 +53,9 @@ function Actions({ row, canAct }: { row: MyQueueRow; canAct: boolean }) {
   if (row.status !== 'waiting' || !canAct) return <span className="text-muted">—</span>
   return (
     <div className="flex flex-wrap items-start gap-2">
-      <SkipUnavailable row={row} />
+      <button type="button" className={SKIP_BTN} onClick={() => onSkip(row)} aria-label={`Skip ${row.token}, ${row.patientName}`} aria-haspopup="dialog">
+        Skip
+      </button>
       {/* The working screen's EmergencyToggle, unchanged; only sized down to the table's 14px button scale here. */}
       <div className="[&_button]:min-h-11 [&_button]:rounded-sm [&_button]:px-3 [&_button]:text-sm">
         <EmergencyToggle queueEntryId={row.queueEntryId} isEmergency={row.isEmergency} />
@@ -100,12 +78,12 @@ function PositionCell({ row }: { row: MyQueueRow }) {
  * Figma frame 161:170 "Queue-Table" (1096px at 1440): header band #F0FDFA, 13px table text, rows ruled #D9ECE9.
  * Columns follow the Figma order. Figma's per-row "Start Consult" / "View Details" are not reproduced: the
  * backend chooses the next patient (Call next patient, above), and there is no consultation-details screen yet.
- * Waiting rows offer the existing emergency-priority control; Skip is shown disabled (see SkipUnavailable).
+ * Waiting rows offer Skip (a confirmation dialog backed by skip_waiting_patient) and the existing emergency-priority control.
  *
  * From xl (1280px) it is a table; the Service column appears from 1400px, where there is room. Below xl the
  * same facts are stacked as cards so nothing scrolls sideways.
  */
-export function MyQueueTable({ rows, caption, canAct }: MyQueueTableProps) {
+export function MyQueueTable({ rows, caption, canAct, onSkip }: MyQueueTableProps) {
   return (
     <>
       <table className="hidden w-full table-fixed border-collapse text-left text-[13px] leading-[18px] xl:table">
@@ -142,7 +120,7 @@ export function MyQueueTable({ rows, caption, canAct }: MyQueueTableProps) {
               <td className="py-3 tabular-nums text-muted">{row.arrivedAt ? formatActivityTime(row.arrivedAt) : '—'}</td>
               <td className="py-3 pr-2"><WaitCell row={row} /></td>
               <td className="py-3 pr-2"><StatusCell row={row} /></td>
-              <td className="py-3 pr-5"><Actions row={row} canAct={canAct} /></td>
+              <td className="py-3 pr-5"><Actions row={row} canAct={canAct} onSkip={onSkip} /></td>
             </tr>
           ))}
         </tbody>
@@ -179,7 +157,7 @@ export function MyQueueTable({ rows, caption, canAct }: MyQueueTableProps) {
             </dl>
             {(row.status === 'in_consultation' || (row.status === 'waiting' && canAct)) && (
               <div className="mt-3 border-t border-border pt-3">
-                <Actions row={row} canAct={canAct} />
+                <Actions row={row} canAct={canAct} onSkip={onSkip} />
               </div>
             )}
           </li>

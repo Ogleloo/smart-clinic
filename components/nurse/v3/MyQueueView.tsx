@@ -25,7 +25,8 @@ import { EndSessionControl } from '@/components/nurse/EndSessionControl'
 import { CoverageWarning } from '@/components/nurse/CoverageWarning'
 import { NurseProfileChip } from './NurseProfileChip'
 import { CallNextPanel } from './CallNextPanel'
-import { MyQueueTable, SKIP_UNAVAILABLE_NOTE_ID } from './MyQueueTable'
+import { MyQueueTable } from './MyQueueTable'
+import { NurseSkipModal } from './NurseSkipModal'
 import { formatActivityTime } from './RecentActivityPanel'
 import { NURSE_WORKSPACE_HREF } from './navItems'
 
@@ -64,8 +65,9 @@ function QueueBroadcastSync({ serviceId, onChange, onOnline }: { serviceId: stri
 }
 
 /**
- * Nurse V3 My Queue (Figma frame 161:170, with 162:534 / 164:192 as its interaction states). The Skip Patient
- * modal (164:268) is not wired: Skip is disabled fail-closed until an atomic backend check is approved.
+ * Nurse V3 My Queue (Figma frame 161:170, with 162:534 / 164:192 / 164:268 as its interaction states). Skip on a
+ * waiting row opens the Skip Patient dialog, whose action is the shared skipPatient -> skip_waiting_patient()
+ * (waiting-only, checked under the row lock): a patient called or skipped by someone else first is refused.
  *
  * The service's waiting queue is shared by every nurse on that service, so it is labelled as the service queue,
  * not as patients assigned to this nurse. "In Consultation" is this nurse's own open consultation (from
@@ -133,6 +135,7 @@ function MyQueueBody({
   const [emergencyOnly, setEmergencyOnly] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
+  const [skipTarget, setSkipTarget] = useState<MyQueueRow | null>(null)
 
   const requestSeq = useRef(0)
   const appliedSeq = useRef(0)
@@ -180,6 +183,21 @@ function MyQueueBody({
     },
     [refresh, showToast]
   )
+
+  const onSkipped = useCallback(
+    (token: string) => {
+      setSkipTarget(null)
+      showToast(`${token} was skipped and removed from the waiting queue.`)
+      void refresh()
+      // The row that opened the dialog is gone: leave keyboard focus on the list rather than on <body>.
+      requestAnimationFrame(() => document.getElementById('my-queue-panel')?.focus())
+    },
+    [refresh, showToast]
+  )
+  // The database said the entry is not waiting any more (another nurse called it, reception skipped it):
+  // the dialog explains, and the stale list is re-read so the row updates behind it.
+  const onSkipRefused = useCallback(() => void refresh(), [refresh])
+  const closeSkip = useCallback(() => setSkipTarget(null), [])
 
   const flow = useNextPatientFlow({ initialEntry, undoWindowSeconds, onCommitted, initialStateError: currentError })
 
@@ -327,7 +345,8 @@ function MyQueueBody({
           id="my-queue-panel"
           role="tabpanel"
           aria-labelledby={`my-queue-tab-${tab}`}
-          className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 shadow-[0_6px_16px_rgba(5,48,46,0.05)] xl:p-0 xl:pb-2"
+          tabIndex={-1}
+          className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 shadow-[0_6px_16px_rgba(5,48,46,0.05)] outline-none xl:p-0 xl:pb-2"
         >
           {!online && <OfflineBanner fullWidth />}
           {refreshFailedAt && (
@@ -347,6 +366,7 @@ function MyQueueBody({
             stateUnknown={!!flow.stateError}
             serviceLabel={serviceLabel}
             onClearSearch={() => setSearch('')}
+            onSkip={setSkipTarget}
           />
           {scoped && !flow.stateError && othersInConsultation > 0 && (
             <p className="px-0 text-xs text-muted xl:px-5">
@@ -364,6 +384,8 @@ function MyQueueBody({
         </Link>
         .
       </p>
+
+      {skipTarget && <NurseSkipModal row={skipTarget} onClose={closeSkip} onSkipped={onSkipped} onRefused={onSkipRefused} />}
 
       {/* Figma 162:534. Bottom of the screen, not under the chip as on Reception: here the duty bar sits there, and the toast must never sit over its controls. */}
       {toast && (
@@ -386,6 +408,7 @@ function PanelBody({
   stateUnknown,
   serviceLabel,
   onClearSearch,
+  onSkip,
 }: {
   rows: MyQueueRow[]
   tab: MyQueueTab
@@ -397,6 +420,7 @@ function PanelBody({
   stateUnknown: boolean
   serviceLabel: string
   onClearSearch: () => void
+  onSkip: (row: MyQueueRow) => void
 }) {
   const wantsQueue = tab === 'all' || tab === 'waiting'
   const wantsCompleted = tab === 'all' || tab === 'completed'
@@ -418,13 +442,7 @@ function PanelBody({
     return (
       <>
         {alertNodes}
-        {scoped && rows.some((r) => r.status === 'waiting') && (
-          <p id={SKIP_UNAVAILABLE_NOTE_ID} className="rounded-md bg-subtle px-4 py-3 text-sm text-ink xl:mx-4 xl:mt-4">
-            <span className="font-semibold">Skip is temporarily unavailable on My Queue</span> while a safety fix is
-            reviewed. If a waiting patient needs to be skipped, ask reception to skip them.
-          </p>
-        )}
-        <MyQueueTable rows={rows} caption={caption} canAct={scoped} />
+        <MyQueueTable rows={rows} caption={caption} canAct={scoped} onSkip={onSkip} />
       </>
     )
   }
