@@ -4,7 +4,84 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 1: Dashboard
+## Latest checkpoint — Nurse V3 Phase 2: My Queue
+
+**Date:** 2026-10-11 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge; Phase 3 not started) · companion **Draft PR #32** `chore/skip-waiting-patient-migration` (migration prepared, **NOT applied**). Nothing written to the shared project; no live call/undo/skip/duty/emergency test run.
+
+### Classic Nurse Skip hotfix — PR #35 (open, NOT merged)
+
+- PR #34 (migration renames) was merged by the owner (`9e461ff`); verified: `main` has 63 migration files matching the 63 production versions. Nothing re-applied.
+- **PR #35** `fix/classic-nurse-waiting-skip`: classic `/nurse` waiting-row Skip (`SkipButton` → `skipPatient`) now calls `skip_waiting_patient()` instead of `skip_patient()`, with no status pre-read. `SkipButton` gains a same-tick duplicate-submit guard, and the generated type entry is added. `skipPatient`'s only caller is the waiting-row button; Reception's skip is untouched. No migration.
+- Tests run against a **local isolated Supabase stack** with the real `/nurse` page and Server Action (`e2e/nurse-classic-skip.local.spec.ts`, self-skips unless pointed at localhost): 8/8. Reverting to `skip_patient` fails the race test; removing the guard sends 3 POSTs. DB suite 31/31. Safe regressions against the hotfix code: dashboard 64/64 (one transient network-suspend, passed on re-run), reception 44 passed / 5 skipped, check-in mocked 4/4.
+- Production read-only after testing: 0 writes of any kind since 23:30 UTC; still 63 migrations.
+- Still pending: wiring V3 Skip (#31) to `skip_waiting_patient`, and any decision on restricting direct nurse calls to `skip_patient()`.
+
+### Production deployment record (2026-10-10 UTC) — #32 and #33 APPLIED
+
+| | #32 `skip_waiting_patient` | #33 `next_patient` FOR NO KEY UPDATE |
+|---|---|---|
+| Merge commit (merge, not squash) | `12e9d90` | `ad1689d` (S7 test-only fix `359ab7e` first; retargeted to main) |
+| Applied (`apply_migration`) | version `20261010231805` | version `20261010232531` |
+| Stored SQL sha256 = file | `be0938810a03f54a…` ✅ | `a316c815154c89ac…` ✅ |
+| Post-deploy verification | `post_deploy_verify.sql` 16/16 ✅; anonymous PostgREST probe → 42501 (function visible, anon refused) | `verify.sql` `state = fixed`, 11/11 ✅ (production md5 `df0e7850…` = locally tested) |
+| Health checks after | v1 13 PASS + 1 INFO, v2 10/10 | v1 13 PASS + 1 INFO, v2 10/10 |
+
+- Preflight before each: baseline unchanged, zero activity (no open consultations, no waiting/in-progress entries, no queue changes or nurse actions in the previous 15 min). No queue, patient, consultation or auth data changed; 0 queue changes, nurse actions or notifications in the 30 minutes covering the deployment.
+- Follow-up **PR #34** `chore/migration-version-names`: pure renames of both files to the recorded versions (blobs byte-identical to the stored SQL), plus test/doc references. Not merged.
+- Still NOT done (needs separate approval): re-enabling V3 Skip on `skip_waiting_patient`, moving classic Skip onto it, merging #31, Phase 3.
+
+### next_patient concurrency review — PR #33 (merged and applied)
+
+- **Confirmed production defect (pre-existing):** `notify_you_are_next()` / `notify_emergency_ahead()` insert notifications whose FK check holds `FOR KEY SHARE` on a waiting entry until commit. `next_patient()`'s `FOR UPDATE SKIP LOCKED` skips such rows, so a call made at the same moment as another call, a skip or an emergency change passes over the real next patient or returns `queue_empty` with a patient waiting.
+- **Fix prepared, NOT applied:** `fix/next-patient-no-key-update` (PR #33, stacked on #32; the migration itself is independent). `20261011010000_next_patient_no_key_update.sql` is the deployed definition (md5 `08dd4ed0…`) with only `for update` → `for no key update` in the claim. Rollback is the exact original; `verify.sql` is a read-only preflight/post-check (production currently `state = original`).
+- **Evidence (local Supabase stack, real RPCs, `supabase/tests/next_patient_lock/concurrency_check.mjs`, 4 runs per variant):** original fails all 4 DEFECT checks (S1 third patient called, S2 false queue_empty, S3 skip in flight, S4 emergency in flight) with invariants 24/24; fixed passes 4/4 and 25/25: no duplicate claims, no deadlocks, Undo/action-id replay intact, emergency order unchanged, concurrent check-in fine. K2 tightened to require the second patient (fails on original, passes on fixed).
+- Local test infrastructure: scratch Supabase project (not in the repo) and the worktrees `../smart-clinic-skip-migration` (#32) and `../smart-clinic-next-patient-lock` (#33).
+
+### Final safety review
+
+- **Fail closed when the current consultation is unknown** (`lib/hooks/useNextPatientFlow.ts`, shared by classic `/nurse` and V3). A failed read of the nurse's open consultation is no longer treated as "no patient" (`currentStateOrNull` replaced by a typed read: success, possibly with no consultation, vs failure). While unknown, `submit()` refuses and Next patient / long-consultation buttons are disabled, with a warning and a read-only **Check again** (`retryStateRead`; a successful focus reconciliation also clears it). The initial page read error starts the hook in that state; `app/nurse/page.tsx` now passes its read error too. After `next_patient()` or undo succeeds but the follow-up read fails, the confirmed result, action UUID and Undo window are kept, the previous patient is not shown as current, and nothing is re-sent. V3 also hides the In Consultation row and the "other nurses" footnote while unknown.
+- **Tests:** 12 new harness tests (V3 + classic): initial failure → disabled → retry fails → retry succeeds (no patient / open patient); a legitimate empty read stays enabled; post-call read failure (returned error and thrown) keeps result, Undo and id, blocks Next, sends no second call, then reconciles; Undo from the unknown state uses the original id; Undo expiry while unknown stays paused; post-undo read failure. Negative controls: reverting "failure = unknown", ignoring the initial error, or removing the guard each makes tests fail.
+- **V3 Skip still disabled** (no modal, no action; the source-scan test passes).
+- **Migration PR #32** (`skip_waiting_patient`, additive): disposable-Postgres harness 24/24 + 13/13 (no-lock control fails 3); **local Supabase stack** (`supabase start`, real GoTrue/PostgREST/RLS and the real `next_patient()`) 31/31 twice (no-lock control fails); `post_deploy_verify.sql` 16/16 locally plus a read-only production baseline. The proposal files and harness moved from this PR to #32. Runbook and findings are in #32's `docs/proposals/skip_waiting_patient_atomic.md`.
+- **Pre-existing findings (reported, not changed):** (1) the committed migrations don't replay on an empty DB (demo clinic/services/settings were created outside migrations); (2) the anon grant on an event-trigger function differs between a replay and production (harmless); (3) CRLF in Windows replays; (4) **out-of-order calls under concurrency in production:** `notify_you_are_next()`'s notification insert holds `FOR KEY SHARE` on the new next patient until commit, so a concurrent `next_patient()` (`FOR UPDATE SKIP LOCKED`) skips them; candidate fix `FOR NO KEY UPDATE SKIP LOCKED` (separate review).
+
+### Security-review follow-up
+
+- **V3 Skip disabled fail-closed.** The first push's `skipWaitingPatient` (read status, then `skip_patient()`) had a time-of-check/time-of-use race: another nurse's `next_patient()` between the two could have its consultation closed. `skipWaitingPatient`, `waitingSkipRefusal` and `NurseSkipModal` are **removed** (no endpoint left); waiting rows show an `aria-disabled` Skip that does nothing, focusable and described by a note: "Skip is temporarily unavailable on My Queue … ask reception to skip them" (reception's `skip_patient` path is atomic). A source-scan test asserts no V3 file references any skip action. The modal can be restored from commit `ce4422a`.
+- **Atomic fix proposed, not applied** (since moved to PR #32 as a migration): new additive `skip_waiting_patient(uuid)` (same auth/clinic checks as `skip_patient`, `for update` then `status = 'waiting'` under the lock, never touches consultations, revoke public/anon). Disposable-Postgres harness (now `supabase/tests/skip_waiting_patient/run.sh` in #32): 24/24 cases, 13/13 concurrency checks (incl. a control that reproduces the old race); the same suite against a no-lock copy fails 3 checks.
+- **Found, not changed (per instruction): the classic `/nurse` Skip has the same race, wider** — `SkipButton` → `skipPatient` → `skip_patient()` as a nurse with no status check at all. Proposal §6 covers moving it onto the new function.
+- **End session report fixed.** Cause: `NurseHeader` rendered the `endSession` slot only while on duty, so `EndSessionControl` (which holds the "Session ended…" report) unmounted when the refresh delivered `is_on_duty = false`; on `/nurse/queue` the whole view was also keyed on duty. Now the slot is always rendered at a stable position, and My Queue keys only its body. Regression tests for both screens; each fails with the fix reverted.
+- **Shared hook rechecked** on the classic panel in the harness: duplicate-click suppression, same-id retry after a thrown request, Undo expiry, network-failed Undo retry with the original id, focus reconciliation, queue-empty with/without Undo, long-consultation decision.
+
+### What exists
+
+- **`/nurse/queue`** (Figma `161:170`, with `162:534` Queue Updated and `164:192` Patient Called as interaction states; `164:268` Skip Patient not wired) inside the `(v3)` shell. Sidebar/mobile **My Queue → `/nurse/queue`**; dashboard "View all", "Open My Queue" and "Go on duty in My Queue" point there too. `/nurse` is unchanged and linked from My Queue ("Open the classic nurse screen"); `homeForRole('nurse')` is still `/nurse`.
+- **State machine extracted, not duplicated:** `lib/hooks/useNextPatientFlow.ts` holds the Next patient / long-consultation / Undo machine moved out of `CurrentPatientPanel`, which now uses it with identical rendering. V3's `CallNextPanel` uses the same hook. Additions (both screens): an in-flight guard on submit/undo (same-tick clicks sent 3 requests with the same action id before; now 1), a thrown Server Action call (connection lost) becomes a retryable error with the **same** action id instead of sticking on "Please wait…", an undo that never reached the server stays retryable, and a failed focus-reconcile read no longer blanks the current patient.
+- **Data:** `lib/nurseQueue.ts` — pure row building/filtering plus `loadQueueSnapshot` (read-only, used by the server page and every client refresh). Waiting rows = `get_service_queue` in DB order (emergency first); In Consultation = the nurse's own open consultation only; Completed = the nurse's own consultations ended today (RLS `consultations_nurse_write`, filtered explicitly by `nurse_id`), excluding `patient_skipped` / `patient_no_show` / `demo_reset` / `orphaned_test_data`; a `staff_break` close is listed as completed, flagged "Break · not in average". Other nurses' in-progress patients are counted in a footnote, not shown as this nurse's. The nurse's own current patient is never also shown as waiting (stale read just after a call).
+- **Refresh:** realtime ping, window focus and every completed call/undo re-read the whole snapshot; reads are numbered and an older read that lands late is dropped. Tab, search and filter are local and survive refreshes. A failed refresh keeps the last list and says so.
+- **Skip:** disabled fail-closed (see follow-up above); no skip action is wired to any V3 screen.
+- **Reused unchanged:** `NurseHeader` (duty, Switch service, End session), `DutyControl`, `EndSessionControl`, `CoverageWarning`, `EmergencyToggle` (only sized down via a wrapper), Reception's `QueueUpdatedToast`.
+
+### Deviations from Figma (deliberate)
+
+No per-row Start Consult / Start Consultation (`next_patient()` picks the patient and opens the consultation atomically) — one **Call next patient / Next patient** control, next token shown as "Next" on position 1 and in the hint (informational). Patient Called (164:192) is shown inline above the queue (not a separate page) so the action id and Undo survive; its Start Consultation slot is **Next patient** with a consequence line. No View Details (no details screen). Skip disabled (when re-enabled: Reason and Notes omitted — no backend persistence — and the copy must say the patient is removed from the waiting queue; Figma's "will remain in the queue" is false). Subtitle says "shared waiting queue for <service>…" not "Patients assigned to you". Duty bar + current-patient panel inserted between header and tabs (no Figma slot; essential workflow). Filters = "Emergency priority only". Contrast: active tab/primary #037F74, Waiting #8A5600/#FFF5DB, Completed #067647/#ECFDF3, danger #B42318. Table from 1280px (Service column from 1400px), cards below. Toast at the bottom (Reception's position would cover the duty bar).
+
+### Tests (`e2e/nurse-v3-queue.spec.ts`)
+
+- **Pure (24) + isolated harness (67) = 91 passed** (after the final safety review): `e2e/support/nurse-queue-harness` bundles the real components with esbuild, swapping only Server Actions, the Supabase client, the realtime hook and Next router for in-page mocks; it fails the build if server modules are bundled, aborts+records any non-static request, and the mocks throw on writes or unconfigured calls. Covers ordering/emergency, tabs+search+filter, empty/off-duty/no-service/read-failure, current-patient recovery, call idempotency and same-id retry (incl. thrown requests), long-consultation decision, Undo success/refusal/expiry/network retry, Skip disabled (aria-disabled, explained, inert on click/Enter/Space, desktop and mobile), classic-panel regressions, End session report on both screens, emergency toggle wiring, realtime refresh preserving tab/search, queue emptying, out-of-order reads, multi-tab focus reconciliation, offline banner, responsive at 1440/1280/1024/900/768/390, Figma geometry at 1440, accessibility structure. Negative controls run: removing the submit guard, the read-sequence guard, the throw handling, the duplicate-row fix or either End-session fix each makes its test fail.
+- **Live read-only (12)**: access (signed out, patient, receptionist), real nurse data with no Figma examples, Waiting count equals the classic screen, sidebar + classic link, no horizontal scroll at six widths. No mutating control is clicked.
+- **Not run (write against shared DB):** `nurse-v2`, `nurse-undo`, `dashboard-guard`, reception walk-in/check-in live tests. **Not verified live:** a real call/undo/skip/emergency/duty change from `/nurse/queue` — the wiring is the same Server Actions as `/nurse`, exercised only through mocks.
+
+### Next
+
+1. Approve (or not) applying PR #33's `next_patient` fix and PR #32's migration, each per its runbook (independent; either order). Then, separately, re-enable V3 Skip and move classic Skip onto it.
+   Separately consider: a replayable demo seed (migrations don't replay from empty).
+2. With approval: a controlled live test on a preview with one synthetic patient (call, undo, call) — no skip until (1).
+3. Then review/merge PR #31. Phase 3 (patient details / vitals / notes) needs the RLS/privacy review noted below.
+
+---
+
+## Previous checkpoint — Nurse V3 Phase 1: Dashboard
 
 **Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-dashboard` (from `main` after PR #29 merged). **Not merged — awaiting review.** Phase 2 not started.
 

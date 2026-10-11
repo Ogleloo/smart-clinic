@@ -51,14 +51,18 @@ export function NurseHeader({
           </p>
         </div>
 
-        {isOnDuty && (
-          <div className="flex flex-wrap items-center gap-2">
+        {/* Always rendered, with endSession at the same position whether on duty or not: EndSessionControl
+            holds its "Session ended" report in its own state, so unmounting it when is_on_duty flips to false
+            (as this used to) discarded the report the moment the page refreshed. Off duty it renders only
+            that report, or nothing. */}
+        <div className="flex flex-wrap items-center gap-2">
+          {isOnDuty && (
             <Button variant="tertiary" onClick={() => setSwitching((s) => !s)}>
               Switch service
             </Button>
-            {endSession}
-          </div>
-        )}
+          )}
+          {endSession}
+        </div>
       </div>
 
       {showDutyControl && (

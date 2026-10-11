@@ -6,6 +6,13 @@ import { todayInClinicTimezone } from '@/lib/clinicTime'
 
 export type LongDecision = 'record' | 'break'
 
+/** The working screen and the Nurse V3 screens all render queue/duty state, so every nurse mutation refreshes all of them. */
+function revalidateNurseScreens() {
+  revalidatePath('/nurse')
+  revalidatePath('/nurse/queue')
+  revalidatePath('/nurse/dashboard')
+}
+
 // next_patient/undo_next_patient/end_shift all return `jsonb`, which
 // Supabase's generator can only type as `Json` — these are the actual
 // shapes, read directly off the migration 0028-0031 function bodies
@@ -149,7 +156,7 @@ export async function nextPatient(
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as NextPatientResult }
 }
 
@@ -159,7 +166,7 @@ export async function undoAction(actionId: string): Promise<{ data?: UndoResult;
   const { data, error } = await supabase.rpc('undo_next_patient', { p_action_id: actionId })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as UndoResult }
 }
 
@@ -173,7 +180,7 @@ export async function endShift(longDecision?: LongDecision): Promise<{ data?: En
   const { data, error } = await supabase.rpc('end_shift', { p_long_decision: longDecision })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { data: data as EndShiftResult }
 }
 
@@ -228,7 +235,7 @@ export async function setDuty(_prev: DutyState, formData: FormData): Promise<Dut
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return {}
 }
 
@@ -242,7 +249,7 @@ export async function skipPatient(_prev: SkipState, formData: FormData): Promise
   const { error } = await supabase.rpc('skip_patient', { p_queue_entry_id: queueEntryId })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { skipped: true }
 }
 
@@ -263,6 +270,6 @@ export async function setEmergencyPriority(
   })
   if (error) return { error: error.message }
 
-  revalidatePath('/nurse')
+  revalidateNurseScreens()
   return { success: true }
 }

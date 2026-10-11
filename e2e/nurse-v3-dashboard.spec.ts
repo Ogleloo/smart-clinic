@@ -362,13 +362,13 @@ test.describe('rendered states (real components, synthetic props)', () => {
     expect(t).toContain('No activity yet today')
   })
 
-  test('off duty: says so and points to the working screen, with no queue table', () => {
+  test('off duty: says so and points to My Queue (where the duty control lives), with no queue table', () => {
     const markup = rendered.offDuty!
     const t = text(markup)
     expect(t).toContain('Off duty')
     expect(t).toContain('You’re off duty.')
     expect(markup).not.toContain('<table')
-    expect(markup).toContain('href="/nurse"')
+    expect(markup).toContain('href="/nurse/queue"')
   })
 
   test('on duty but no assigned service', () => {
@@ -448,7 +448,7 @@ test.describe('rendered states (real components, synthetic props)', () => {
   })
 
   test('navigation only offers routes that exist', () => {
-    expect(NURSE_NAV_ITEMS.map((i) => i.href)).toEqual(['/nurse/dashboard', '/nurse'])
+    expect(NURSE_NAV_ITEMS.map((i) => i.href)).toEqual(['/nurse/dashboard', '/nurse/queue'])
   })
 })
 
@@ -598,11 +598,11 @@ test.describe('Nurse V3 dashboard — live, read-only', () => {
     }
   })
 
-  test('View all opens the existing working screen, which still loads', async ({ page }) => {
+  test('View all opens My Queue (Phase 2), which loads', async ({ page }) => {
     await openDashboard(page)
     await page.getByRole('link', { name: 'View all' }).click()
-    await expect(page).toHaveURL(/\/nurse$/, { timeout: 90_000 })
-    await expect(page.getByRole('heading', { level: 1, name: /^Nurse/ })).toBeVisible({ timeout: 90_000 })
+    await expect(page).toHaveURL(/\/nurse\/queue$/, { timeout: 90_000 })
+    await expect(page.getByRole('heading', { level: 1, name: 'My Queue' })).toBeVisible({ timeout: 90_000 })
   })
 
   test('sidebar offers only working routes, marks the current page, and has a visible Sign Out', async ({ page }) => {
@@ -612,7 +612,7 @@ test.describe('Nurse V3 dashboard — live, read-only', () => {
     await expect(nav.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('aria-current', 'page')
     await expect(nav.getByRole('button', { name: 'Sign Out' })).toBeVisible()
     await nav.getByRole('link', { name: 'My Queue' }).click()
-    await expect(page).toHaveURL(/\/nurse$/, { timeout: 90_000 })
+    await expect(page).toHaveURL(/\/nurse\/queue$/, { timeout: 90_000 })
   })
 
   test('Sign Out from the dashboard lands on /login', async ({ page }) => {
