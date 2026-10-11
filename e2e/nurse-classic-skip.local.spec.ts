@@ -1,9 +1,8 @@
-import { test as base, expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import type { Database } from '../lib/types/database.types'
+import { type Browser, type Page } from '@playwright/test'
 import { loginAs } from './helpers'
 import { PRODUCTION_PROJECT_REF, isForeignSupabaseRequest, resolveLocalTarget } from './support/local-supabase-guard'
+import { PW, RUN, entry, escapedByContext, establishLocalTarget, expect, guard, guardedContext, must, openConsultations, scenario, target, test, db } from './support/local-stack'
 
 /**
  * Classic /nurse waiting-list Skip → skipPatient() → skip_waiting_patient().
@@ -42,49 +41,6 @@ import { PRODUCTION_PROJECT_REF, isForeignSupabaseRequest, resolveLocalTarget } 
  * another nurse has called or reception has skipped that patient) block the page's realtime WebSocket, so the
  * list cannot refresh behind the test's back.
  */
-
-const target = resolveLocalTarget(process.env)
-
-// ------------------------------------------------------------------ browser guard (every context, before any navigation)
-
-const escapedByContext = new WeakMap<BrowserContext, string[]>()
-
-async function installGuard(ctx: BrowserContext): Promise<string[]> {
-  if (target.state !== 'ok') throw new Error('guard: refusing to open a browser without a verified local target')
-  const allowed = { appOrigin: target.appOrigin, supabaseOrigin: target.supabaseOrigin }
-  const escaped: string[] = []
-  await ctx.route(
-    (url) => isForeignSupabaseRequest(url.href, allowed),
-    (route) => {
-      escaped.push(route.request().url())
-      return route.abort('blockedbyclient')
-    }
-  )
-  await ctx.routeWebSocket(
-    (url) => isForeignSupabaseRequest(url.href, allowed),
-    (ws) => {
-      escaped.push(ws.url())
-      ws.close({ code: 1008, reason: 'blocked by the local-only guard' })
-    }
-  )
-  escapedByContext.set(ctx, escaped)
-  return escaped
-}
-
-/** A context created by hand (the fixture one is guarded automatically). */
-async function guardedContext(browser: Browser): Promise<BrowserContext> {
-  const ctx = await browser.newContext()
-  await installGuard(ctx)
-  return ctx
-}
-
-const test = base.extend<{ context: BrowserContext }>({
-  context: async ({ context }, provide) => {
-    const escaped = await installGuard(context)
-    await provide(context)
-    expect(escaped, 'the page tried to reach a non-local Supabase host').toEqual([])
-  },
-})
 
 // ------------------------------------------------------------------ 1. STANDALONE (no database, server or network)
 
@@ -211,51 +167,6 @@ test.describe('local-only guard rules (pure)', () => {
 
 // ------------------------------------------------------------------ 2. INTEGRATION (local Supabase stack only)
 
-const CLINIC_A = '11111111-1111-1111-1111-111111111111'
-const PW = 'local-only-password-1'
-const RUN = Date.now().toString(36)
-let admin!: SupabaseClient<Database>
-
-/**
- * Runs once, before any integration test. Throws — failing every test — unless the configuration is valid AND the
- * app's server provably reads the same local stack. Nothing is written anywhere before this passes (a canary
- * service, created and deleted again, is the only write, and it goes to the local stack alone).
- */
-async function establishLocalTarget() {
-  if (target.state === 'invalid') {
-    throw new Error(`REFUSING TO RUN: unsafe local-test configuration. Nothing was sent anywhere.\n  - ${target.reasons.join('\n  - ')}`)
-  }
-  if (target.state !== 'ok') throw new Error('REFUSING TO RUN: no verified local target')
-  const { supabaseOrigin, appOrigin } = target
-  admin = createClient<Database>(supabaseOrigin, target.service, { auth: { persistSession: false, autoRefreshToken: false } })
-
-  const id = crypto.randomUUID()
-  const name = `Canary ${RUN} ${Math.random().toString(36).slice(2, 10)}`
-  const prefix = Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
-  const created = await admin.from('services').insert({ id, clinic_id: CLINIC_A, name, token_prefix: prefix })
-  if (created.error) {
-    throw new Error(`REFUSING TO RUN: cannot use the local Supabase stack at ${supabaseOrigin} (${created.error.message}). Is \`supabase start\` running, and is the key its service_role key?`)
-  }
-  try {
-    let res: Response
-    try {
-      res = await fetch(`${appOrigin}/display/${id}`, { redirect: 'manual', signal: AbortSignal.timeout(150_000) })
-    } catch (e) {
-      throw new Error(`REFUSING TO RUN: the app at ${appOrigin} did not answer (${(e as Error).message}). Start it with NEXT_PUBLIC_SUPABASE_URL=${supabaseOrigin}.`)
-    }
-    const html = await res.text()
-    if (res.status !== 200 || !html.includes(name)) {
-      throw new Error(
-        `REFUSING TO RUN: the app at ${appOrigin} is NOT using the local Supabase stack at ${supabaseOrigin}. Its server could not see ` +
-          `the canary service that exists only in that stack (HTTP ${res.status}, ${html.includes('This board is unavailable') ? 'board unavailable' : 'canary name absent'}). ` +
-          `Restart the app with NEXT_PUBLIC_SUPABASE_URL=${supabaseOrigin} and NEXT_PUBLIC_SUPABASE_ANON_KEY=<that stack's anon key>.`
-      )
-    }
-  } finally {
-    await admin.from('services').delete().eq('id', id)
-  }
-}
-
 test.describe('classic Skip against the local stack', () => {
   test.skip(target.state === 'unconfigured', 'LOCAL_SUPABASE_* not set: the local isolated Supabase integration tests are opt-in')
   test.describe.configure({ mode: 'serial', timeout: 180_000 })
@@ -293,65 +204,6 @@ test.describe('classic Skip against the local stack', () => {
     // The recording is the point of this test; clear it so the fixture's end-of-test assertion doesn't re-fail it.
     escaped.length = 0
   })
-
-  async function must<R extends { data: unknown; error: { message: string } | null }>(p: PromiseLike<R>, what: string): Promise<NonNullable<R['data']>> {
-    const { data, error } = await p
-    if (error) throw new Error(`${what}: ${error.message}`)
-    return data as NonNullable<R['data']>
-  }
-
-  let n = 0
-  async function makeUser(tag: string, role: 'nurse' | 'receptionist', clinicId = CLINIC_A) {
-    if (target.state !== 'ok') throw new Error('no verified local target')
-    n += 1
-    const email = `${tag}${n}.${RUN}@local.test`
-    const created = await must(admin.auth.admin.createUser({ email, password: PW, email_confirm: true, user_metadata: { full_name: `Local ${tag} ${n}` } }), 'createUser')
-    await must(admin.from('profiles').update({ role, clinic_id: clinicId }).eq('auth_user_id', created.user!.id), 'profile')
-    const client = createClient<Database>(target.supabaseOrigin, target.anon, { auth: { persistSession: false, autoRefreshToken: false } })
-    await must(client.auth.signInWithPassword({ email, password: PW }), 'signIn')
-    return { email, client }
-  }
-
-  /** A fresh service with nurse(s) on duty and patients checked in through the real RPCs. */
-  async function scenario(patientCount: number, nurseCount = 1) {
-    const svc = crypto.randomUUID()
-    const prefix = Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
-    await must(admin.from('services').insert({ id: svc, clinic_id: CLINIC_A, name: `Skip ${RUN} ${prefix}`, token_prefix: prefix }), 'service')
-    const nurses = []
-    for (let i = 0; i < nurseCount; i++) {
-      const nurse = await makeUser('nurse', 'nurse')
-      await must(nurse.client.rpc('set_duty', { p_on_duty: true, p_service_id: svc }), 'set_duty')
-      nurses.push(nurse)
-    }
-    const rec = await makeUser('rec', 'receptionist')
-    const patients: { id: string; token: string }[] = []
-    for (let i = 0; i < patientCount; i++) {
-      const p = await must(rec.client.rpc('create_walkin_patient', { p_full_name: `Skip patient ${i} ${RUN}` }), 'walk-in')
-      const e = await must(rec.client.rpc('check_in_patient', { p_service_id: svc, p_patient_id: p.id }), 'check-in')
-      patients.push({ id: e.id, token: e.token })
-    }
-    return { svc, nurses, rec, patients }
-  }
-
-  const entry = async (id: string) => must(admin.from('queue_entries').select('status').eq('id', id).single(), 'entry')
-  const openConsultations = async (id: string) => (await must(admin.from('consultations').select('id').eq('queue_entry_id', id).is('ended_at', null), 'cons')).length
-
-  /**
-   * Per-page view of the context guard (see installGuard): `escaped` is every browser request the guard blocked
-   * because it targeted a Supabase host other than the local stack. Also records Server Action POST bodies: the
-   * classic page makes other read-only Server Action calls while it hydrates (coverage check, current-state reads),
-   * so the Skip action's own POSTs are found by the queue entry id in the form body.
-   */
-  function guard(page: Page) {
-    const escaped = escapedByContext.get(page.context())
-    if (!escaped) throw new Error("guard: this page's context has no local-only guard installed")
-    const actionBodies: string[] = []
-    page.on('request', (req) => {
-      if (req.method() === 'POST' && req.headers()['next-action']) actionBodies.push(req.postDataBuffer()?.toString('latin1') ?? '')
-    })
-    const skipPosts = (entryId: string) => actionBodies.filter((b) => b.includes(entryId)).length
-    return { escaped, skipPosts }
-  }
 
   async function openNurse(page: Page, email: string, { stale = false } = {}) {
     // Stale: the realtime socket never connects, so the waiting list shows only what the page first rendered.
@@ -417,11 +269,11 @@ test.describe('classic Skip against the local stack', () => {
     const { nurses, patients } = await scenario(1)
     // An entry in clinic B, created directly (service role) — no clinic-A user can see it.
     const clinicB = crypto.randomUUID()
-    await must(admin.from('clinics').insert({ id: clinicB, name: `Local B ${RUN}` }), 'clinic B')
+    await must(db().from('clinics').insert({ id: clinicB, name: `Local B ${RUN}` }), 'clinic B')
     const svcB = crypto.randomUUID()
-    await must(admin.from('services').insert({ id: svcB, clinic_id: clinicB, name: 'B svc', token_prefix: 'BBBB' }), 'svc B')
-    const pB = await must(admin.from('profiles').insert({ full_name: `B patient ${RUN}`, role: 'patient' }).select('id').single(), 'patient B')
-    const eB = await must(admin.from('queue_entries').insert({ clinic_id: clinicB, service_id: svcB, patient_id: pB.id, token: 'BBBB-001', token_number: 1 }).select('id').single(), 'entry B')
+    await must(db().from('services').insert({ id: svcB, clinic_id: clinicB, name: 'B svc', token_prefix: 'BBBB' }), 'svc B')
+    const pB = await must(db().from('profiles').insert({ full_name: `B patient ${RUN}`, role: 'patient' }).select('id').single(), 'patient B')
+    const eB = await must(db().from('queue_entries').insert({ clinic_id: clinicB, service_id: svcB, patient_id: pB.id, token: 'BBBB-001', token_number: 1 }).select('id').single(), 'entry B')
     await openNurse(page, nurses[0]!.email)
     // Rewrite the Server Action body so it carries clinic B's id instead of the row's own.
     await page.route('**/nurse', async (route) => {
