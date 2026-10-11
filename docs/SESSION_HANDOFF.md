@@ -4,9 +4,58 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 1: Dashboard
+## Latest checkpoint — Nurse V3 Phase 2: My Queue (ready for final review)
 
-**Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-dashboard` (from `main` after PR #29 merged). **Not merged — awaiting review.** Phase 2 not started.
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge until the final Phase 2 review; Phase 3 not started). `main` already contains everything below it in the table; this branch was brought up to date by merging `main` (no conflicts beyond `app/actions/nurse.ts`, which auto-merged and was checked by hand).
+
+### Where everything stands
+
+| PR | What | State |
+|---|---|---|
+| #32 | `skip_waiting_patient(uuid)` | **Merged** (`12e9d90`) and **applied to production** as migration `20261010231805` |
+| #33 | `next_patient()` claims with `FOR NO KEY UPDATE SKIP LOCKED` | **Merged** (`ad1689d`) and **applied** as `20261010232531` |
+| #34 | Rename both migration files to the recorded versions (no SQL) | **Merged** (`9e461ff`) |
+| #35 | Classic `/nurse` Skip → `skip_waiting_patient`, plus the fail-closed local-only test guard | **Merged** (`2a851d6`) |
+| #31 | Nurse V3 Phase 2 (this branch) | Draft, updated |
+
+Production deployment record (2026-10-10 UTC): stored SQL sha256 equals the files (`be0938810a03f54a…`, `a316c815154c89ac…`); `post_deploy_verify.sql` 16/16; `verify.sql` `state = fixed`; `system_health_check()` 13 PASS + 1 INFO and `_v2()` 10/10 after each. No queue, patient, consultation or auth data was changed by either deployment.
+
+### What this branch contains now
+
+- **`/nurse/queue`** (Figma `161:170`, with `162:534` Queue Updated, `164:192` Patient Called and `164:268` Skip Patient as interaction states) in the `(v3)` shell. Sidebar/dashboard My Queue links open it; `/nurse` is unchanged and linked as "Open the classic nurse screen"; `homeForRole('nurse')` is still `/nurse`.
+- **Shared Next/Undo state machine:** `lib/hooks/useNextPatientFlow.ts`, used by the classic `CurrentPatientPanel` and V3 `CallNextPanel`: same-action-id retry (including when the request throws), same-tick duplicate-click suppression, Undo with the original id, expiry and network retry, long-consultation decision, queue-empty results, focus reconciliation. **Fail closed when the current consultation is unknown:** a failed read is distinct from "no consultation"; Next is paused with a read-only "Check again"; after a call or undo whose follow-up read fails, the confirmed result, action id and Undo window are kept and nothing is re-sent.
+- **V3 Skip restored (this round).** `NurseSkipModal` reuses the **shared `skipPatient` Server Action** (the same one the classic screen uses), which calls only `skip_waiting_patient()`: waiting-only, checked under the row lock, role and clinic enforced, never closes a consultation. No status pre-read, no second copy of a safety-sensitive action, no new migration. Copy: "The patient will be marked as skipped and removed from the active waiting queue. Their history will be retained." No Reason/Notes (nothing can store them), no per-row Start. A patient called or skipped by someone else while the dialog is open is refused by the database; the dialog says so ("Nothing was changed for this patient"), drops the pointless confirm button, and the stale list is re-read. Other errors (including a dropped connection, wrapped so it can't crash to an error boundary) keep Confirm for a deliberate retry. Duplicate-click guard, focus trap, Escape/backdrop/close, focus back to the row button (or to the list after a successful skip). Success toast and queue re-read; database ordering untouched.
+- **Data:** `lib/nurseQueue.ts`. Waiting rows = `get_service_queue` in DB order (emergency first); In Consultation = the nurse's own open consultation; Completed = the nurse's own consultations ended today (explicit `nurse_id` filter on top of RLS), excluding skips, no-shows and admin closes; other nurses' in-progress patients are a footnote. Reads are numbered so a late older read never overwrites newer state.
+- **Reused unchanged:** `NurseHeader` (End session report now survives going off duty on both screens), `DutyControl`, `EndSessionControl`, `CoverageWarning`, `EmergencyToggle`, Reception's toast.
+
+### Deviations from Figma (deliberate)
+
+No per-row Start Consult (`next_patient()` picks the patient and opens the consultation atomically): one Call next / Next patient control, with the next token informational. Patient Called is inline above the queue so the action id and Undo survive. Skip modal: Reason and Notes omitted; Figma's "will remain in the queue" is false and is replaced by the real behaviour. No View Details (no details screen). Subtitle says "shared waiting queue", not "assigned to you". Duty bar and current-patient panel sit between header and tabs. Contrast-adjusted colours (#037F74 primary, #8A5600/#FFF5DB Waiting, #B42318 danger). Table from 1280px, cards below.
+
+### Tests
+
+- **`e2e/nurse-v3-queue.spec.ts` pure + harness: 102 passed** (mocked Server Actions, fail-closed request interception; covers V3 and the classic panel, including the new dialog tests).
+- **`e2e/nurse-v3-skip.local.spec.ts` (new), local Supabase stack only: 7 passed.** Real `/nurse/queue` + real Server Action: success, called-before-confirm refused, already-skipped refused, cross-clinic forged id ("Queue entry not found"), unauthorised replays (patient: "Not authorised", other clinic's nurse: "Queue entry not found", inactive receptionist stopped by the app before the action), duplicate clicks (1 request), and Skip vs Next Patient **swept across six timings so both orders occur** (skip won 3, call won 3) with the invariants holding every time.
+- **`e2e/nurse-classic-skip.local.spec.ts`: 59 passed** (51 standalone + 7 integration + the browser-guard test) against the local stack; unchanged after the shared guard code moved to `e2e/support/local-stack.ts`. With no `LOCAL_SUPABASE_*` set (what CI sees) both local specs give 51 passed and 15 skipped.
+- Database-free regressions: dashboard groups 45/45, reception validation 11/11. `tsc` clean, ESLint clean (`app components lib e2e`), `npm run build` passes (`/nurse/queue` is a dynamic route; built with the local Supabase URL injected).
+- **Negative controls, all fail as they should:** shared action reverted to `skip_patient` fails the V3 race and simultaneous tests; removing the click guard, the refresh-on-refusal, the connection-failure wrapper, or changing the wording each fail their test.
+- **The local-only guard** (`e2e/support/local-supabase-guard.ts` + `local-stack.ts`): both URLs must be plain `http://localhost|127.0.0.1:<port>`; opted in means invalid = failure, never skip; a canary service that exists only in the local stack must render on the app's `/display/<id>` page, proving the app's *server* reads that stack; browser requests/WebSockets to any non-local Supabase host are blocked and recorded; `playwright.config.ts` never auto-starts `npm run dev` when `LOCAL_SUPABASE_*` is set.
+- **Not run (they log in to or write the shared project):** the live read-only suites (dashboard live group, reception queue/profile/check-in), `nurse-v2`, `nurse-undo`, `dashboard-guard`. **Not verified live:** a real call/undo/skip/emergency/duty change from `/nurse/queue`.
+
+### Outstanding
+
+1. Controlled live test on a **preview** with one synthetic patient (call, undo, call, skip). Needs explicit approval; previews share the production database.
+2. `skip_patient()` still lets a nurse skip an in-progress entry if called directly through the API; no UI uses it that way now. Restricting it is a separate decision.
+3. The committed migrations don't replay on an empty database (the demo clinic/services/settings were created outside migrations); local verification uses a scratch-only seed.
+4. Pre-existing: shared primary button contrast (#039486, 3.76:1) on the reused "Start session" button.
+5. Intermediate commits `4890d18`…`e3545b8` on this branch don't compile on their own: **squash-merge** (or merge) knowingly.
+6. Phase 3 (patient details / vitals / notes) needs the RLS/privacy review described under Phase 1.
+
+---
+
+## Previous checkpoint — Nurse V3 Phase 1: Dashboard
+
+**Date:** 2026-10-10 · **Branch:** `feat/nurse-v3-dashboard` (from `main` after PR #29 merged) — **merged as PR #30**. Phase 2 (above) built on it.
 
 ### What exists
 

@@ -1,7 +1,7 @@
 import { Users } from 'lucide-react'
 import { LinkButton } from '@/components/ui/LinkButton'
 import type { DashboardQueueRow, NurseDashboardData } from '@/lib/nurseDashboard'
-import { NURSE_WORKSPACE_HREF } from './navItems'
+import { NURSE_QUEUE_HREF } from './navItems'
 
 /** Pill colours checked for WCAG AA text contrast: Figma's amber (#F59E0B on #FFF5DB) is far below 4.5:1, so the same hue is darkened. */
 const CHIP = 'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold leading-[18px]'
@@ -63,7 +63,7 @@ function Body({ data }: { data: NurseDashboardData }) {
             ? 'Choose a service in My Queue to see its queue here.'
             : 'Go on duty in My Queue to choose a service and see its queue here.'}
         </p>
-        <LinkButton href={NURSE_WORKSPACE_HREF} variant="secondary" className="!border-[#037F74] !text-[#037F74]">
+        <LinkButton href={NURSE_QUEUE_HREF} variant="secondary" className="!border-[#037F74] !text-[#037F74]">
           Open My Queue
         </LinkButton>
       </div>
@@ -170,7 +170,7 @@ export function TodaysQueuePanel({ data }: { data: NurseDashboardData }) {
           </div>
         </div>
         <LinkButton
-          href={NURSE_WORKSPACE_HREF}
+          href={NURSE_QUEUE_HREF}
           variant="secondary"
           className="!h-10 !min-h-10 !w-[130px] !rounded-sm !border-[#037F74] !px-4 !text-sm !text-[#037F74]"
         >

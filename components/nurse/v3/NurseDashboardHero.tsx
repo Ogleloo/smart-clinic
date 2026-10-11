@@ -2,7 +2,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { initials } from '@/lib/initials'
 import { TYPE } from '@/components/reception/PageHeader'
-import { NURSE_WORKSPACE_HREF } from './navItems'
+import { NURSE_QUEUE_HREF } from './navItems'
 
 interface NurseDashboardHeroProps {
   fullName: string
@@ -47,7 +47,7 @@ export function NurseDashboardHero({ fullName, clinicName, isOnDuty, serviceName
             {isOnDuty ? `On duty${serviceName ? ` · ${serviceName}` : ''}` : 'Off duty'}
           </span>
           {!isOnDuty && (
-            <Link href={NURSE_WORKSPACE_HREF} className="font-semibold text-[#037F74] underline underline-offset-2">
+            <Link href={NURSE_QUEUE_HREF} className="font-semibold text-[#037F74] underline underline-offset-2">
               Go on duty in My Queue
             </Link>
           )}
