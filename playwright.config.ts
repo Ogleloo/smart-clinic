@@ -21,9 +21,14 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: process.env.E2E_BASE_URL
-    ? undefined
-    : {
+  // Never auto-start `npm run dev` when the local-only integration specs have been opted into
+  // (LOCAL_SUPABASE_*): that server would read .env.local — normally the shared production project — before the
+  // spec's guard could refuse anything. In that mode the app must be started explicitly and verified by the spec
+  // (see e2e/support/local-supabase-guard.ts); with E2E_BASE_URL unset the spec then fails closed.
+  webServer:
+    process.env.E2E_BASE_URL || ['LOCAL_SUPABASE_URL', 'LOCAL_SUPABASE_ANON', 'LOCAL_SUPABASE_SERVICE'].some((k) => process.env[k]?.trim())
+      ? undefined
+      : {
         command: 'npm run dev',
         url: 'http://localhost:3000',
         reuseExistingServer: true,
