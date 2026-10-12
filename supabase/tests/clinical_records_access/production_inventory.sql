@@ -82,6 +82,12 @@ select extname, extversion, extnamespace::regnamespace from pg_extension order b
 \echo '== 10c. Vault secret NAMES only (never values) — is identity_document_hmac_key_v1 present?'
 select name, created_at from vault.secrets order by 1;
 
+\echo '== 10d. cron jobs: owner, state and WHICH function each targets — no command text is returned'
+select j.jobname, j.username, j.active, j.schedule,
+       (position('send_appointment_reminders()' in j.command) > 0) as targets_send_appointment_reminders,
+       (position('mark_overdue_no_shows()' in j.command) > 0)      as targets_mark_overdue_no_shows
+from cron.job j order by j.jobname;
+
 \echo '== 11. event triggers'
 select evtname, evtevent, evtenabled, p.proname from pg_event_trigger e join pg_proc p on p.oid = e.evtfoid order by 1;
 

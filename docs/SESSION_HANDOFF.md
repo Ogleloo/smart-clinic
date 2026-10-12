@@ -4,16 +4,15 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — PR #36 revision 5: targeted corrections (awaiting review)
+## Latest checkpoint — PR #36: staged plan revision 2 + M1b drafted (awaiting independent review)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No app code, no migrations, nothing applied to the shared project; read-only production inventory NOT run (needs authorisation).** Phase 3 screens paused.
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No migration approved; nothing applied; no production access by this session.** Phase 3 screens paused.
 
-- Decisions D-S1, D-F13, D-P1–3, D-ID1–5 applied (table in `docs/proposals/supervisor_requirements.md`).
-- Priority: audit survives queue-entry deletion (no FK, snapshots, append-only / resolve-once triggers); reason codes required to set AND clear; nurse escalations are codes only; admin oversight only.
-- Merge: `merge_patient_profiles_with_reason` (code + note, active admin) via one private core; legacy 2-arg kept until Admin UI cutover, recorded `legacy_unspecified`; audit append-only, `reason_code` NOT NULL.
-- Identity prototype: HMAC with Vault key (no plaintext), exact lookup, verified replacement, single-use claim codes.
-- Local results (fresh stacks): baseline and proposed both hold — clinical 85, profiles 70, priority 48, identity 36, workflows 24; catalogs 19/14/11 true after; Playwright local 66; clean health identical.
-- Next: authorise the read-only production inventory (`supabase/tests/clinical_records_access/production_inventory.sql` + three `assert_catalog*.sql`), then separate migration approvals in the R4 sequence.
+- `docs/proposals/staged_migration_plan.md` rev 2: staged approach approved for preparation only; D-R1/D-R3 and review items 4-8 applied. **C0 (most urgent): production test-account passwords are committed in a PUBLIC repo** (`e2e/helpers.ts`, `docs/ARCHITECTURE.md`, scripts, one migration). Not verified whether they are live; rotation NOT done (needs separate approval; §7).
+- M1b drafted: `docs/proposals/grant_hygiene_m1b.sql` + `rollback/grant_hygiene_m1b_rollback.sql`; tests `probe_grants.mjs` (48), `catalog_snapshot.sql`, `rollback_cycle.mjs`, `assert_catalog_grants.sql`. Part B (MAINTAIN, PG17) is an addition beyond D-R1 awaiting a decision.
+- `reset_demo_state` instructions removed (ARCHITECTURE.md, proposals); stage S1-T (isolate destructive E2E) runs parallel to S1; F14 cron check returns flags only.
+- Rollback requirement (plan §6): M1a/M1c/M2/M3/M4/M5 still lack complete, cycle-tested rollback scripts and are blocked.
+- Local helper scripts for stack runs live in the session scratchpad, not the repo.
 
 ---
 

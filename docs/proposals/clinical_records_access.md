@@ -16,6 +16,11 @@ The treatment-linked design is approved in principle.
 | Local assertions | `supabase/tests/clinical_records_access/` — `probe.mjs` 85, `probe_profiles.mjs` 70, `probe_priority.mjs` 48, `probe_identity.mjs` 36, `regression_workflows.mjs` 24 |
 | Read-only catalog | `assert_catalog.sql` 19, `assert_catalog_profiles.sql` 14, `assert_catalog_priority.sql` 11, `production_inventory.sql` — **not run on production** |
 
+## R6. Revision 6 — pointer
+
+Staged plan corrections (M1b drafted and tested, credential exposure C0, test isolation S1-T, complete-rollback
+requirement, cron check without command text): see `staged_migration_plan.md`. No change to the F1–F16 design in R5.
+
 ## R5. Revision 5 — targeted corrections (decisions D-S1…D-ID5 applied)
 
 | # | Review finding | Correction | Asserted |
@@ -63,9 +68,9 @@ explicit authorisation; nothing has been run against production.
    history and nurse escalations; the cutover revokes `set_emergency_priority` from app roles and stops priority at
    check-in. Must ship with the Reception V3 control and the removal of the Nurse toggle. Asserted (36 checks).
 4. **F13 `reset_demo_state`** [fact] any admin of any clinic can run it and it resets every clinic. [design] service
-   role / SQL editor only. **Dependency [fact]:** `e2e/helpers.ts` calls it as the demo admin for the live suites;
-   revoking it breaks them by design (they mutate the shared production database) — *decision D-F13*: move those
-   suites to the local stack, or keep a clinic-scoped admin variant.
+   role only — nobody runs it on the shared database (D-F13). **Dependency [fact]:** `e2e/helpers.ts` calls it as the
+   demo admin for the live suites; revoking it breaks them by design, so destructive suites move to an isolated local
+   stack first (staged plan S1-T).
 5. **F14 `send_appointment_reminders`** [fact] executable by any signed-in user, no role check (asserted: a patient
    triggered it). Its only intended caller is the pg_cron job, which runs as `postgres`. [design] revoke from app
    roles; the cron job is unaffected (asserted it still targets the function as `postgres`).
@@ -391,7 +396,11 @@ it in the same change that applies it; ship the priority cutover only together w
 
 ## 11. Rollback
 
-Each new proposal file ends with its own rollback block.
+**Superseded by the rollback requirement in `staged_migration_plan.md` §6:** the prose below is *not* a rollback. A
+migration is approvable only with a complete rollback script that passed `rollback_cycle.mjs` (done so far for M1b only:
+`rollback/grant_hygiene_m1b_rollback.sql`).
+
+(Earlier note: each proposal file also ends with a short rollback block — incomplete by that standard.)
 
 ```sql
 -- clinical_records_access.sql

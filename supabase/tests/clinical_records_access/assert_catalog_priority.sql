@@ -61,6 +61,11 @@ checks(check_name, pass, detail) as (
                           and has_function_privilege('service_role', oid, 'EXECUTE') from fn where proname = 'reset_demo_state'), false),
          'reset_demo_state'
   union all
+  select 'F14 precondition: the reminders cron job exists, is active, is owned by postgres and targets send_appointment_reminders() (command text not returned)',
+         exists (select 1 from cron.job j where j.jobname = 'send-appointment-reminders' and j.active and j.username = 'postgres'
+                   and position('send_appointment_reminders()' in j.command) > 0),
+         coalesce((select format('owner=%s active=%s', j.username, j.active) from cron.job j where j.jobname = 'send-appointment-reminders'), 'job not found')
+  union all
   select 'F14 send_appointment_reminders: not executable by authenticated/anon',
          coalesce((select not has_function_privilege('authenticated', oid, 'EXECUTE') and not has_function_privilege('anon', oid, 'EXECUTE')
                    from fn where proname = 'send_appointment_reminders'), false),
