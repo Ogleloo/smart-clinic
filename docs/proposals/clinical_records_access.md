@@ -202,7 +202,7 @@ each gap is confirmed open). F12–F14 are in §0.
 | F4 | A nurse can write into another clinic's consultation | High |
 | F5 | Vitals can be recorded against a patient who is not the consultation's patient | High |
 | F6 | A note/vitals row can be moved to another encounter (UPDATE without WITH CHECK) | Medium |
-| F7 | `anon`/`authenticated` hold TRUNCATE/DELETE/REFERENCES/TRIGGER on all four tables | High if production matches |
+| F7 | `anon`/`authenticated` hold TRUNCATE/DELETE/REFERENCES/TRIGGER on all four tables (and, per the reconciliation, on all 14 public tables) | Least-privilege / defence in depth: not reachable through PostgREST or pg_graphql — see `staged_migration_plan.md` R2 (earlier "High" overstated it) |
 | F8 | Admins read and update every profile in every clinic (ID number, DOB, phone); clinic staff read other clinics' **staff** profiles via patient visits (§0.1) | Medium–High |
 | F9 | Notes are open to all nurses while `consultations` is owner-only: the layers disagree | Design |
 | **F10** | **A nurse can create, re-open or re-target consultations directly** (`consultations_nurse_write` FOR ALL; it has no clinic or queue check). Inserting a consultation on any waiting entry, or setting `ended_at = null` on an old one, succeeded. Besides bypassing `next_patient()`, this would let a nurse *forge* any "currently treating" relationship a treatment-linked policy relies on. It also leaves orphaned open consultations (`system_health_check_v2` "No open consultation on a closed entry" fails after the probe). | High |
