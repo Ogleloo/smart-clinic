@@ -91,6 +91,7 @@ manager and supplied to tests and scripts through the environment (never committ
 |-------------|---------------------------|------------------------------|
 | Patient     | `E2E_PATIENT_EMAIL`       | `E2E_PATIENT_PASSWORD`       |
 | Nurse       | `E2E_NURSE_EMAIL`         | `E2E_NURSE_PASSWORD`         |
+| Nurses 2-4  | `E2E_NURSE2_EMAIL` … `E2E_NURSE4_EMAIL` | (passwords in the password manager; used for manual demos) |
 | Reception   | `E2E_RECEPTIONIST_EMAIL`  | `E2E_RECEPTIONIST_PASSWORD`  |
 | Admin       | `E2E_ADMIN_EMAIL`         | `E2E_ADMIN_PASSWORD`         |
 
