@@ -63,7 +63,19 @@ await step('reception: check_in_patient (walk-in and registered patient)', async
 await step('reception: loads the checked-in patient profile for identity verification', () => nonEmpty(rec.client.from('profiles').select('id, full_name, phone, date_of_birth, id_number').eq('id', p2), 'profile'))
 await step('reception: get_service_queue shows both', async () => { const d = await ok(rec.client.rpc('get_service_queue', { p_service_id: svcId }), 'queue'); if ((d ?? []).length < 2) throw new Error(`queue has ${(d ?? []).length}`); return `${d.length} waiting` })
 await step('reception: queue_entries read with patient names (reception queue page)', () => nonEmpty(rec.client.from('queue_entries').select('id, token, patient:profiles!queue_entries_patient_id_fkey(full_name)').eq('service_id', svcId), 'queue read'))
-await step('nurse: set_emergency_priority on and off (clinical staff only)', async () => { await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: true }), 'on'); await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: false }), 'off') })
+// Priority: after the queue_priority_reception.sql cutover Reception owns it (set_queue_priority); before, the nurse
+// control (set_emergency_priority). The step uses whichever path the database offers and says which.
+await step('priority on and off (reception set_queue_priority if present, else nurse set_emergency_priority)', async () => {
+  const probe = await rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 1, p_reason: 'administrative', p_note: 'workflow regression' })
+  if (probe.error?.code === 'PGRST202') {
+    await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: true }), 'on')
+    await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: false }), 'off')
+    return 'nurse path (baseline)'
+  }
+  if (probe.error) throw new Error(`on: ${probe.error.message}`)
+  await ok(rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 0 }), 'off')
+  return 'reception path (proposed)'
+})
 await step('patient: reads own queue entry (patient dashboard)', () => nonEmpty(patient.client.from('queue_entries').select('id, status').eq('patient_id', p2), 'own entry'))
 
 // Nurse

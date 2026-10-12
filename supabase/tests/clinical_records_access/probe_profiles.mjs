@@ -75,11 +75,27 @@ const mergeB2 = await patient(`PP MergeB ${RUN}`, CLINIC_B, svcB)
 const phoneB = `+27 83 ${String(Date.now()).slice(-3)} ${String(Date.now()).slice(-7, -3)}`
 await must(svc.from('profiles').update({ phone: phoneB }).eq('id', pB), 'phone B')
 
+// Multi-clinic patient S: history at clinic A AND clinic B.
+const S = await patient(`PP Shared ${RUN}`, CLINIC_A, svcA)
+const sB = (await must(svc.from('queue_entries').insert({ clinic_id: CLINIC_B, service_id: svcB, patient_id: S, token: `PPS-${RUN}`, token_number: 798, status: 'done' }).select('id').single(), 'S at B')).id
+const keepK = await patient(`PP Keep ${RUN}`, CLINIC_A, svcA) // clinic-A-only patient used as the merge target
+const keepK2 = await patient(`PP Keep2 ${RUN}`, CLINIC_A, svcA)
+// M1: clinic-A-only patient that is cancelled_by on a clinic-B appointment (an audit reference in another clinic).
+const M1 = await patient(`PP AuditRef ${RUN}`, CLINIC_A, svcA)
+const otherB = await patient(`PP Other B ${RUN}`, CLINIC_B, svcB)
+const slot = new Date(Date.UTC(2026, 11, 1, 8, 15, 0)).toISOString()
+const apptB = (await must(svc.from('appointments').insert({ patient_id: otherB, service_id: svcB, scheduled_time: slot, status: 'cancelled', cancelled_by: M1 }).select('id').single(), 'appt B')).id
+// M2: clinic-A-only patient holding a notification about a clinic-B queue entry.
+const M2 = await patient(`PP NotifRef ${RUN}`, CLINIC_A, svcA)
+await must(svc.from('notifications').insert({ recipient_id: M2, kind: 'called', title: 'probe', queue_entry_id: sB }), 'notif B')
+const adminB = await user('adminb', 'admin', CLINIC_B)
+
 const results = []
 const rows = (r) => (r.error || r.data == null ? 0 : Array.isArray(r.data) ? r.data.length : 1)
 const why = (r) => (r.error ? `${r.error.code ?? ''} ${r.error.message ?? ''}`.trim().slice(0, 70) : `${rows(r)} row(s)`)
 async function check(area, name, expect, q) {
   const want = expect[PHASE]
+  if (want === 'skip') { await q; results.push({ area, name, want, got: 'skip', ok: true, detail: 'not applicable in this phase' }); return }
   const r = await q
   const got = rows(r) > 0 ? 'allowed' : 'denied'
   results.push({ area, name, want, got, ok: got === want, detail: why(r) })
@@ -117,7 +133,7 @@ const pairOf = (r, a, b) => ({ ...r, data: (r.data ?? []).filter((x) => [x.profi
 await check('duplicates', 'admin A sees a clinic-B-only duplicate pair (names, phones, visit counts)', OPEN, dupPairs().then((r) => pairOf(r, dupB1, dupB2)))
 await check('duplicates', 'admin A sees a clinic-A + never-visited duplicate pair', KEEP, dupPairs().then((r) => pairOf(r, dupA, dupU)))
 await check('search', 'receptionist A: partial-name search finds a clinic-B-only patient', OPEN, recA.client.rpc('search_patients', { p_query: `PP linked B ${RUN}` }))
-await check('search', 'receptionist A: exact phone finds a returning clinic-B-only patient (identity verification)', KEEP, recA.client.rpc('search_patients', { p_query: phoneB }))
+await check('search', 'receptionist A: exact phone match discloses a clinic-B-only patient (a phone is not proof of identity)', OPEN, recA.client.rpc('search_patients', { p_query: phoneB }))
 await check('search', 'receptionist A: partial phone does not find a clinic-B-only patient', DENY_IF_PROPOSED(), recA.client.rpc('search_patients', { p_query: phoneB.slice(0, 8) }))
 await check('search', 'receptionist A: partial-name search finds a clinic-A patient', KEEP, recA.client.rpc('search_patients', { p_query: `PP linked A ${RUN}` }))
 await check('search', 'nurse calls search_patients', OPEN, nurseA.client.rpc('search_patients', { p_query: `PP linked A ${RUN}` }))
@@ -125,12 +141,32 @@ await check('merge', 'admin A merges two clinic-B-only patients', OPEN, adminA.c
 await check('merge', 'admin A merges a clinic-B staff profile into a clinic-A patient', OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: pA, p_merge_id: staffNoLogin }))
 await check('merge', 'admin A merges a never-visited duplicate into a clinic-A patient', KEEP, adminA.client.rpc('merge_patient_profiles', { p_keep_id: dupA, p_merge_id: dupU }))
 
+// Multi-clinic merge (rev 4): a patient known to clinics A and B must not be merged by either clinic alone.
+await check('merge multi-clinic', 'receptionist A finds the shared patient S by name (legitimate cross-clinic care)', KEEP, recA.client.rpc('search_patients', { p_query: `PP Shared ${RUN}` }))
+await check('merge multi-clinic', 'admin A merges shared patient S (history at A and B) into a clinic-A patient', OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: keepK, p_merge_id: S }))
+await check('merge multi-clinic', "S's clinic-B queue entry still belongs to S afterwards", { baseline: 'denied', proposed: 'allowed' }, svc.from('queue_entries').select('id').eq('id', sB).eq('patient_id', S))
+await check('merge multi-clinic', 'admin A merges a clinic-A patient INTO a shared profile (keep side shared)', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles', { p_keep_id: S, p_merge_id: keepK2 }))
+await check('merge multi-clinic', 'admin B merges shared patient S as well', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminB.client.rpc('merge_patient_profiles', { p_keep_id: otherB, p_merge_id: S }))
+await check('merge audit refs', "admin A merges a clinic-A patient who is cancelled_by on a clinic-B appointment (rewrites B's audit record)", OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: keepK2, p_merge_id: M1 }))
+await check('merge audit refs', "clinic B's appointment still records the original canceller", { baseline: 'denied', proposed: 'allowed' }, svc.from('appointments').select('id').eq('id', apptB).eq('cancelled_by', M1))
+await check('merge audit refs', 'admin A merges a clinic-A patient holding a notification about a clinic-B entry', OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: keepK2, p_merge_id: M2 }))
+await check('merge audit', 'an allowed merge writes a patient_merge_audit row (admin A can read it)', { baseline: 'skip', proposed: 'allowed' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').select('id, merged_by, moved').eq('keep_id', dupA).eq('merged_by', adminA.id))
+await check('merge audit', "admin B cannot read clinic A's merge audit", { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminB.client.from('patient_merge_audit').select('id').eq('keep_id', dupA))
+await check('merge audit', 'nobody can write the merge audit directly', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').insert({ merged_by: adminA.id, clinic_id: CLINIC_A, keep_id: dupA, merged_id: dupA, moved: {} }).select('id'))
+
+// F13 / F14 (function_privileges_hardening.sql)
+const priv = (fn) => psql(`select has_function_privilege('authenticated', '${fn}', 'EXECUTE');`).trim() === 't'
+await check('function privileges', 'authenticated can execute reset_demo_state() (any admin resets every clinic)', OPEN, Promise.resolve({ data: priv('public.reset_demo_state()') ? [1] : [] }))
+await check('function privileges', 'service_role can still execute reset_demo_state()', KEEP, Promise.resolve({ data: psql("select has_function_privilege('service_role', 'public.reset_demo_state()', 'EXECUTE');").trim() === 't' ? [1] : [] }))
+await check('function privileges', 'an ordinary patient triggers send_appointment_reminders()', OPEN, patSelf.client.rpc('send_appointment_reminders').then((r) => ({ ...r, data: r.error ? null : [1] })))
+await check('function privileges', "the reminders cron job still targets send_appointment_reminders() as its owner", KEEP, Promise.resolve({ data: psql("select count(*) from cron.job where command like '%send_appointment_reminders%' and username = 'postgres';").trim() === '1' ? [1] : [] }))
+
 // Remaining cross-clinic paths found in the audit — NOT changed by these proposals (pre-existing; separate fix).
 const svcBForA = svcB
 await check('cross-clinic controls', 'nurse A cannot go on duty on a clinic-B service (refused today)', DENY, nurseA.client.rpc('set_duty', { p_on_duty: true, p_service_id: svcBForA }).then((r) => ({ ...r, data: r.error ? null : [1] })))
 await nurseA.client.rpc('set_duty', { p_on_duty: false })
 const bEntry = (await must(svc.from('queue_entries').insert({ clinic_id: CLINIC_B, service_id: svcB, patient_id: pB, token: `PPE-${RUN}`, token_number: 799, status: 'waiting' }).select('id').single(), 'b entry')).id
-await check('known open (separate fix)', 'nurse A sets emergency priority on a clinic-B entry (no clinic check)', { baseline: 'allowed', proposed: 'allowed' }, nurseA.client.rpc('set_emergency_priority', { p_queue_entry_id: bEntry, p_emergency: true }).then((r) => ({ ...r, data: r.error ? null : [1] })))
+await check('cross-clinic controls', 'F12: nurse A sets emergency priority on a clinic-B entry (closed by the queue_priority_reception cutover)', OPEN, nurseA.client.rpc('set_emergency_priority', { p_queue_entry_id: bEntry, p_emergency: true }).then((r) => ({ ...r, data: r.error ? null : [1] })))
 
 await check('patient', 'patient reads own ID number / date of birth', KEEP, patSelf.client.from('profiles').select('id_number, date_of_birth').eq('id', patSelf.id))
 await check('patient', "patient reads another patient's profile", DENY, ident(patSelf.client, pA))

@@ -101,18 +101,19 @@ checks(check_name, pass, detail) as (
               and p.proname in ('active_nurse', 'nurse_treats_patient', 'nurse_can_read_clinical', 'nurse_owns_active_consultation')),
          'pg_proc'
   union all
-  -- Helper inputs are ROW data only (an allow-list); the caller is always derived from auth.uid() inside.
+  -- SECURITY DEFINER helper inputs are ROW data only (an allow-list); the caller is always derived from auth.uid()
+  -- inside. (Invoker-rights pure validators in private, e.g. identity-document checks, are out of this rule.)
   -- p_author_id receives the row's nurse_id and is only ever compared with the caller's own profile id.
   select 'private helper inputs are row data only (allow-list) and identity comes from auth.uid()',
          not exists (select 1 from pg_proc p,
                        unnest(coalesce(p.proargnames, '{}'), coalesce(p.proargmodes, array_fill('i'::"char", array[coalesce(array_length(p.proargnames, 1), 0)]))) as a(name, mode)
-                     where p.pronamespace = to_regnamespace('private') and a.mode in ('i', 'b')
+                     where p.pronamespace = to_regnamespace('private') and p.prosecdef and a.mode in ('i', 'b')
                        and a.name not in ('p_consultation_id', 'p_patient_id', 'p_author_id'))
-         and not exists (select 1 from pg_proc p where p.pronamespace = to_regnamespace('private')
+         and not exists (select 1 from pg_proc p where p.pronamespace = to_regnamespace('private') and p.prosecdef
                            and p.prorettype <> 'trigger'::regtype
                            and p.prosrc !~ '(auth\.uid\(\)|private\.active_nurse\(\))'),
          coalesce((select string_agg(p.proname || '(' || array_to_string(p.proargnames, ',') || ')', ', ') from pg_proc p
-                   where p.pronamespace = to_regnamespace('private') and p.prorettype <> 'trigger'::regtype), 'none')
+                   where p.pronamespace = to_regnamespace('private') and p.prosecdef and p.prorettype <> 'trigger'::regtype), 'none')
   union all
   select 'no private function executable by anon or PUBLIC',
          not exists (select 1 from pg_proc p where p.pronamespace = to_regnamespace('private')

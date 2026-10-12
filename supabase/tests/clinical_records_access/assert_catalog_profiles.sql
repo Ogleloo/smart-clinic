@@ -45,6 +45,26 @@ checks(check_name, pass, detail) as (
          (select count(*) = 3 and bool_and(prosecdef and cfg like '%search_path=%' and not has_function_privilege('anon', oid, 'EXECUTE')) from fn),
          'pg_proc'
   union all
+  select 'search_patients never returns patients known only to other clinics (rev 4)',
+         coalesce((select prosrc !~ 'foreign' and prosrc ~ '''linked'', ''shared'', ''unaffiliated''' from fn where proname = 'search_patients'), false),
+         'search_patients'
+  union all
+  select 'merge refuses shared/foreign profiles and other-clinic audit references, and writes patient_merge_audit',
+         coalesce((select prosrc ~ '''shared''' and prosrc ~ 'cancelled_by = p_merge_id' and prosrc ~ 'priority_set_by = p_merge_id'
+                          and prosrc ~ 'insert into public\.patient_merge_audit' from fn where proname = 'merge_patient_profiles'), false),
+         'merge_patient_profiles'
+  union all
+  select 'patient_merge_audit: RLS on, clinic-scoped admin read, no write privilege for app roles',
+         coalesce((select c.relrowsecurity
+                          and not has_table_privilege('authenticated', c.oid, 'INSERT') and not has_table_privilege('authenticated', c.oid, 'UPDATE')
+                          and not has_table_privilege('authenticated', c.oid, 'DELETE') and not has_table_privilege('anon', c.oid, 'SELECT')
+                   from pg_class c where c.oid = to_regclass('public.patient_merge_audit')), false),
+         'patient_merge_audit'
+  union all
+  select 'private.patient_scope distinguishes shared (known to this and another clinic)',
+         coalesce((select p.prosrc ~ '''shared''' from pg_proc p where p.oid = to_regprocedure('private.patient_scope(uuid)')), false),
+         'private.patient_scope'
+  union all
   select 'private.patient_scope: SECURITY DEFINER, not anon/PUBLIC-executable',
          coalesce((select p.prosecdef and not has_function_privilege('anon', p.oid, 'EXECUTE')
                           and not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0)

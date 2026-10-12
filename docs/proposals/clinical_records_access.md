@@ -1,20 +1,84 @@
-# Clinical records and patient-identifier access — security proposal (revision 3)
+# Clinical records, patient identity and queue priority — security proposal (revision 4)
 
 **Status: PROPOSAL ONLY — nothing applied to the shared Supabase project; not authorised for production.** No
-migration, RLS, grant or SQL change has been made to production or preview. Both SQL files live under
-`docs/proposals/`, not `supabase/migrations/`. Nurse V3 Phase 3 (Patient Details / Patient History) stays on hold.
-Revision 3 answers the final review (§0); the design was approved in principle with D1 = all historical visits at
-the patient's current clinic while the nurse is treating them, paginated, no date cutoff.
+migration, RLS, grant or SQL change has been made to production or preview; the read-only production inventory has
+**not** been run. All SQL lives under `docs/proposals/`. Nurse V3 Phase 3 stays paused at the clinical-record gate.
+The treatment-linked design is approved in principle.
 
 | | |
 |---|---|
-| Clinical proposal | [`clinical_records_access.sql`](clinical_records_access.sql) — notes/vitals, treatment link, grants, paginated history, legacy RPC revokes |
-| Profiles proposal (separate) | [`profiles_identifier_access.sql`](profiles_identifier_access.sql) — Stage 1: admin/staff clinic scoping, duplicates, search, merge |
-| Assertions (local only) | `supabase/tests/clinical_records_access/` — `probe.mjs` (85), `probe_profiles.mjs` (37), `regression_workflows.mjs` (24) |
-| Read-only catalog checks | `assert_catalog.sql` (19), `assert_catalog_profiles.sql` (8), `production_inventory.sql` (12 sections) — **not run on production** (needs authorisation) |
-| Where verified | Disposable local Supabase stack (CLI 2.118.0) replaying the 63 committed migrations plus a local-only demo seed |
+| Clinical proposal | [`clinical_records_access.sql`](clinical_records_access.sql) — treatment-linked notes/vitals, no direct writes to consultations/queue_entries, minimal grants, paginated history, legacy RPCs revoked (unchanged in rev 4) |
+| Profiles proposal | [`profiles_identifier_access.sql`](profiles_identifier_access.sql) — rev 4: `shared` scope, no cross-clinic search disclosure, single-clinic audited merge |
+| Queue priority (new) | [`queue_priority_reception.sql`](queue_priority_reception.sql) — revised BR-10, Reception-managed, audited, nurse escalation; closes F12 at cutover |
+| Function privileges (new) | [`function_privileges_hardening.sql`](function_privileges_hardening.sql) — F13 `reset_demo_state`, F14 `send_appointment_reminders` |
+| Identity prototype (new) | [`identity_documents_prototype.sql`](identity_documents_prototype.sql) — design prototype for mandatory ID (not the registration change) |
+| Supervisor requirements | [`supervisor_requirements.md`](supervisor_requirements.md) — mandatory identification; Reception-managed priority; V3 impact |
+| Local assertions | `supabase/tests/clinical_records_access/` — `probe.mjs` 85, `probe_profiles.mjs` 56, `probe_priority.mjs` 36, `probe_identity.mjs` 24, `regression_workflows.mjs` 24 |
+| Read-only catalog | `assert_catalog.sql` 19, `assert_catalog_profiles.sql` 12, `assert_catalog_priority.sql` 7, `production_inventory.sql` — **not run on production** |
 
-## 0. Final review — answers
+## R4. Revision 4 — what changed and why
+
+**Verified facts** (local stack, committed migrations) are marked [fact]; recommendations [design].
+
+1. **Cross-clinic merge hole in rev 3 — fixed.** [fact] `private.patient_scope()` returned `linked` for a patient with
+   history at clinics A **and** B, so clinic A's admin could merge that patient and rewrite clinic B's queue entries
+   (asserted against baseline: B's entry moved). Also [fact] a clinic-A-only patient could be `cancelled_by` on a
+   clinic-B appointment or hold a notification about a clinic-B entry, and the merge rewrote those too.
+   [design] `patient_scope` now returns `linked` / **`shared`** / `foreign` / `unaffiliated`; the merge refuses
+   `shared` and `foreign` on either side, refuses if any row it would rewrite (queue entries, appointments,
+   notifications, `cancelled_by`, `priority_set_by`) belongs to another clinic, requires patient profiles, and writes
+   `patient_merge_audit` (clinic-scoped admin read, no direct writes). Duplicates listing excludes `shared`. Asserted:
+   shared-patient merges by A and by B refused, B's records untouched, audit row written and not readable by clinic B.
+   Reconciled with mandatory ID: merges become exceptional reconciliation only (`supervisor_requirements.md` §1.6).
+2. **Cross-clinic patient search — tightened.** [design] Rev 3 returned a patient known only to other clinics on an
+   exact phone match; a phone number is not proof of identity, so rev 4 never returns them. Patients known to this
+   clinic (incl. `shared`) and unaffiliated patients remain searchable. Returning patients from another clinic will be
+   found by exact identity document once mandatory ID exists. **Interim cost:** until then Reception at clinic A cannot
+   find a clinic-B patient and may create a second walk-in profile — accepted temporarily or the profiles migration
+   waits for identity documents (*decision D-S1*).
+3. **F12 `set_emergency_priority` — corrected through the supervisor's Reception model.** [fact] no clinic check
+   (asserted: clinic-A nurse changed a clinic-B entry), changes in-progress entries, no history. [design]
+   `queue_priority_reception.sql`: Reception-only `set_queue_priority` with clinic check, waiting-only, reasons,
+   history and nurse escalations; the cutover revokes `set_emergency_priority` from app roles and stops priority at
+   check-in. Must ship with the Reception V3 control and the removal of the Nurse toggle. Asserted (36 checks).
+4. **F13 `reset_demo_state`** [fact] any admin of any clinic can run it and it resets every clinic. [design] service
+   role / SQL editor only. **Dependency [fact]:** `e2e/helpers.ts` calls it as the demo admin for the live suites;
+   revoking it breaks them by design (they mutate the shared production database) — *decision D-F13*: move those
+   suites to the local stack, or keep a clinic-scoped admin variant.
+5. **F14 `send_appointment_reminders`** [fact] executable by any signed-in user, no role check (asserted: a patient
+   triggered it). Its only intended caller is the pg_cron job, which runs as `postgres`. [design] revoke from app
+   roles; the cron job is unaffected (asserted it still targets the function as `postgres`).
+6. **Admin Staff scoping** preserved (rev 3 policy: visit-based staff reads only for patient profiles). Planned app
+   change, not in this PR: explicit `.eq('clinic_id', …)` on the Staff page query. Cross-clinic **patient care**
+   remains (a `shared` patient is visible to both clinics' staff); cross-clinic **administration** does not.
+7. **Supervisor requirements** documented in `supervisor_requirements.md` and `docs/V3_REQUIREMENTS.md`, with an
+   identity-document prototype whose database invariants are tested (validation, normalisation, concurrent
+   uniqueness, replacement, minimum exposure). Registration itself is unchanged.
+8. **Two prototype defects found by the tests and fixed** [fact]: the identity CHECK constraints call `private`
+   functions, so the inserting role needs USAGE/EXECUTE (writes will come from SECURITY DEFINER functions); and the
+   validators were left with the default PUBLIC EXECUTE — now revoked, per the project rule.
+
+### Recommended migration and implementation sequence [design]
+
+| # | Change | Depends on | Ships with app change? |
+|---|---|---|---|
+| 0 | **Authorise and run** the read-only inventory + three catalog files on production; reconcile drift | — | no |
+| 1 | `function_privileges_hardening.sql` (F14 now; F13 after D-F13) | 0; D-F13 | F13: e2e helper change |
+| 2 | `clinical_records_access.sql` | 0 | no (no deployed code writes the affected tables) |
+| 3 | `profiles_identifier_access.sql` | 0; D-S1 | Staff page filter in the same window |
+| 4 | Nurse V3 Phase 3 screens (Patient Details / History) | 2 | yes |
+| 5 | `queue_priority_reception.sql` Part 1 | 0 | no |
+| 6 | Reception V3 Queue priority control + escalation inbox; Nurse escalate action; Nurse toggle removed; **Part 2 cutover** | 5 | **yes — one release** |
+| 7 | Identity documents: expand → registration/walk-in capture → backfill → enforcement → drop `profiles.id_number` | decisions D-ID1…5 | yes (Patient, Reception V3) |
+| 8 | Admin V3 without routine merge; later revoke the 2-argument merge | 3, 7 | yes |
+
+### Remaining decisions
+
+D-S1 interim cross-clinic search gap · D-F13 live e2e suites vs `reset_demo_state` · D-P1/P2/P3 priority (admin
+access, reception-observed emergency, escalation-note content) · D-ID1…5 identity storage, account linking, patient
+self-correction, transition window, test-record tagging.
+
+## 0. Revision 3 — final review answers (kept for history; see R4 for changes)
 
 1. **Clinic-B staff on clinic A's Staff page — yes, today and even after revision-2 Stage 1.**
    `app/admin/staff/page.tsx` selects `profiles` by role with **no clinic filter**, relying on RLS.
@@ -30,9 +94,8 @@ the patient's current clinic while the nurse is treating them, paginated, no dat
    DEFINER with **no clinic scope** (details and corrections in §7). Summary: any admin listed every clinic's
    duplicate patients (names, phones, visit counts); any staff role, including nurses, could substring-search every
    clinic's patients; any admin could merge any two profiles in any clinic — including a **staff** profile, moving
-   another clinic's records and deleting the merged profile. Corrected through one boolean-style classifier,
-   `private.patient_scope()` (linked / foreign / unaffiliated). Nothing is broadened: cross-clinic search now needs an
-   exact phone match (identity verification), where today a partial name suffices.
+   another clinic's records and deleting the merged profile. Corrected through one classifier,
+   `private.patient_scope()`. *(Rev 4: a `shared` scope was added and the exact-phone cross-clinic search removed — see R4.)*
 3. **History authorisation matches `next_patient()`.** "Currently treating" requires an open consultation owned by
    the nurse with the queue entry `in_progress` — the state `next_patient()` creates atomically. Asserted: a nurse
    whose service has the patient **waiting** (not called) gets nothing; after `next_patient()` access starts; after
@@ -61,7 +124,7 @@ the patient's current clinic while the nurse is treating them, paginated, no dat
    an 8-check profiles catalog file.
 8. Docs/tests updated; SQL stays outside `supabase/migrations`.
 
-**Other cross-clinic paths found in the audit (pre-existing, not changed by these proposals — separate fix):**
+**Other cross-clinic paths found in the rev-3 audit** (rev 4 proposes fixes for F12–F14 — see R4.3–R4.5):
 
 | # | Finding | Evidence |
 |---|---|---|
@@ -201,7 +264,7 @@ and the helpers are revoked from `public, anon`; `get_public_queue_display` rema
 | `profiles_staff_read_clinic_patients`: visit-based branches only for `role = 'patient'` | other clinics' staff disclosed via patient visits, incl. on the Staff page (§0.1) |
 | `private.patient_scope(id)` → `linked` / `foreign` / `unaffiliated` | one rule for the three functions; caller from `auth.uid()`; returns no profile data; not an RPC |
 | `find_duplicate_patients()`: pairs with neither side foreign and at least one side linked | today lists every clinic's patients (names, phones, visit counts) |
-| `search_patients()`: receptionist/admin only; substring search within linked + unaffiliated; a foreign-only patient only on an **exact phone** match (≥ 9 digits) | today any staff role substring-searches every clinic |
+| `search_patients()`: receptionist/admin only; substring search within linked, shared and unaffiliated patients; a patient known only to other clinics is **never** returned (rev 4) | today any staff role substring-searches every clinic |
 | `merge_patient_profiles()`: both profiles `patient`; neither foreign; at least one linked; one generic refusal message; role check uses `is distinct from` | today any admin merges any two profiles in any clinic, including staff; original `<> 'admin'` passes a NULL role |
 
 | Behaviour after Stage 1 | Asserted |
@@ -210,8 +273,8 @@ and the helpers are revoked from `public, anon`; `get_public_queue_display` rema
 | Clinic-B nurse who visited clinic A as a patient: on clinic A's Staff page / readable by clinic-A reception | denied |
 | Admin reads clinic-A patients and staff; Staff page lists own-clinic staff | allowed |
 | Reception reads a linked patient's ID number / DOB (check-in identity verification) | allowed |
-| Reception search: never-visited patient by name; clinic-A patient by name; returning clinic-B patient by exact phone | allowed |
-| Reception search: clinic-B-only patient by partial name or partial phone; any nurse calling `search_patients` | denied |
+| Reception search: never-visited patient by name; clinic-A patient by name; shared (A+B) patient by name | allowed |
+| Reception search: clinic-B-only patient by partial name, partial phone or exact phone; any nurse calling `search_patients` | denied |
 | Duplicates: clinic-B-only pair hidden; clinic-A + never-visited pair shown | asserted |
 | Merge: two clinic-B patients, or a staff profile → refused; never-visited duplicate into clinic-A patient → allowed | asserted |
 | Patient reads own ID number / DOB; another patient's profile | allowed / denied |
@@ -244,7 +307,7 @@ every `select('*')` on `profiles` (`app/admin/staff/page.tsx`) — a column revo
 | Reception | Walk-in creation, search, check-in, appointment check-in | SECURITY DEFINER RPCs | none | regression 24/24 |
 | Reception | Identity verification on check-in (`id, full_name, phone, date_of_birth, id_number`) | `profiles_staff_read_clinic_patients` | none (Stage 2 would move it to a function) | regression + profiles probe |
 | Reception | Queue list with patient names, skip (waiting only) | SELECT kept; `skip_patient` RPC | none | regression |
-| Reception | Patient search (`search_patients`) | SECURITY DEFINER, now scoped | same within clinic and for never-visited patients; another clinic's patient only by exact phone | profiles probe + regression |
+| Reception | Patient search (`search_patients`) | SECURITY DEFINER, now scoped | same within the clinic (incl. shared patients) and for never-visited patients; patients known only to another clinic no longer returned (D-S1) | profiles probe + regression |
 | Reception | Reading clinical notes/vitals | — | **removed** (intended, F1) | probe |
 | Reception | Direct `queue_entries` updates | — | **removed**; no app code did this (F11) | catalog + in-transaction check |
 | Nurse | Duty, next, undo, emergency, skip-waiting, end consultation, end shift | SECURITY DEFINER RPCs | none | regression; local Playwright 66/66 (real `next_patient` / `skip_waiting_patient` through the app) |
@@ -252,6 +315,10 @@ every `select('*')` on `profiles` (`app/admin/staff/page.tsx`) — a column revo
 | Nurse | Notes/vitals on the active consultation | new write policies | allowed; after completion read-only | probe |
 | Nurse | Other patients' notes/vitals | — | **removed** unless treating/authored (intended, F2) | probe |
 | Nurse | Legacy `start_consultation` / `call_next_patient` | — | **EXECUTE revoked**; unused by app and database (F15) | probe + catalog |
+| Nurse | Emergency toggle (`set_emergency_priority`) | revoked at the priority cutover | **removed** with the UI change; replaced by "escalate to reception" | priority probe |
+| Reception | Queue priority | new `set_queue_priority` + escalation inbox | **new** Reception responsibility (revised BR-10) | priority probe + regression |
+| Admin | Duplicates / merge | scoped, single-clinic, audited | no routine Admin V3 screen; exceptional only | profiles probe |
+| Ops / tests | `reset_demo_state()`, `send_appointment_reminders()` | service role / cron only | live e2e helper affected (D-F13); cron unaffected | profiles probe + catalog |
 | Admin | Reports (`consultations` at the clinic) | `consultations_staff_read` (unchanged) | none | regression |
 | Admin | Staff list, staff status changes | profiles SELECT; `admin_set_staff_status` | own clinic only after Stage 1 | regression + profiles probe |
 | Admin | Patient search, duplicates, merge | direct profiles query; definer RPCs | search limited to clinic-linked patients after Stage 1 | regression |
@@ -262,53 +329,49 @@ every `select('*')` on `profiles` (`app/admin/staff/page.tsx`) — a column revo
 | Ops | `reset_demo_state()` | SECURITY DEFINER, postgres | none expected; **not verifiable locally** — it fails on the local seed for an unrelated reason (demo patient profiles that exist only in production) | — |
 | Tests | Playwright fixtures | service role | none | Playwright 66/66 |
 
-## 9. Local test results (exact, 2026-10-12)
+## 9. Local test results (exact, revision 4, 2026-10-12)
 
-Two fresh local stacks (63 committed migrations + local-only seed), so that fixtures from the baseline probes never
-mix with the proposed-phase results.
+Two fresh local stacks (63 committed migrations + local-only seed). Stack A: no proposal. Stack B: all five SQL
+proposals applied (clinical, profiles, queue priority Parts 1+2, function privileges, identity prototype). "Skipped"
+rows are assertions about objects that only exist after the proposals; they are counted inside the totals.
 
-**Stack A — baseline (no proposal):**
+| Run | Stack A — baseline | Stack B — all proposals |
+|---|---|---|
+| health checks, fresh, no fixtures | 22 PASS · 1 INFO · 1 FAIL | **identical** before and after applying (and identical to A) |
+| `production_inventory.sql` (read-only) | 342 lines | 363 lines |
+| `assert_catalog.sql` | 4 / 19 true (findings) | **19 / 19** |
+| `assert_catalog_profiles.sql` | 1 / 12 true | **12 / 12** |
+| `assert_catalog_priority.sql` | 0 / 7 true | **7 / 7** |
+| `probe.mjs` (clinical) | 85/85 hold (5 skipped) | **85/85** |
+| `probe_profiles.mjs` | 56/56 hold (5 skipped) | **56/56** |
+| `probe_priority.mjs` | 36/36 hold (18 skipped) | **36/36** |
+| `probe_identity.mjs` | 24/24 hold (21 skipped) | **24/24** |
+| `regression_workflows.mjs` | 24/24 (nurse priority path) | **24/24** (Reception priority path) |
+| Playwright `nurse-v3-skip.local` + `nurse-classic-skip.local` | — | **66 passed**; tripwire: no non-local Supabase traffic |
+| health checks after all tests | 20 PASS · 1 INFO · 1 WARN · 2 FAIL | 21 PASS · 1 INFO · 1 WARN · 1 FAIL |
 
-| Run | Result |
-|---|---|
-| health checks, fresh, no fixtures | 22 PASS · 1 INFO · 1 FAIL (pre-existing `revoke_anon_on_new_functions`) |
-| `production_inventory.sql` (read-only) | ran; 342 lines |
-| `assert_catalog.sql` / `assert_catalog_profiles.sql` | 15 of 19 false / 7 of 8 false — the findings |
-| `probe.mjs PHASE=baseline` | **85/85 hold** (every clinical gap reproduced) |
-| `probe_profiles.mjs PHASE=baseline` | **37/37 hold** (first run 36/37: my `set_duty` cross-clinic expectation was wrong — the trigger refuses it; changed to a control, not weakened) |
-| `regression_workflows.mjs` | **24/24** |
-| health checks after the probes | 20 PASS · 1 INFO · 1 WARN · 2 FAIL — the extra FAIL is the orphan created by the F10 forgery probe; the WARN is backdated open fixtures |
+The one FAIL present everywhere is pre-existing (`revoke_anon_on_new_functions`, an event-trigger function counted
+as anon-executable; not an RPC). Stack A's extra FAIL after the tests is the orphaned consultation created by the
+**successful** F10 forgery probe; it does not occur on stack B. The WARN is backdated open fixtures.
 
-**Stack B — both proposals applied (fresh):**
+Intermediate runs during revision 4 (not the evidence above, recorded for honesty): the first stack-B run had
+3 failures and a crash — the F12 expectation was still "known open" though the cutover closes it (expectation
+updated); the clinical catalog's helper allow-list wrongly covered the identity validators (narrowed to SECURITY
+DEFINER helpers); the identity prototype lacked USAGE/EXECUTE for the inserting role and left PUBLIC EXECUTE on the
+validators (fixed in the SQL); and the prototype table had RLS without a policy (explicit deny-all added).
 
-| Run | Result |
-|---|---|
-| health checks, no fixtures | 22 PASS · 1 INFO · 1 FAIL — **status rows identical to stack A before** |
-| `assert_catalog.sql` / `assert_catalog_profiles.sql` | **19/19 / 8/8 true** |
-| `probe.mjs PHASE=proposed` | **85/85 hold** |
-| `probe_profiles.mjs PHASE=proposed` | **37/37 hold** |
-| `regression_workflows.mjs` | **24/24** |
-| Playwright `nurse-v3-skip.local` + `nurse-classic-skip.local`, app server on stack B | **66 passed**, 0 skipped; tripwire: no non-local Supabase connection (one npm registry check blocked) |
-| health checks after everything | 21 PASS · 1 INFO · 1 WARN (backdated open fixtures) · 1 FAIL (pre-existing) — no orphan |
-
-Catalog negative control (revision 2, still valid): injected violations are flagged.
-Not run: anything against production or a preview; `reset_demo_state()` (fails on the local seed: demo patient
-profiles exist only in production); the live read-only Playwright suites; TypeScript/ESLint/build (no app code
-changed).
+Not run: anything against production or a preview (including the read-only inventory); `reset_demo_state()`
+itself; the live Playwright suites; TypeScript/ESLint/build (no app code changed).
 
 ## 10. Before any deployment (remaining blockers)
 
-1. **Authorise and run the read-only production inventory** (`production_inventory.sql`, then `assert_catalog.sql`
-   and `assert_catalog_profiles.sql`). Compare with the local baseline; adjust the SQL for any drift.
-2. **Separate approval of the migration(s)**, committed in the same change that applies them. Order: clinical first or
-   profiles first — they are independent. Every statement is a production change on apply.
-3. **App follow-up in the same release window:** explicit clinic filter on the Staff page query (§0.1).
-4. **Decide F12–F14** (separate fixes): `set_emergency_priority` clinic check; scope `reset_demo_state` to the
-   caller's clinic (or service role only); role check / revoke on `send_appointment_reminders`.
-5. After applying: re-run the three read-only catalog files (all true), both health checks, and a smoke test of
-   check-in → call → end on the deployed site, plus the admin Staff page and reception search.
+See **R4 → Recommended migration and implementation sequence** and **Remaining decisions**. In short: authorise the
+read-only production inventory; answer D-S1, D-F13, D-P1–3 and D-ID1–5; approve each migration separately and commit
+it in the same change that applies it; ship the priority cutover only together with the Reception/Nurse UI change.
 
 ## 11. Rollback
+
+Each new proposal file ends with its own rollback block.
 
 ```sql
 -- clinical_records_access.sql

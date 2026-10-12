@@ -1,4 +1,4 @@
--- PROPOSAL (revision 2) — NOT APPLIED, NOT A MIGRATION. Independent of clinical_records_access.sql (either can be
+-- PROPOSAL (revision 4) — NOT APPLIED, NOT A MIGRATION. Independent of clinical_records_access.sql (either can be
 -- approved and applied first). Rationale and test evidence: docs/proposals/clinical_records_access.md §7.
 --
 -- Stage 1 — keep administrators (and all staff) to their own clinic for patient identity data:
@@ -9,17 +9,22 @@
 --      Staff page, whose query has no clinic filter. Staff profiles are visible through clinic_id only.
 --   3. find_duplicate_patients(): only pairs this clinic can act on (see "scope" below), not every clinic's
 --      patients' names, phones and visit counts.
---   4. search_patients(): receptionist/admin only (no nurse screen uses it); substring search within scope;
---      a patient known only to OTHER clinics is returned only on an exact phone-number match (identity
---      verification for a returning patient), never by partial name.
---   5. merge_patient_profiles(): both profiles must be patients, neither may have history at another clinic,
---      and at least one must belong to the caller's clinic. Today any admin can merge any two profiles in any
---      clinic — including a staff profile — moving other clinics' records and deleting a profile.
+--   4. search_patients(): receptionist/admin only (no nurse screen uses it); substring search over patients
+--      linked to the caller's clinic (incl. shared) and unaffiliated patients. A patient known ONLY to other
+--      clinics is never returned — not even on an exact phone match (rev 4: a phone number is not proof of
+--      identity). Returning patients from another clinic will be found by identity document once mandatory
+--      identification exists (identity_documents_prototype.sql / supervisor_requirements.md).
+--   5. merge_patient_profiles(): exceptional and audited. Both profiles must be patients; every record either
+--      profile touches (queue entries, appointments, notifications, cancelled_by / priority_set_by audit refs)
+--      must belong to the caller's clinic; at least one profile must be linked to it. Each merge writes a row to
+--      patient_merge_audit. Rev 4 fixes a rev-3 hole: a patient with history at clinics A AND B was classified
+--      'linked' by A, so A could merge it and rewrite B's records.
 --
 -- Scope of a patient profile for the calling staff member:
---   linked       — profile.clinic_id is the caller's clinic, or it has a queue entry / appointment there
---   foreign      — it has a clinic_id, queue entry or appointment at ANOTHER clinic (and is not linked)
---   unaffiliated — neither (e.g. registered online, never visited anywhere)
+--   linked       — known to the caller's clinic (clinic_id, queue entry or appointment there) and to no other
+--   shared       — known to the caller's clinic AND to another clinic
+--   foreign      — known only to other clinics
+--   unaffiliated — known to no clinic (e.g. registered online, never visited)
 --
 -- Stage 2 (column-level identifier minimisation) is designed in the .md and is NOT in this file.
 
@@ -29,7 +34,7 @@ create schema if not exists private;
 revoke all on schema private from public, anon;
 grant usage on schema private to authenticated;
 
--- 'linked' | 'foreign' | 'unaffiliated' | null (no such profile, or caller is not clinic staff with a clinic).
+-- 'linked' | 'shared' | 'foreign' | 'unaffiliated' | null (no such profile, or caller is not active clinic staff).
 -- Boolean-ish classification only; derives the caller's clinic from auth.uid(); returns no profile data.
 create or replace function private.patient_scope(p_patient_id uuid)
 returns text
@@ -41,20 +46,24 @@ as $$
     where auth_user_id = auth.uid() and role in ('receptionist', 'nurse', 'admin') and is_active and clinic_id is not null
     limit 1
   ),
-  p as (select id, clinic_id from public.profiles where id = p_patient_id)
-  select case
-           when p.clinic_id = me.clinic_id
-             or exists (select 1 from public.queue_entries q where q.patient_id = p.id and q.clinic_id = me.clinic_id)
-             or exists (select 1 from public.appointments a join public.services s on s.id = a.service_id
-                        where a.patient_id = p.id and s.clinic_id = me.clinic_id)
-             then 'linked'
-           when p.clinic_id is not null
-             or exists (select 1 from public.queue_entries q where q.patient_id = p.id)
-             or exists (select 1 from public.appointments a where a.patient_id = p.id)
-             then 'foreign'
-           else 'unaffiliated'
-         end
-  from me, p;
+  p as (select id, clinic_id from public.profiles where id = p_patient_id),
+  k as (
+    select
+      (p.clinic_id = me.clinic_id
+        or exists (select 1 from public.queue_entries q where q.patient_id = p.id and q.clinic_id = me.clinic_id)
+        or exists (select 1 from public.appointments a join public.services s on s.id = a.service_id
+                   where a.patient_id = p.id and s.clinic_id = me.clinic_id)) as here,
+      ((p.clinic_id is not null and p.clinic_id <> me.clinic_id)
+        or exists (select 1 from public.queue_entries q where q.patient_id = p.id and q.clinic_id <> me.clinic_id)
+        or exists (select 1 from public.appointments a join public.services s on s.id = a.service_id
+                   where a.patient_id = p.id and s.clinic_id <> me.clinic_id)) as elsewhere
+    from me, p
+  )
+  select case when here and elsewhere then 'shared'
+              when here then 'linked'
+              when elsewhere then 'foreign'
+              else 'unaffiliated' end
+  from k;
 $$;
 revoke all on function private.patient_scope(uuid) from public, anon;
 grant execute on function private.patient_scope(uuid) to authenticated;
@@ -111,6 +120,7 @@ as $$
    and ( (a.phone is not null and a.phone = b.phone)
       or lower(a.full_name) = lower(b.full_name) )
    and not (a.has_login and b.has_login)
+  -- Only pairs this clinic could merge (see merge rules): shared and foreign profiles never qualify.
   where a.scope in ('linked', 'unaffiliated') and b.scope in ('linked', 'unaffiliated')
     and 'linked' in (a.scope, b.scope);
 $$;
@@ -126,7 +136,6 @@ as $$
 declare
   caller_role public.user_role := public.auth_role();
   q text := nullif(trim(p_query), '');
-  q_digits text := regexp_replace(coalesce(p_query, ''), '\D', '', 'g');
 begin
   if caller_role is null or caller_role not in ('receptionist', 'admin') then
     raise exception 'Not authorised';
@@ -141,12 +150,8 @@ begin
   cross join lateral (select private.patient_scope(p.id) as scope) sc
   where p.role = 'patient'
     and p.is_active
-    and (
-      (sc.scope in ('linked', 'unaffiliated')
-        and (p.full_name ilike '%' || q || '%' or p.phone ilike '%' || q || '%'))
-      or (sc.scope = 'foreign' and length(q_digits) >= 9
-        and regexp_replace(coalesce(p.phone, ''), '\D', '', 'g') = q_digits)
-    )
+    and sc.scope in ('linked', 'shared', 'unaffiliated')
+    and (p.full_name ilike '%' || q || '%' or p.phone ilike '%' || q || '%')
   order by p.full_name
   limit 20;
 end;
@@ -154,7 +159,30 @@ $$;
 revoke all on function public.search_patients(text) from public, anon;
 grant execute on function public.search_patients(text) to authenticated;
 
--- 5. Merge: the deployed body (20260808154202) with the scope checks added after the role check.
+-- 5. Exceptional merge, audited. The Admin V3 UI is planned WITHOUT routine duplicate detection or merge
+--    (supervisor: prevent duplicates at registration instead); the function is kept, restricted and audited.
+create table if not exists public.patient_merge_audit (
+  id               uuid primary key default gen_random_uuid(),
+  merged_at        timestamptz not null default now(),
+  merged_by        uuid not null,                -- staff profile id (no FK: audit rows must outlive profiles)
+  clinic_id        uuid not null references public.clinics(id),
+  keep_id          uuid not null,                -- no FK: the kept profile may itself be merged later
+  merged_id        uuid not null,                -- the deleted profile (no FK: it no longer exists)
+  merged_full_name text,                         -- minimal snapshot; no ID number, DOB or phone
+  moved            jsonb not null,
+  reason           text
+);
+alter table public.patient_merge_audit enable row level security;
+revoke all on public.patient_merge_audit from public, anon, authenticated;
+grant select on public.patient_merge_audit to authenticated;
+create policy patient_merge_audit_admin_read on public.patient_merge_audit
+  for select to authenticated
+  using (public.auth_role() = 'admin' and clinic_id = public.auth_clinic_id());
+-- No write policy: rows are written only by merge_patient_profiles() (SECURITY DEFINER).
+
+-- The deployed body (20260808154202) with: patients only, single-clinic footprint, audit row. Signature unchanged
+-- so the deployed admin screen keeps working until Admin V3 removes it; a reason-taking variant comes with the
+-- exceptional-reconciliation flow.
 create or replace function public.merge_patient_profiles(p_keep_id uuid, p_merge_id uuid)
 returns table (queue_entries_moved int, appointments_moved int, notifications_moved int, audit_refs_moved int)
 language plpgsql
@@ -165,6 +193,8 @@ declare
   keep_auth uuid; merge_auth uuid;
   keep_role public.user_role; merge_role public.user_role;
   keep_scope text; merge_scope text;
+  me_clinic uuid;
+  merged_name text;
   n_q int; n_a int; n_n int; n_x int; n_tmp int;
 begin
   if public.auth_role() is distinct from 'admin' then
@@ -182,12 +212,27 @@ begin
   if keep_role <> 'patient' or merge_role <> 'patient' then
     raise exception 'Only patient profiles can be merged';
   end if;
+  me_clinic := public.auth_clinic_id();
   keep_scope := private.patient_scope(p_keep_id);
   merge_scope := private.patient_scope(p_merge_id);
-  if keep_scope is null or merge_scope is null
-     or 'foreign' in (keep_scope, merge_scope)
-     or 'linked' not in (keep_scope, merge_scope) then
-    -- Same message whatever the reason, so this is not a probe for other clinics' patients.
+  -- Same message whatever the reason, so this is not a probe for other clinics' patients.
+  if me_clinic is null or keep_scope is null or merge_scope is null
+     or keep_scope in ('foreign', 'shared') or merge_scope in ('foreign', 'shared')
+     or 'linked' not in (keep_scope, merge_scope)
+     -- Every row the merge rewrites must belong to this clinic (patient_scope covers patient_id; these cover the
+     -- audit references and notifications too).
+     or exists (select 1 from public.queue_entries q
+                where (q.patient_id in (p_keep_id, p_merge_id) or q.priority_set_by = p_merge_id)
+                  and q.clinic_id <> me_clinic)
+     or exists (select 1 from public.appointments a join public.services s on s.id = a.service_id
+                where (a.patient_id in (p_keep_id, p_merge_id) or a.cancelled_by = p_merge_id)
+                  and s.clinic_id <> me_clinic)
+     or exists (select 1 from public.notifications n
+                left join public.queue_entries q on q.id = n.queue_entry_id
+                left join public.appointments a on a.id = n.appointment_id
+                left join public.services s on s.id = a.service_id
+                where n.recipient_id = p_merge_id
+                  and (q.clinic_id <> me_clinic or s.clinic_id <> me_clinic)) then
     raise exception 'These profiles cannot be merged from your clinic';
   end if;
 
@@ -218,7 +263,12 @@ begin
      where id = p_keep_id;
   end if;
 
+  select full_name into merged_name from public.profiles where id = p_merge_id;
   delete from public.profiles where id = p_merge_id;
+
+  insert into public.patient_merge_audit (merged_by, clinic_id, keep_id, merged_id, merged_full_name, moved)
+  values (public.auth_profile_id(), me_clinic, p_keep_id, p_merge_id, merged_name,
+          jsonb_build_object('queue_entries', n_q, 'appointments', n_a, 'notifications', n_n, 'audit_refs', n_x));
 
   queue_entries_moved := n_q;
   appointments_moved  := n_a;
@@ -232,7 +282,7 @@ grant execute on function public.merge_patient_profiles(uuid, uuid) to authentic
 
 commit;
 
--- ROLLBACK: re-create profiles_select_admin / profiles_update_admin (20260804164222) and
+-- ROLLBACK: drop table patient_merge_audit; re-create profiles_select_admin / profiles_update_admin (20260804164222) and
 -- profiles_staff_read_clinic_patients (20260805171242) verbatim; restore find_duplicate_patients,
 -- search_patients (20260805171801) and merge_patient_profiles (20260808154202) from their migrations; drop
 -- private.patient_scope.

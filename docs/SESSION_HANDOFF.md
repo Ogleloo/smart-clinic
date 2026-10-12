@@ -4,14 +4,15 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 3: security proposal revision 3 (final review answered)
+## Latest checkpoint — PR #36 revision 4: security + supervisor requirements (awaiting final review)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No feature code; nothing applied to the shared project; not authorised for production.**
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No app code, no migrations, nothing applied to the shared project, read-only production inventory NOT run.** Phase 3 screens remain paused.
 
-- Design approved in principle (D1: all visits at the current clinic while treating, paginated). Revision 3 adds: paginated/excluding history function; revokes legacy `start_consultation`/`call_next_patient` (second consultation-opening path); Stage 1 profiles now also limits visit-based staff reads to patient profiles (clinic-B staff were visible on clinic A's Staff page) and scopes `find_duplicate_patients`/`search_patients`/`merge_patient_profiles` via `private.patient_scope`.
-- Read-only `production_inventory.sql` + `assert_catalog*.sql` prepared, **not run on production**.
-- Local results (two fresh stacks): baseline clinical 85/85, profiles 37/37, workflows 24/24; proposed 85/85, 37/37, 24/24; Playwright local specs 66 passed; clean health checks identical before/after (1 pre-existing FAIL).
-- Remaining blockers: authorise read-only production inventory; separate migration approval; Staff page explicit clinic filter (app); separate fixes for F12 (`set_emergency_priority` cross-clinic), F13 (`reset_demo_state` all clinics), F14 (`send_appointment_reminders` callable by anyone signed in).
+- Supervisor requirements designed (not implemented): mandatory SA ID / passport+country with database-enforced uniqueness (`docs/proposals/supervisor_requirements.md`, prototype `identity_documents_prototype.sql`); queue priority moves to Reception with audit and nurse escalation (`queue_priority_reception.sql`, Part 2 cutover only with the UI change). `docs/V3_REQUIREMENTS.md` updated.
+- Rev-3 hole fixed: patients with history at two clinics (`shared`) can no longer be merged by one clinic; merges are single-clinic, patient-only, audited (`patient_merge_audit`). Cross-clinic exact-phone search removed.
+- F13/F14 proposals (`function_privileges_hardening.sql`); F13 breaks `e2e/helpers.ts` live suites by design (decision).
+- Local results: baseline and proposed both hold — clinical 85, profiles 56, priority 36, identity 24, workflows 24; catalogs 19/12/7 true after; Playwright local 66 passed; clean health checks identical.
+- Decisions pending: D-S1, D-F13, D-P1–3, D-ID1–5 (see `clinical_records_access.md` R4). Sequence in R4.
 
 ---
 
