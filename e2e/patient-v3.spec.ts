@@ -431,7 +431,8 @@ test('registration: optional DOB and ID fields are present and validated before 
   await page.getByLabel('Full name').fill('Validation Only')
   await page.getByLabel('Email').fill(email)
   await page.getByLabel('ID or passport number (optional)').fill('!!')
-  await page.getByLabel('Password').fill('pw12345678')
+  // A throwaway value: this test never gets as far as creating an account (the ID field fails validation first).
+  await page.getByLabel('Password').fill(`${crypto.randomUUID()}-Aa1`)
   await page.getByRole('button', { name: 'Create account' }).click()
   await waitSettled(page)
   await expect(page.getByText('ID or passport number must be 6–20 letters or digits.')).toBeVisible()

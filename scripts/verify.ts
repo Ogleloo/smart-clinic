@@ -1,17 +1,29 @@
 // Security/RLS verification via real supabase-js client calls (not simulated JWTs).
-// Run with: npx tsx scripts/verify.ts
+// Run with (LOCAL stack + E2E_* environment variables): npx tsx scripts/verify.ts
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const URL = 'https://bffhjvpkfivtbzqielve.supabase.co'
-const KEY = 'sb_publishable_uwBdyYKKd3bKm9SZ8tp8Rw_AbqRdoWD'
+import { PRODUCTION_PROJECT_REF } from '../e2e/support/local-supabase-guard'
+
+// Target and credentials come from the environment — nothing is committed (see docs/proposals/staged_migration_plan.md, C0).
+// This script WRITES (check-ins), so it only runs against a LOCAL Supabase stack, never the shared project.
+function need(name: string): string {
+  const value = process.env[name]?.trim()
+  if (!value) throw new Error(`${name} is not set (credentials are kept in the team password manager, never in this repository)`)
+  return value
+}
+const URL = need('E2E_SUPABASE_URL')
+const KEY = need('E2E_SUPABASE_ANON_KEY')
+if (URL.includes(PRODUCTION_PROJECT_REF) || !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(URL)) {
+  throw new Error(`Refusing to run: E2E_SUPABASE_URL must be a local stack (http://127.0.0.1:<port>), got "${URL}". This script writes data.`)
+}
 
 const CLINIC_ID = '11111111-1111-1111-1111-111111111111'
 const SERVICE_GC = '22222222-2222-2222-2222-222222222221'
 
 const ACCOUNTS = {
-  patient: { email: 'thabo.patient@test.local', password: 'pw12345678' },
-  receptionist: { email: 'grace.reception@riverside.test', password: 'staff-password-123' },
-  nurse: { email: 'mabaso.nurse@riverside.test', password: 'staff-password-456' },
+  patient: { email: need('E2E_PATIENT_EMAIL'), password: need('E2E_PATIENT_PASSWORD') },
+  receptionist: { email: need('E2E_RECEPTIONIST_EMAIL'), password: need('E2E_RECEPTIONIST_PASSWORD') },
+  nurse: { email: need('E2E_NURSE_EMAIL'), password: need('E2E_NURSE_PASSWORD') },
 }
 
 type Result = { check: string; status: 'PASS' | 'FAIL' | 'ERROR' | 'SKIP'; detail: string }

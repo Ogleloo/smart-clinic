@@ -1,16 +1,28 @@
 import { defineConfig, devices } from '@playwright/test'
 
 /**
- * These are regression/integration tests against the real shared dev
- * Supabase backend — not a per-test-isolated database. Every test that
- * touches queue/consultation/notification state calls resetDemoState()
- * first (see e2e/helpers.ts), and workers are forced to 1 here so two
- * tests never race each other over that same shared state. That trades
- * suite speed for correctness, which is the right trade for a suite
- * whose entire purpose is catching exactly this class of regression.
+ * Regression/integration tests. Where they run and who they sign in as come from the environment (e2e/helpers.ts):
+ * no credential is committed and nothing defaults to the shared production project (the repository is public).
+ *
+ * The suites below WRITE shared state (reset_demo_state, check-ins, clinic settings). They are DISABLED BY DEFAULT and
+ * only run when E2E_ENABLE_DESTRUCTIVE=1 against a local Supabase stack — their helpers refuse any other target.
+ * Workers are forced to 1 so two tests never race over the same state.
  */
+const DESTRUCTIVE_SPECS = [
+  'appointment-cancel',
+  'dashboard-guard',
+  'dashboard-queue-card',
+  'idle-timeout',
+  'nurse-undo',
+  'patient-v3',
+  'queue-explainability',
+  'reception-checkin',
+  'reception-walkin',
+].map((name) => `**/${name}.spec.ts`)
+
 export default defineConfig({
   testDir: './e2e',
+  testIgnore: process.env.E2E_ENABLE_DESTRUCTIVE === '1' ? [] : DESTRUCTIVE_SPECS,
   fullyParallel: false,
   workers: 1,
   retries: 0,

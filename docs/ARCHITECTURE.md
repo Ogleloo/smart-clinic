@@ -84,12 +84,19 @@ No nurse on duty → no estimate shown (never a guess).
 
 ## Test accounts
 
-| Role        | Email                              | Password           |
-|-------------|------------------------------------|---------------------|
-| Patient     | thabo.patient@test.local           | pw12345678          |
-| Nurse       | mabaso.nurse@riverside.test        | staff-password-456  |
-| Reception   | grace.reception@riverside.test     | staff-password-123  |
-| Admin       | admin@riverside.test               | admin-password-789  |
+The demonstration accounts' passwords are **not stored in this repository**. They are kept in the team password
+manager and supplied to tests and scripts through the environment (never committed):
+
+| Role        | E-mail variable           | Password variable            |
+|-------------|---------------------------|------------------------------|
+| Patient     | `E2E_PATIENT_EMAIL`       | `E2E_PATIENT_PASSWORD`       |
+| Nurse       | `E2E_NURSE_EMAIL`         | `E2E_NURSE_PASSWORD`         |
+| Reception   | `E2E_RECEPTIONIST_EMAIL`  | `E2E_RECEPTIONIST_PASSWORD`  |
+| Admin       | `E2E_ADMIN_EMAIL`         | `E2E_ADMIN_PASSWORD`         |
+
+Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Suites that write data are disabled by default and run
+only against a local Supabase stack (`E2E_ENABLE_DESTRUCTIVE=1`). Rotation procedure:
+`docs/proposals/credential_rotation_runbook.md`.
 
 Reset demo state: `SELECT * FROM public.reset_demo_state();`
 
