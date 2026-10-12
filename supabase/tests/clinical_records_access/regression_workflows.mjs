@@ -66,14 +66,14 @@ await step('reception: queue_entries read with patient names (reception queue pa
 // Priority: after the queue_priority_reception.sql cutover Reception owns it (set_queue_priority); before, the nurse
 // control (set_emergency_priority). The step uses whichever path the database offers and says which.
 await step('priority on and off (reception set_queue_priority if present, else nurse set_emergency_priority)', async () => {
-  const probe = await rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 1, p_reason: 'administrative', p_note: 'workflow regression' })
+  const probe = await rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 1, p_reason: 'operational', p_note: 'workflow regression' })
   if (probe.error?.code === 'PGRST202') {
     await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: true }), 'on')
     await ok(nurse2.client.rpc('set_emergency_priority', { p_queue_entry_id: entry2, p_emergency: false }), 'off')
     return 'nurse path (baseline)'
   }
   if (probe.error) throw new Error(`on: ${probe.error.message}`)
-  await ok(rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 0 }), 'off')
+  await ok(rec.client.rpc('set_queue_priority', { p_queue_entry_id: entry2, p_priority: 0, p_reason: 'no_longer_required' }), 'off')
   return 'reception path (proposed)'
 })
 await step('patient: reads own queue entry (patient dashboard)', () => nonEmpty(patient.client.from('queue_entries').select('id, status').eq('patient_id', p2), 'own entry'))

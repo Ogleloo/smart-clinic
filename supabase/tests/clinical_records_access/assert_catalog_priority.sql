@@ -33,6 +33,29 @@ checks(check_name, pass, detail) as (
             from pg_class c where c.oid in (to_regclass('public.queue_priority_events'), to_regclass('public.queue_priority_escalations'))),
          'queue_priority_events, queue_priority_escalations'
   union all
+  select 'priority audit survives queue-entry deletion: no foreign key from events/escalations to queue_entries',
+         not exists (select 1 from pg_constraint c where c.contype = 'f'
+                       and c.conrelid in (to_regclass('public.queue_priority_events'), to_regclass('public.queue_priority_escalations'))
+                       and c.confrelid = 'public.queue_entries'::regclass)
+         and to_regclass('public.queue_priority_events') is not null,
+         'pg_constraint'
+  union all
+  select 'priority events append-only and escalations guarded (triggers present)',
+         exists (select 1 from pg_trigger t where t.tgrelid = to_regclass('public.queue_priority_events') and not t.tgisinternal and t.tgname like '%no_update_delete')
+         and exists (select 1 from pg_trigger t where t.tgrelid = to_regclass('public.queue_priority_escalations') and not t.tgisinternal and t.tgname like '%guard'),
+         'pg_trigger'
+  union all
+  select 'every priority event has a reason (NOT NULL), clearing included',
+         coalesce((select a.attnotnull from pg_attribute a where a.attrelid = to_regclass('public.queue_priority_events') and a.attname = 'reason'), false)
+         and coalesce((select prosrc ~ 'A reason is required to change priority' from fn where proname = 'set_queue_priority'), false),
+         'queue_priority_events.reason'
+  union all
+  select 'escalations carry a reason code and no free-text column',
+         coalesce((select a.attnotnull from pg_attribute a where a.attrelid = to_regclass('public.queue_priority_escalations') and a.attname = 'reason'), false)
+         and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'queue_priority_escalations'
+                           and data_type in ('text', 'character varying') and column_name <> 'token'),
+         'queue_priority_escalations'
+  union all
   select 'F13 reset_demo_state: not executable by authenticated/anon; service_role can',
          coalesce((select not has_function_privilege('authenticated', oid, 'EXECUTE') and not has_function_privilege('anon', oid, 'EXECUTE')
                           and has_function_privilege('service_role', oid, 'EXECUTE') from fn where proname = 'reset_demo_state'), false),

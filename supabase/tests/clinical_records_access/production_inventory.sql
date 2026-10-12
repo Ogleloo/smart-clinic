@@ -76,6 +76,12 @@ from pg_default_acl d order by 1, 2, 3;
 \echo '== 10. realtime publication'
 select pubname, schemaname, tablename from pg_publication_tables order by 1, 2, 3;
 
+\echo '== 10b. extensions (pgcrypto and supabase_vault are prerequisites of the identity design)'
+select extname, extversion, extnamespace::regnamespace from pg_extension order by 1;
+
+\echo '== 10c. Vault secret NAMES only (never values) — is identity_document_hmac_key_v1 present?'
+select name, created_at from vault.secrets order by 1;
+
 \echo '== 11. event triggers'
 select evtname, evtevent, evtenabled, p.proname from pg_event_trigger e join pg_proc p on p.oid = e.evtfoid order by 1;
 

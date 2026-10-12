@@ -89,12 +89,13 @@ await check('legacy control', 'nurse check-in with p_priority = 1', OPEN, async 
 await check('direct write', 'receptionist updates queue_entries.priority directly (F11, unaudited)', OPEN, recA.client.from('queue_entries').update({ priority: 1 }).eq('id', eA3).select('id'))
 if (PHASE === 'baseline') await svc.from('queue_entries').update({ priority: 0, priority_set_by: null }).in('id', [eA1, eA3, eA4, eB])
 
-// Reception-managed priority
-await check('reception', 'receptionist sets administrative priority with a note', NEW, setp(recA.client, eA2, 1, { p_reason: 'administrative', p_note: 'elderly, mobility aid' }))
-await check('reception', 'the change is recorded: who, when, old -> new, reason', NEW, async () => {
-  const r = await svc.from('queue_priority_events').select('changed_by, changed_at, old_priority, new_priority, reason').eq('queue_entry_id', eA2)
+// Reception-managed priority (rev 5: a reason CODE is required to set AND to clear)
+await check('reception', 'receptionist sets priority: accessibility_need', NEW, setp(recA.client, eA2, 1, { p_reason: 'accessibility_need' }))
+await check('reception', 'the change is recorded: who, when, old -> new, reason, entry snapshot', NEW, async () => {
+  const r = await svc.from('queue_priority_events').select('changed_by, changed_at, old_priority, new_priority, reason, token, queue_date, service_id').eq('queue_entry_id', eA2)
   const e = r.data?.[0]
-  const ok = !r.error && r.data.length === 1 && e.changed_by === recA.id && e.old_priority === 0 && e.new_priority === 1 && e.reason === 'administrative' && !!e.changed_at
+  const ok = !r.error && r.data.length === 1 && e.changed_by === recA.id && e.old_priority === 0 && e.new_priority === 1
+    && e.reason === 'accessibility_need' && !!e.changed_at && !!e.token && !!e.queue_date && e.service_id === svcA
   return { outcome: ok ? 'allowed' : 'denied', detail: r.error ? why(r) : JSON.stringify(e ?? null).slice(0, 80) }
 })
 await check('reception', 'queue order: the prioritised patient is listed first', NEW, async () => {
@@ -102,51 +103,87 @@ await check('reception', 'queue order: the prioritised patient is listed first',
   const first = (r.data ?? []).find((x) => x.status === 'waiting')
   return { outcome: !r.error && (first?.id ?? first?.queue_entry_id) === eA2 ? 'allowed' : 'denied', detail: r.error ? why(r) : `first waiting = ${(first?.id ?? first?.queue_entry_id) === eA2 ? 'eA2' : 'other'}` }
 })
-await check('reception', 'receptionist clears the priority (no reason needed)', NEW, setp(recA.client, eA2, 0))
-await check('reception', 'administrative priority without a note', NEWDENY, setp(recA.client, eA3, 1, { p_reason: 'administrative' }))
-await check('reception', 'priority without a reason', NEWDENY, setp(recA.client, eA3, 1))
-await check('reception', 'clinical emergency without a nurse escalation', NEWDENY, setp(recA.client, eA3, 1, { p_reason: 'clinical_emergency' }))
-await check('reception', 'priority on an in-progress entry', NEWDENY, setp(recA.client, eProg, 1, { p_reason: 'administrative', p_note: 'x' }))
-await check('reception', 'setting the value it already has', NEWDENY, setp(recA.client, eA3, 0))
-await check('cross-clinic', 'clinic-A receptionist sets priority on a clinic-B entry', DENY, setp(recA.client, eB, 1, { p_reason: 'administrative', p_note: 'x' }))
-await check('roles', 'nurse calls set_queue_priority', DENY, setp(nurseA.client, eA3, 1, { p_reason: 'administrative', p_note: 'x' }))
-await check('roles', 'admin calls set_queue_priority', DENY, setp(adminA.client, eA3, 1, { p_reason: 'administrative', p_note: 'x' }))
-await check('roles', 'patient prioritises own entry', DENY, setp(pat.client, eOwn, 1, { p_reason: 'administrative', p_note: 'me first' }))
-await check('roles', 'anon calls set_queue_priority', DENY, setp(anon, eA3, 1, { p_reason: 'administrative', p_note: 'x' }))
+await check('clearing', 'clearing priority WITHOUT a reason is refused', NEWDENY, setp(recA.client, eA2, 0))
+await check('clearing', 'clearing with a raising reason (accessibility_need) is refused', NEWDENY, setp(recA.client, eA2, 0, { p_reason: 'accessibility_need' }))
+await check('clearing', 'clearing with no_longer_required succeeds and is logged with its reason', NEW, async () => {
+  const r = await setp(recA.client, eA2, 0, { p_reason: 'no_longer_required' })
+  if (r.error) return r
+  const ev = await svc.from('queue_priority_events').select('id').eq('queue_entry_id', eA2).eq('new_priority', 0).eq('reason', 'no_longer_required').eq('changed_by', recA.id)
+  return { outcome: (ev.data ?? []).length === 1 ? 'allowed' : 'denied', detail: `clear events=${(ev.data ?? []).length}` }
+})
+await check('reception', 'raising with a clearing reason (entered_in_error) is refused', NEWDENY, setp(recA.client, eA3, 1, { p_reason: 'entered_in_error' }))
+await check('reception', 'operational priority without a note is refused', NEWDENY, setp(recA.client, eA3, 1, { p_reason: 'operational' }))
+await check('reception', 'priority without any reason is refused', NEWDENY, setp(recA.client, eA3, 1))
+await check('reception', 'nurse_escalation_accepted without an escalation is refused (Reception cannot classify clinically, D-P2)', NEWDENY, setp(recA.client, eA3, 1, { p_reason: 'nurse_escalation_accepted' }))
+await check('reception', 'priority on an in-progress entry', NEWDENY, setp(recA.client, eProg, 1, { p_reason: 'accessibility_need' }))
+await check('reception', 'setting the value it already has', NEWDENY, setp(recA.client, eA3, 0, { p_reason: 'no_longer_required' }))
+await check('cross-clinic', 'clinic-A receptionist sets priority on a clinic-B entry', DENY, setp(recA.client, eB, 1, { p_reason: 'accessibility_need' }))
+await check('roles', 'nurse calls set_queue_priority', DENY, setp(nurseA.client, eA3, 1, { p_reason: 'accessibility_need' }))
+await check('roles', 'admin calls set_queue_priority (oversight only, D-P1)', DENY, setp(adminA.client, eA3, 1, { p_reason: 'accessibility_need' }))
+await check('roles', 'patient prioritises own entry', DENY, setp(pat.client, eOwn, 1, { p_reason: 'accessibility_need' }))
+await check('roles', 'anon calls set_queue_priority', DENY, setp(anon, eA3, 1, { p_reason: 'accessibility_need' }))
+await check('oversight', 'admin reads the clinic priority history', NEW, adminA.client.from('queue_priority_events').select('id').eq('clinic_id', CLINIC_A).eq('queue_entry_id', eA2))
 
 // Concurrency: two simultaneous identical requests -> exactly one change, one refusal, one event.
 await check('concurrency', 'two simultaneous set_queue_priority calls: exactly one succeeds, one event row', NEW, async () => {
   const [r1, r2] = await Promise.all([
-    setp(recA.client, eA4, 1, { p_reason: 'administrative', p_note: 'first' }),
-    setp(recA.client, eA4, 1, { p_reason: 'administrative', p_note: 'second' }),
+    setp(recA.client, eA4, 1, { p_reason: 'operational', p_note: 'first' }),
+    setp(recA.client, eA4, 1, { p_reason: 'operational', p_note: 'second' }),
   ])
   const ev = await svc.from('queue_priority_events').select('id').eq('queue_entry_id', eA4)
   const okCount = [r1, r2].filter((r) => !r.error).length
   return { outcome: okCount === 1 && (ev.data ?? []).length === 1 && (await prio(eA4)) === 1 ? 'allowed' : 'denied', detail: `successes=${okCount}, events=${(ev.data ?? []).length}` }
 })
 
-// Nurse escalation -> Reception decision
+// Nurse escalation -> Reception decision (rev 5: reason codes only, no free text — D-P3)
 let escId = null
-await check('escalation', 'nurse requests a priority escalation for a waiting patient', NEW, async () => {
-  const r = await nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_note: 'chest pain reported' })
+await check('escalation', 'nurse requests escalation with a reason code', NEW, async () => {
+  const r = await nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_reason: 'nurse_assessed_urgent' })
   escId = r.data?.id ?? null
   return r
 })
-await check('escalation', 'a second open escalation for the same entry', NEWDENY, nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_note: 'again' }))
+await check('escalation', 'escalation without a reason code is refused', NEWDENY, nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA1, p_reason: null }))
+await check('escalation', 'free-text clinical notes cannot be attached (no note parameter)', NEWDENY, nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA1, p_reason: 'nurse_assessed_urgent', p_note: 'chest pain' }))
+await check('escalation', 'what Reception can read about an escalation contains no free text', NEW, async () => {
+  const r = await recA.client.from('queue_priority_escalations').select('*').eq('id', escId)
+  const row = r.data?.[0] ?? {}
+  const textCols = Object.entries(row).filter(([k, v]) => typeof v === 'string' && !['id', 'queue_entry_id', 'clinic_id', 'token', 'queue_date', 'requested_by', 'reason', 'status', 'created_at', 'resolved_by', 'resolved_at'].includes(k))
+  return { outcome: !r.error && r.data.length === 1 && textCols.length === 0 && row.reason === 'nurse_assessed_urgent' ? 'allowed' : 'denied', detail: r.error ? why(r) : `columns=${Object.keys(row).join(',')}`.slice(0, 80) }
+})
+await check('escalation', 'a second open escalation for the same entry', NEWDENY, nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_reason: 'nurse_requests_early_review' }))
 await check('escalation', 'escalation does not change the queue by itself', NEW, async () => ({ outcome: (await prio(eA3)) === 0 ? 'allowed' : 'denied', detail: 'priority still 0' }))
-await check('escalation', 'clinic-B nurse escalates a clinic-A entry', DENY, nurseB.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_note: 'x x x' }))
-await check('escalation', 'receptionist calls request_priority_escalation', DENY, recA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_note: 'x x x' }))
-await check('escalation', 'clinic-A reception sees the open escalation', NEW, recA.client.from('queue_priority_escalations').select('id').eq('queue_entry_id', eA3).eq('status', 'open'))
+await check('escalation', 'clinic-B nurse escalates a clinic-A entry', DENY, nurseB.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_reason: 'nurse_assessed_urgent' }))
+await check('escalation', 'receptionist calls request_priority_escalation', DENY, recA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA3, p_reason: 'nurse_assessed_urgent' }))
 await check('escalation', 'clinic-B reception cannot see it', DENY, recB.client.from('queue_priority_escalations').select('id').eq('queue_entry_id', eA3))
-await check('escalation', 'reception accepts: clinical emergency citing the escalation', NEW, async () => setp(recA.client, eA3, 1, { p_reason: 'clinical_emergency', p_escalation_id: escId }))
+await check('escalation', 'reception accepts: nurse_escalation_accepted citing the escalation', NEW, async () => setp(recA.client, eA3, 1, { p_reason: 'nurse_escalation_accepted', p_escalation_id: escId }))
 await check('escalation', 'escalation marked accepted by that receptionist', NEW, svc.from('queue_priority_escalations').select('id').eq('id', escId).eq('status', 'accepted').eq('resolved_by', recA.id))
+await check('escalation', 'a resolved escalation cannot be re-opened or edited (even by the service role)', NEWDENY, svc.from('queue_priority_escalations').update({ status: 'open' }).eq('id', escId).select('id'))
 await check('escalation', 'reception declines another escalation', NEW, async () => {
-  const e = await nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA1, p_note: 'please review' })
+  const e = await nurseA.client.rpc('request_priority_escalation', { p_queue_entry_id: eA1, p_reason: 'nurse_requests_early_review' })
   if (e.error) return e
   return recA.client.rpc('decline_priority_escalation', { p_escalation_id: e.data.id })
 })
-await check('audit', 'clinic-B reception cannot read clinic-A priority history', DENY, recB.client.from('queue_priority_events').select('id').eq('queue_entry_id', eA3))
-await check('audit', 'nobody writes priority history directly', NEWDENY, recA.client.from('queue_priority_events').insert({ queue_entry_id: eA1, clinic_id: CLINIC_A, old_priority: 0, new_priority: 1, reason: 'administrative', changed_by: recA.id }).select('id'))
+
+// Audit retention (rev 5): history survives deletion of the queue entry and cannot be altered.
+await check('retention', 'priority history survives deletion of the queue entry', NEW, async () => {
+  const before = await svc.from('queue_priority_events').select('id').eq('queue_entry_id', eA2)
+  const del = await svc.from('queue_entries').delete().eq('id', eA2).select('id')
+  if (del.error) return { outcome: 'denied', detail: `delete failed: ${del.error.message}`.slice(0, 80) }
+  const after = await svc.from('queue_priority_events').select('id, token').eq('queue_entry_id', eA2)
+  const kept = (after.data ?? []).length
+  return { outcome: kept > 0 && kept === (before.data ?? []).length && !!after.data[0].token ? 'allowed' : 'denied', detail: `events before=${(before.data ?? []).length} after=${kept}` }
+})
+await check('retention', 'escalation records survive deletion of the queue entry', NEW, async () => {
+  const del = await svc.from('queue_entries').delete().eq('id', eA3).select('id')
+  if (del.error) return { outcome: 'denied', detail: del.error.message.slice(0, 80) }
+  const r = await svc.from('queue_priority_escalations').select('id').eq('queue_entry_id', eA3)
+  return { outcome: (r.data ?? []).length >= 1 ? 'allowed' : 'denied', detail: `escalations=${(r.data ?? []).length}` }
+})
+await check('retention', 'priority history cannot be updated (append-only, even by the service role)', NEWDENY, svc.from('queue_priority_events').update({ reason: 'entered_in_error' }).eq('queue_entry_id', eA2).select('id'))
+await check('retention', 'priority history cannot be deleted (even by the service role)', NEWDENY, svc.from('queue_priority_events').delete().eq('queue_entry_id', eA2).select('id'))
+await check('retention', 'escalations cannot be deleted (even by the service role)', NEWDENY, svc.from('queue_priority_escalations').delete().eq('queue_entry_id', eA3).select('id'))
+await check('audit', 'clinic-B reception cannot read clinic-A priority history', DENY, recB.client.from('queue_priority_events').select('id').eq('queue_entry_id', eA2))
+await check('audit', 'nobody writes priority history directly', NEWDENY, recA.client.from('queue_priority_events').insert({ queue_entry_id: eA1, clinic_id: CLINIC_A, service_id: svcA, token: 'X', queue_date: '2026-10-12', old_priority: 0, new_priority: 1, reason: 'accessibility_need', changed_by: recA.id }).select('id'))
 await check('audit', 'patient cannot read priority history', DENY, pat.client.from('queue_priority_events').select('id'))
 
 const width = Math.max(...results.map((r) => r.name.length))

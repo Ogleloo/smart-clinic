@@ -6,8 +6,8 @@
 --     operator in the SQL editor (ARCHITECTURE.md) and the live Playwright helper e2e/helpers.ts, which signs in
 --     as the demo admin. Proposal: service role / SQL editor only.
 --     DEPENDENCY: e2e/helpers.ts resetDemoState() would then fail. Those live suites already mutate the shared
---     production database (CLAUDE.md); they should move to the local stack (service role) or be retired. This
---     is a decision, not an oversight — see the .md.
+--     production database (CLAUDE.md). DECIDED (D-F13): destructive live tests move to isolated test
+--     infrastructure (local stack / separate project, service role); ordinary admins never run reset_demo_state().
 --
 -- F14 send_appointment_reminders(): executable by every authenticated user with no role check (anyone signed in
 --     can trigger reminder notifications to every patient with an upcoming booking, in every clinic). Intended

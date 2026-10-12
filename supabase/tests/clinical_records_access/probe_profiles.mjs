@@ -90,6 +90,14 @@ const M2 = await patient(`PP NotifRef ${RUN}`, CLINIC_A, svcA)
 await must(svc.from('notifications').insert({ recipient_id: M2, kind: 'called', title: 'probe', queue_entry_id: sB }), 'notif B')
 const adminB = await user('adminb', 'admin', CLINIC_B)
 
+// Rev 5: merge with a mandatory reason.
+const rV1 = await patient(`PP Reason ${RUN}`, CLINIC_A, svcA)
+const rV2 = await patient(`PP Reason ${RUN}`, null, null)
+const rV3 = await patient(`PP Reason3 ${RUN}`, CLINIC_A, svcA)
+const rV4 = await patient(`PP Reason3 ${RUN}`, null, null)
+const adminInactive = await user('admininactive', 'admin', CLINIC_A)
+await must(svc.from('profiles').update({ is_active: false }).eq('id', adminInactive.id), 'deactivate admin')
+
 const results = []
 const rows = (r) => (r.error || r.data == null ? 0 : Array.isArray(r.data) ? r.data.length : 1)
 const why = (r) => (r.error ? `${r.error.code ?? ''} ${r.error.message ?? ''}`.trim().slice(0, 70) : `${rows(r)} row(s)`)
@@ -153,6 +161,20 @@ await check('merge audit refs', 'admin A merges a clinic-A patient holding a not
 await check('merge audit', 'an allowed merge writes a patient_merge_audit row (admin A can read it)', { baseline: 'skip', proposed: 'allowed' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').select('id, merged_by, moved').eq('keep_id', dupA).eq('merged_by', adminA.id))
 await check('merge audit', "admin B cannot read clinic A's merge audit", { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminB.client.from('patient_merge_audit').select('id').eq('keep_id', dupA))
 await check('merge audit', 'nobody can write the merge audit directly', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').insert({ merged_by: adminA.id, clinic_id: CLINIC_A, keep_id: dupA, merged_id: dupA, moved: {} }).select('id'))
+
+// Merge justification (rev 5): replacement RPC with a mandatory reason; legacy 2-argument RPC kept until the Admin UI cutover.
+await check('merge reason', 'legacy 2-argument merge is still recorded with a reason code (legacy_unspecified)', { baseline: 'skip', proposed: 'allowed' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').select('id').eq('keep_id', dupA).eq('reason_code', 'legacy_unspecified'))
+await check('merge reason', 'merge_patient_profiles_with_reason without a reason code is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: null, p_reason_note: 'Same ID document seen at the desk' }))
+await check('merge reason', 'with the legacy code is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: 'legacy_unspecified', p_reason_note: 'Same ID document seen at the desk' }))
+await check('merge reason', 'with a note shorter than 10 characters is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: 'same_person_document_verified', p_reason_note: 'ok' }))
+await check('merge reason', 'by a receptionist is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : recA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: 'same_person_document_verified', p_reason_note: 'Same ID document seen at the desk' }))
+await check('merge reason', 'by a deactivated admin is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminInactive.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: 'same_person_document_verified', p_reason_note: 'Same ID document seen at the desk' }))
+await check('merge reason', 'of the shared (A+B) patient is refused', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV3, p_merge_id: S, p_reason_code: 'same_person_document_verified', p_reason_note: 'Same ID document seen at the desk' }))
+await check('merge reason', 'by an active admin with code and note succeeds', { baseline: 'skip', proposed: 'allowed' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.rpc('merge_patient_profiles_with_reason', { p_keep_id: rV1, p_merge_id: rV2, p_reason_code: 'same_person_document_verified', p_reason_note: 'Same SA ID document seen at the desk' }))
+await check('merge reason', 'the audit row carries the code, the note and the acting admin', { baseline: 'skip', proposed: 'allowed' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : adminA.client.from('patient_merge_audit').select('id').eq('keep_id', rV1).eq('merged_id', rV2).eq('reason_code', 'same_person_document_verified').eq('merged_by', adminA.id).not('reason_note', 'is', null))
+await check('merge reason', 'the audit row cannot be altered or deleted (even by the service role)', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : svc.from('patient_merge_audit').update({ reason_note: 'rewritten later' }).eq('keep_id', rV1).select('id'))
+await check('merge reason', 'the audit row cannot be deleted (even by the service role)', { baseline: 'skip', proposed: 'denied' }, PHASE === 'baseline' ? Promise.resolve({ data: null }) : svc.from('patient_merge_audit').delete().eq('keep_id', rV1).select('id'))
+await check('merge reason', 'the private merge core is not callable as an RPC', DENY, adminA.client.rpc('merge_patient_profiles_core', { p_keep_id: rV3, p_merge_id: rV4, p_reason_code: 'registration_error_verified', p_reason_note: 'xxxxxxxxxxxx' }))
 
 // F13 / F14 (function_privileges_hardening.sql)
 const priv = (fn) => psql(`select has_function_privilege('authenticated', '${fn}', 'EXECUTE');`).trim() === 't'

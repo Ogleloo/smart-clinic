@@ -1,4 +1,4 @@
--- PROPOSAL (revision 4) — NOT APPLIED, NOT A MIGRATION. Independent of clinical_records_access.sql (either can be
+-- PROPOSAL (revision 5) — NOT APPLIED, NOT A MIGRATION. Independent of clinical_records_access.sql (either can be
 -- approved and applied first). Rationale and test evidence: docs/proposals/clinical_records_access.md §7.
 --
 -- Stage 1 — keep administrators (and all staff) to their own clinic for patient identity data:
@@ -159,8 +159,22 @@ $$;
 revoke all on function public.search_patients(text) from public, anon;
 grant execute on function public.search_patients(text) to authenticated;
 
--- 5. Exceptional merge, audited. The Admin V3 UI is planned WITHOUT routine duplicate detection or merge
---    (supervisor: prevent duplicates at registration instead); the function is kept, restricted and audited.
+-- 5. Exceptional merge, audited, with a mandatory justification.
+--    The Admin V3 UI is planned WITHOUT routine duplicate detection or merge (supervisor: prevent duplicates at
+--    registration). Coordinated replacement (rev 5):
+--      * private.merge_patient_profiles_core(...)  — the single implementation (scope checks, rewrite, audit row);
+--        not executable by any app role, callable only from the two SECURITY DEFINER wrappers below.
+--      * public.merge_patient_profiles_with_reason(keep, merge, reason_code, reason_note) — the replacement: an
+--        active admin, a reason code AND a note (10–500 characters) are mandatory.
+--      * public.merge_patient_profiles(keep, merge) — UNCHANGED signature for the deployed admin screen until the
+--        Admin UI cutover; it records reason_code 'legacy_unspecified' so no audit row is ever without a reason.
+--        At the cutover: revoke EXECUTE on the 2-argument function from authenticated (see end of file).
+create type public.patient_merge_reason as enum (
+  'same_person_document_verified',   -- staff saw the identity document(s) proving both profiles are one person
+  'registration_error_verified',     -- a duplicate created in error, confirmed with the patient
+  'legacy_unspecified'               -- written only by the legacy 2-argument function
+);
+
 create table if not exists public.patient_merge_audit (
   id               uuid primary key default gen_random_uuid(),
   merged_at        timestamptz not null default now(),
@@ -170,7 +184,9 @@ create table if not exists public.patient_merge_audit (
   merged_id        uuid not null,                -- the deleted profile (no FK: it no longer exists)
   merged_full_name text,                         -- minimal snapshot; no ID number, DOB or phone
   moved            jsonb not null,
-  reason           text
+  reason_code      public.patient_merge_reason not null,
+  reason_note      text check (reason_note is null or length(reason_note) <= 500),
+  constraint reasoned_merge_has_note check (reason_code = 'legacy_unspecified' or length(btrim(coalesce(reason_note, ''))) >= 10)
 );
 alter table public.patient_merge_audit enable row level security;
 revoke all on public.patient_merge_audit from public, anon, authenticated;
@@ -178,18 +194,29 @@ grant select on public.patient_merge_audit to authenticated;
 create policy patient_merge_audit_admin_read on public.patient_merge_audit
   for select to authenticated
   using (public.auth_role() = 'admin' and clinic_id = public.auth_clinic_id());
--- No write policy: rows are written only by merge_patient_profiles() (SECURITY DEFINER).
+-- No write policy; rows only from the merge core. Append-only for everyone, including the service role.
+create or replace function private.patient_merge_audit_append_only()
+returns trigger language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  raise exception 'patient_merge_audit is append-only';
+end;
+$$;
+revoke all on function private.patient_merge_audit_append_only() from public, anon, authenticated;
+create trigger patient_merge_audit_no_update_delete before update or delete on public.patient_merge_audit
+  for each row execute function private.patient_merge_audit_append_only();
 
--- The deployed body (20260808154202) with: patients only, single-clinic footprint, audit row. Signature unchanged
--- so the deployed admin screen keeps working until Admin V3 removes it; a reason-taking variant comes with the
--- exceptional-reconciliation flow.
-create or replace function public.merge_patient_profiles(p_keep_id uuid, p_merge_id uuid)
+create or replace function private.merge_patient_profiles_core(
+  p_keep_id uuid, p_merge_id uuid, p_reason_code public.patient_merge_reason, p_reason_note text
+)
 returns table (queue_entries_moved int, appointments_moved int, notifications_moved int, audit_refs_moved int)
 language plpgsql
 security definer
 set search_path = public, pg_temp
 as $$
 declare
+  me record;
   keep_auth uuid; merge_auth uuid;
   keep_role public.user_role; merge_role public.user_role;
   keep_scope text; merge_scope text;
@@ -197,8 +224,11 @@ declare
   merged_name text;
   n_q int; n_a int; n_n int; n_x int; n_tmp int;
 begin
-  if public.auth_role() is distinct from 'admin' then
-    raise exception 'Only an administrator may merge patient profiles';
+  -- Active administrator with a clinic (auth_role() alone ignores is_active).
+  select p.id, p.clinic_id into me from public.profiles p
+  where p.auth_user_id = auth.uid() and p.role = 'admin' and p.is_active and p.clinic_id is not null;
+  if me.id is null then
+    raise exception 'Only an administrator may merge patient profiles' using errcode = '42501';
   end if;
   if p_keep_id = p_merge_id then
     raise exception 'Cannot merge a profile into itself';
@@ -212,7 +242,7 @@ begin
   if keep_role <> 'patient' or merge_role <> 'patient' then
     raise exception 'Only patient profiles can be merged';
   end if;
-  me_clinic := public.auth_clinic_id();
+  me_clinic := me.clinic_id;
   keep_scope := private.patient_scope(p_keep_id);
   merge_scope := private.patient_scope(p_merge_id);
   -- Same message whatever the reason, so this is not a probe for other clinics' patients.
@@ -266,9 +296,11 @@ begin
   select full_name into merged_name from public.profiles where id = p_merge_id;
   delete from public.profiles where id = p_merge_id;
 
-  insert into public.patient_merge_audit (merged_by, clinic_id, keep_id, merged_id, merged_full_name, moved)
-  values (public.auth_profile_id(), me_clinic, p_keep_id, p_merge_id, merged_name,
-          jsonb_build_object('queue_entries', n_q, 'appointments', n_a, 'notifications', n_n, 'audit_refs', n_x));
+  insert into public.patient_merge_audit
+    (merged_by, clinic_id, keep_id, merged_id, merged_full_name, moved, reason_code, reason_note)
+  values (me.id, me_clinic, p_keep_id, p_merge_id, merged_name,
+          jsonb_build_object('queue_entries', n_q, 'appointments', n_a, 'notifications', n_n, 'audit_refs', n_x),
+          p_reason_code, p_reason_note);
 
   queue_entries_moved := n_q;
   appointments_moved  := n_a;
@@ -277,12 +309,51 @@ begin
   return next;
 end;
 $$;
+revoke all on function private.merge_patient_profiles_core(uuid, uuid, public.patient_merge_reason, text) from public, anon, authenticated;
+
+-- The replacement RPC: mandatory reason code and note.
+create or replace function public.merge_patient_profiles_with_reason(
+  p_keep_id uuid, p_merge_id uuid, p_reason_code public.patient_merge_reason, p_reason_note text
+)
+returns table (queue_entries_moved int, appointments_moved int, notifications_moved int, audit_refs_moved int)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if p_reason_code is null or p_reason_code = 'legacy_unspecified' then
+    raise exception 'A merge reason is required' using errcode = '22023';
+  end if;
+  if length(btrim(coalesce(p_reason_note, ''))) not between 10 and 500 then
+    raise exception 'Describe the evidence for this merge (10–500 characters)' using errcode = '22023';
+  end if;
+  return query select * from private.merge_patient_profiles_core(p_keep_id, p_merge_id, p_reason_code, btrim(p_reason_note));
+end;
+$$;
+revoke all on function public.merge_patient_profiles_with_reason(uuid, uuid, public.patient_merge_reason, text) from public, anon;
+grant execute on function public.merge_patient_profiles_with_reason(uuid, uuid, public.patient_merge_reason, text) to authenticated;
+
+-- Legacy 2-argument RPC: same core, recorded as 'legacy_unspecified'. Kept only until the Admin UI cutover.
+create or replace function public.merge_patient_profiles(p_keep_id uuid, p_merge_id uuid)
+returns table (queue_entries_moved int, appointments_moved int, notifications_moved int, audit_refs_moved int)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  return query select * from private.merge_patient_profiles_core(p_keep_id, p_merge_id, 'legacy_unspecified', null);
+end;
+$$;
 revoke all on function public.merge_patient_profiles(uuid, uuid) from public, anon;
 grant execute on function public.merge_patient_profiles(uuid, uuid) to authenticated;
 
+-- ADMIN UI CUTOVER (separate, later step — not applied with this file):
+--   revoke all on function public.merge_patient_profiles(uuid, uuid) from authenticated;
+
 commit;
 
--- ROLLBACK: drop table patient_merge_audit; re-create profiles_select_admin / profiles_update_admin (20260804164222) and
+-- ROLLBACK: export then drop table patient_merge_audit (audit record), type patient_merge_reason,
+-- merge_patient_profiles_with_reason and the private core; re-create profiles_select_admin / profiles_update_admin (20260804164222) and
 -- profiles_staff_read_clinic_patients (20260805171242) verbatim; restore find_duplicate_patients,
 -- search_patients (20260805171801) and merge_patient_profiles (20260808154202) from their migrations; drop
 -- private.patient_scope.

@@ -1,4 +1,4 @@
-# Clinical records, patient identity and queue priority — security proposal (revision 4)
+# Clinical records, patient identity and queue priority — security proposal (revision 5)
 
 **Status: PROPOSAL ONLY — nothing applied to the shared Supabase project; not authorised for production.** No
 migration, RLS, grant or SQL change has been made to production or preview; the read-only production inventory has
@@ -13,8 +13,29 @@ The treatment-linked design is approved in principle.
 | Function privileges (new) | [`function_privileges_hardening.sql`](function_privileges_hardening.sql) — F13 `reset_demo_state`, F14 `send_appointment_reminders` |
 | Identity prototype (new) | [`identity_documents_prototype.sql`](identity_documents_prototype.sql) — design prototype for mandatory ID (not the registration change) |
 | Supervisor requirements | [`supervisor_requirements.md`](supervisor_requirements.md) — mandatory identification; Reception-managed priority; V3 impact |
-| Local assertions | `supabase/tests/clinical_records_access/` — `probe.mjs` 85, `probe_profiles.mjs` 56, `probe_priority.mjs` 36, `probe_identity.mjs` 24, `regression_workflows.mjs` 24 |
-| Read-only catalog | `assert_catalog.sql` 19, `assert_catalog_profiles.sql` 12, `assert_catalog_priority.sql` 7, `production_inventory.sql` — **not run on production** |
+| Local assertions | `supabase/tests/clinical_records_access/` — `probe.mjs` 85, `probe_profiles.mjs` 70, `probe_priority.mjs` 48, `probe_identity.mjs` 36, `regression_workflows.mjs` 24 |
+| Read-only catalog | `assert_catalog.sql` 19, `assert_catalog_profiles.sql` 14, `assert_catalog_priority.sql` 11, `production_inventory.sql` — **not run on production** |
+
+## R5. Revision 5 — targeted corrections (decisions D-S1…D-ID5 applied)
+
+| # | Review finding | Correction | Asserted |
+|---|---|---|---|
+| 1 | `queue_priority_events` cascaded from `queue_entries` | No FK to `queue_entries` on events or escalations; entry snapshot columns; append-only trigger on events; escalations resolve-once and never deleted (all roles, incl. service role) | history + escalations survive deleting the entry; update/delete refused |
+| 2 | Clearing priority needed no reason | Reason **code** required for every change; separate raise / clear code sets enforced in the function and by a table CHECK | clear without reason / with a raising code refused; clear with `no_longer_required` logged |
+| 3 | Merge reason nullable; 2-arg RPC unjustified | `reason_code` NOT NULL; `merge_patient_profiles_with_reason` (code + 10–500-char note, active admin); legacy 2-arg kept until the Admin UI cutover, recorded as `legacy_unspecified`; single private core; audit append-only | 12 new checks (missing/legacy code, short note, receptionist, deactivated admin, shared patient, audit content, immutability, core not an RPC) |
+| 4 | Escalation tests carried symptoms readable by Reception | Escalations take a reason **code** only (`nurse_assessed_urgent`, `nurse_requests_early_review`); no note column; Reception-visible rows contain no free text | free-text parameter rejected; Reception's view has no free-text column |
+| 6 | Identity design end-to-end | Prototype rev 5: HMAC (Vault key) instead of plaintext; exact-match lookup; verified atomic replacement; single-use expiring claim codes after document verification | 33 identity checks (see §9) |
+
+Also: priority decisions D-P1 (admin oversight only — asserted admin cannot set, can read history), D-P2 (no
+reception-observed clinical code), D-P3 (codes only); D-F13 recorded (`reset_demo_state` service-role only; live
+destructive suites to move to isolated infrastructure); inventory now also lists extensions and Vault secret **names**.
+One catalog rule was made precise (the "row-data inputs only" rule applies to private helpers that app roles can
+execute; internal definer functions taking a staff id are non-executable by app roles, asserted separately); its
+negative control still fires.
+
+**Ready for a read-only production inventory?** Yes, from the security-design side: all proposals, read-only
+catalog files and the inventory script are final for this review and pass locally. Running it still needs your
+explicit authorisation; nothing has been run against production.
 
 ## R4. Revision 4 — what changed and why
 
@@ -74,9 +95,9 @@ The treatment-linked design is approved in principle.
 
 ### Remaining decisions
 
-D-S1 interim cross-clinic search gap · D-F13 live e2e suites vs `reset_demo_state` · D-P1/P2/P3 priority (admin
-access, reception-observed emergency, escalation-note content) · D-ID1…5 identity storage, account linking, patient
-self-correction, transition window, test-record tagging.
+All of D-S1, D-F13, D-P1–3 and D-ID1–5 were decided in the PR #36 review and are applied in revision 5
+(`supervisor_requirements.md`, decisions table). Remaining: authorisation to run the read-only production inventory;
+separate approval of each migration.
 
 ## 0. Revision 3 — final review answers (kept for history; see R4 for changes)
 
@@ -329,39 +350,38 @@ every `select('*')` on `profiles` (`app/admin/staff/page.tsx`) — a column revo
 | Ops | `reset_demo_state()` | SECURITY DEFINER, postgres | none expected; **not verifiable locally** — it fails on the local seed for an unrelated reason (demo patient profiles that exist only in production) | — |
 | Tests | Playwright fixtures | service role | none | Playwright 66/66 |
 
-## 9. Local test results (exact, revision 4, 2026-10-12)
+## 9. Local test results (exact, revision 5, 2026-10-12)
 
 Two fresh local stacks (63 committed migrations + local-only seed). Stack A: no proposal. Stack B: all five SQL
-proposals applied (clinical, profiles, queue priority Parts 1+2, function privileges, identity prototype). "Skipped"
-rows are assertions about objects that only exist after the proposals; they are counted inside the totals.
+proposals applied. "Skipped" rows assert objects that exist only after the proposals; they are counted in the totals.
 
 | Run | Stack A — baseline | Stack B — all proposals |
 |---|---|---|
-| health checks, fresh, no fixtures | 22 PASS · 1 INFO · 1 FAIL | **identical** before and after applying (and identical to A) |
-| `production_inventory.sql` (read-only) | 342 lines | 363 lines |
+| health checks, fresh, no fixtures | 22 PASS · 1 INFO · 1 FAIL | **identical** before and after applying, and identical to A |
+| `production_inventory.sql` (read-only) | 350 lines | 383 lines |
 | `assert_catalog.sql` | 4 / 19 true (findings) | **19 / 19** |
-| `assert_catalog_profiles.sql` | 1 / 12 true | **12 / 12** |
-| `assert_catalog_priority.sql` | 0 / 7 true | **7 / 7** |
+| `assert_catalog_profiles.sql` | 1 / 14 true | **14 / 14** |
+| `assert_catalog_priority.sql` | 0 / 11 true | **11 / 11** |
 | `probe.mjs` (clinical) | 85/85 hold (5 skipped) | **85/85** |
-| `probe_profiles.mjs` | 56/56 hold (5 skipped) | **56/56** |
-| `probe_priority.mjs` | 36/36 hold (18 skipped) | **36/36** |
-| `probe_identity.mjs` | 24/24 hold (21 skipped) | **24/24** |
+| `probe_profiles.mjs` | 70/70 hold (16 skipped) | **70/70** |
+| `probe_priority.mjs` | 48/48 hold (30 skipped) | **48/48** |
+| `probe_identity.mjs` | 36/36 hold (33 skipped) | **36/36** |
 | `regression_workflows.mjs` | 24/24 (nurse priority path) | **24/24** (Reception priority path) |
 | Playwright `nurse-v3-skip.local` + `nurse-classic-skip.local` | — | **66 passed**; tripwire: no non-local Supabase traffic |
 | health checks after all tests | 20 PASS · 1 INFO · 1 WARN · 2 FAIL | 21 PASS · 1 INFO · 1 WARN · 1 FAIL |
 
-The one FAIL present everywhere is pre-existing (`revoke_anon_on_new_functions`, an event-trigger function counted
-as anon-executable; not an RPC). Stack A's extra FAIL after the tests is the orphaned consultation created by the
-**successful** F10 forgery probe; it does not occur on stack B. The WARN is backdated open fixtures.
+The FAIL present everywhere is pre-existing (`revoke_anon_on_new_functions`, an event-trigger function counted as
+anon-executable; not an RPC). Stack A's extra FAIL is the orphan created by the successful F10 forgery probe. The
+WARN is backdated open fixtures.
 
-Intermediate runs during revision 4 (not the evidence above, recorded for honesty): the first stack-B run had
-3 failures and a crash — the F12 expectation was still "known open" though the cutover closes it (expectation
-updated); the clinical catalog's helper allow-list wrongly covered the identity validators (narrowed to SECURITY
-DEFINER helpers); the identity prototype lacked USAGE/EXECUTE for the inserting role and left PUBLIC EXECUTE on the
-validators (fixed in the SQL); and the prototype table had RLS without a policy (explicit deny-all added).
+Intermediate rev-5 run (recorded for honesty): the first stack-B run had one failure — the clinical catalog's
+"row-data inputs only" rule flagged the identity/merge internals (which take a staff id but are not executable by
+app roles). The rule was narrowed to app-executable helpers, its negative control re-run (still flags), and both
+stacks were re-run from scratch; the table above is that final run.
 
 Not run: anything against production or a preview (including the read-only inventory); `reset_demo_state()`
-itself; the live Playwright suites; TypeScript/ESLint/build (no app code changed).
+itself; the live Playwright suites; TypeScript/ESLint/build of app code (no app code changed; ESLint clean on the
+test scripts).
 
 ## 10. Before any deployment (remaining blockers)
 

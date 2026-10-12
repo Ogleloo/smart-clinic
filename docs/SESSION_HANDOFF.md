@@ -4,15 +4,16 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — PR #36 revision 4: security + supervisor requirements (awaiting final review)
+## Latest checkpoint — PR #36 revision 5: targeted corrections (awaiting review)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No app code, no migrations, nothing applied to the shared project, read-only production inventory NOT run.** Phase 3 screens remain paused.
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No app code, no migrations, nothing applied to the shared project; read-only production inventory NOT run (needs authorisation).** Phase 3 screens paused.
 
-- Supervisor requirements designed (not implemented): mandatory SA ID / passport+country with database-enforced uniqueness (`docs/proposals/supervisor_requirements.md`, prototype `identity_documents_prototype.sql`); queue priority moves to Reception with audit and nurse escalation (`queue_priority_reception.sql`, Part 2 cutover only with the UI change). `docs/V3_REQUIREMENTS.md` updated.
-- Rev-3 hole fixed: patients with history at two clinics (`shared`) can no longer be merged by one clinic; merges are single-clinic, patient-only, audited (`patient_merge_audit`). Cross-clinic exact-phone search removed.
-- F13/F14 proposals (`function_privileges_hardening.sql`); F13 breaks `e2e/helpers.ts` live suites by design (decision).
-- Local results: baseline and proposed both hold — clinical 85, profiles 56, priority 36, identity 24, workflows 24; catalogs 19/12/7 true after; Playwright local 66 passed; clean health checks identical.
-- Decisions pending: D-S1, D-F13, D-P1–3, D-ID1–5 (see `clinical_records_access.md` R4). Sequence in R4.
+- Decisions D-S1, D-F13, D-P1–3, D-ID1–5 applied (table in `docs/proposals/supervisor_requirements.md`).
+- Priority: audit survives queue-entry deletion (no FK, snapshots, append-only / resolve-once triggers); reason codes required to set AND clear; nurse escalations are codes only; admin oversight only.
+- Merge: `merge_patient_profiles_with_reason` (code + note, active admin) via one private core; legacy 2-arg kept until Admin UI cutover, recorded `legacy_unspecified`; audit append-only, `reason_code` NOT NULL.
+- Identity prototype: HMAC with Vault key (no plaintext), exact lookup, verified replacement, single-use claim codes.
+- Local results (fresh stacks): baseline and proposed both hold — clinical 85, profiles 70, priority 48, identity 36, workflows 24; catalogs 19/14/11 true after; Playwright local 66; clean health identical.
+- Next: authorise the read-only production inventory (`supabase/tests/clinical_records_access/production_inventory.sql` + three `assert_catalog*.sql`), then separate migration approvals in the R4 sequence.
 
 ---
 

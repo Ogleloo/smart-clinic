@@ -6,6 +6,21 @@ Registration, check-in and the deployed priority controls are unchanged. SQL liv
 
 Legend: **[fact]** verified in the code or on the local stack · **[design]** recommendation for review.
 
+### Decisions applied (PR #36 review, revision 5)
+
+| | Decision | Where |
+|---|---|---|
+| D-S1 | Cross-clinic privacy first; the interim duplicate risk is acceptable **only during development** — production intake requires compulsory SA ID / passport | profiles proposal; §1 |
+| D-F13 | Destructive live tests move to isolated infrastructure; ordinary admins cannot run `reset_demo_state()` | `function_privileges_hardening.sql` |
+| D-P1 | Reception only for routine priority; admins have read-only oversight | §2 |
+| D-P2 | Reception does not classify emergencies: they call a nurse and follow clinic emergency procedures; only a nurse escalation yields a clinical priority | §2 |
+| D-P3 | Reception-visible escalation content = structured reason codes, no free text | §2 |
+| D-ID1 | Keyed hash (HMAC-SHA-256, Vault key); no plaintext; no encryption unless a need appears | §1.3, prototype rev 5 |
+| D-ID2 | Verified, single-use, expiring, hashed claim codes | §1.4, prototype rev 5 |
+| D-ID3 | Patients *request* corrections; staff perform verified replacements | §1.4 |
+| D-ID4 | Mandatory at launch for new registrations and walk-ins; controlled backfill + verification for existing incomplete profiles | §1.5 |
+| D-ID5 | Isolate test data; otherwise tag known demo records explicitly; never fabricate documents | §1.5 |
+
 ---
 
 ## 1. Mandatory patient identification
@@ -60,9 +75,15 @@ active document **per kind per patient**, so a person may hold an SA ID *and* a 
 `SECURITY DEFINER` functions that return at most `number_last4`:
 `register_patient_with_document(...)`, `find_patient_by_document(type, country, number)` (exact match only — the
 caller must already hold the full number, i.e. the document is in front of them), `replace_identity_document(...)`.
-Recommended for production: store a **keyed hash** (HMAC, key in Supabase Vault) for the unique index and exact-match
-lookup, and either no full number or an encrypted one. An unkeyed hash is not enough — SA ID numbers have low entropy
-(a date plus a short sequence). *Decision D-ID1.*
+**Storage (D-ID1, prototyped in rev 5):** the number is never stored. The table keeps `number_hmac` =
+HMAC-SHA-256(key, `type:country:normalised_number`) with the key in Supabase Vault (`identity_document_hmac_key_v1`,
+created by an operator, never granted to any role), plus `number_last4` and `key_version`. The unique index and the
+exact-match lookup both use the HMAC. An unkeyed hash would not do: SA ID numbers have low entropy (a date plus a
+short sequence) and could be brute-forced. No encryption: nothing currently needs the full number back. **Key
+rotation** cannot re-hash without the plaintext, so it happens lazily — on the next in-person verification the
+document is re-hashed under the new key version; during rotation lookups try both versions. Asserted locally: no
+column can hold the number; stored rows contain neither the number nor a claim code; app roles cannot execute the
+registration, lookup, claim or key functions; the service role cannot read the key function either.
 
 ### 1.4 Workflows [design]
 
@@ -71,12 +92,17 @@ lookup, and either no full number or an encrypted one. An unkeyed hash is not en
 - **Reception walk-in**: `create_walkin_patient` gains the document; Reception marks it **verified** (saw the physical
   document). If it already exists, Reception is shown that profile (name + last 4) and checks the person in on it —
   this replaces today's name/phone search as the way a returning patient from **another clinic** is found.
-- **Linking an existing profile to an account** (a walk-in later signs up): knowing someone's ID number must not be
-  enough to take over their record. Proposed: a **one-time claim code** issued by Reception after an in-person
-  document check (or an OTP to the phone already on the profile), redeemed once, expiring, audited. *Decision D-ID2.*
-- **Correction / replacement** (typo, new passport): Reception or admin, with a reason; the old row becomes
-  `replaced` (history kept), the new row `active`. Patients cannot edit their document themselves once verified —
-  today's self-edit of `id_number` is removed. *Decision D-ID3: may a patient correct an unverified document?*
+- **Linking an existing profile to an account (D-ID2, prototyped):** knowing someone's ID number is never enough.
+  Reception verifies the physical document, then issues a **claim code**: 80 random bits, shown once, stored only as an
+  HMAC, expiring (24 h default), single-use, one live code per profile, issuable only for a patient profile with no
+  login and an active **verified** document. Redemption links the new account only if the account has no profile yet
+  and the profile is still unclaimed; every failure returns the same message. Attempt rate-limiting belongs to the
+  calling RPC/API. Asserted: issue refused before verification; wrong, reused and expired codes refused; an account
+  that already has a profile cannot claim.
+- **Correction / replacement (D-ID3):** patients **request** a correction (a request record, no direct edit); staff
+  perform the replacement after seeing the document: old row `replaced` with a reason (history kept), new row `active`
+  and verified, linked by `replaced_by`, atomically. Asserted: replacement needs a reason and verifying staff. Today's
+  patient self-edit of `id_number` is removed when documents go live.
 - **More than one document for one person** (SA ID and passport, or a passport renewed under a new number): allowed on
   one profile. If two profiles turn out to be the same person through **different** documents, that is an
   **exceptional reconciliation** — the restricted, audited merge (§1.6), never a routine screen.
@@ -88,22 +114,26 @@ lookup, and either no full number or an encrypted one. An unkeyed hash is not en
    **unverified**; anything else → **not** imported automatically (it could be a passport with unknown country, or
    garbage); flagged for capture at the next visit. Numbers shared by several profiles are **not** imported for any
    of them and go to a reconciliation list.
-3. Profiles without a document get an `identity_pending` state: allowed to check in during a transition window, with
-   Reception prompted to capture the document; after the window, check-in requires it. *Decision D-ID4 (window
-   length; hard block or warning).*
-4. *Test / demo records*: the production database holds demo data (`reset_demo_state`, `ZZ…` test profiles). Tag them
-   explicitly (e.g. a `is_test_record` flag or a dedicated demo clinic) and exclude them from the backfill and the
-   duplicate checks rather than inventing fake document numbers. *Decision D-ID5.*
+3. **D-ID4:** new self-registrations and walk-ins require a document **from launch**. Existing profiles without one
+   get `identity_pending`: controlled backfill — Reception captures and verifies the document at the next visit; a
+   report tracks the remaining pending profiles; any conflict found during capture (document already held by another
+   profile) goes to exceptional reconciliation, never an automatic merge.
+4. **D-ID5:** test data lives on isolated infrastructure (local stack / separate project) wherever possible; demo
+   records that must remain in production are tagged explicitly (e.g. `is_test_record` or a dedicated demo clinic),
+   excluded from backfill and reporting, and never given fabricated document numbers.
 5. *Contract*: once all screens read documents through the new functions, stop writing `profiles.id_number`, then
    drop it in a later migration.
 
 ### 1.6 Duplicate detection and merge [design]
 
 - **Admin V3 UI: no routine "find duplicates / merge" screen.** Prevention at registration replaces it.
-- Keep the functions (expand/contract) but restricted: `merge_patient_profiles` now requires patient profiles, a
-  single-clinic footprint (no queue entries, appointments, notifications or audit references at another clinic),
-  and writes `patient_merge_audit` (`profiles_identifier_access.sql`, rev 4). Later: a reason-taking variant used only
-  by an exceptional-reconciliation flow, and revoke the 2-argument version once the current admin screen is gone.
+- Keep the functions (expand/contract) but restricted: one private core requires patient profiles, an **active**
+  admin, a single-clinic footprint (no queue entries, appointments, notifications or audit references at another
+  clinic) and writes the append-only `patient_merge_audit`. **Rev 5 coordinated replacement:**
+  `merge_patient_profiles_with_reason(keep, merge, reason_code, reason_note)` — code
+  (`same_person_document_verified` | `registration_error_verified`) and a 10–500-character note are mandatory; the
+  deployed 2-argument `merge_patient_profiles` stays until the Admin UI cutover and records `legacy_unspecified`, so
+  `reason_code` is never null; at the cutover the 2-argument function is revoked from app roles.
 - With documents in place, a merge must also refuse when both profiles hold **different active documents of the same
   kind** (two different SA IDs cannot be one person) and must move document rows with an audit entry.
 
@@ -130,16 +160,25 @@ a clinically assessed emergency, and nurses keep a way to escalate clinical urge
 
 ### 2.3 Revised BR-10 [design]
 
-> **BR-10 (revised).** Queue priority is set and cleared only by **Reception of the entry's clinic**, only while the
-> patient is **waiting**, through `set_queue_priority()`. Every change records who, when, old and new value, and a
-> reason: **clinical emergency** (must cite an open nurse escalation for that patient) or **administrative**
-> (Reception's decision, note required). Nurses request priority through an **escalation**; they do not reorder the
-> queue. Patients cannot affect priority. Queue order remains `priority desc, checked_in_at, token_number`.
+> **BR-10 (revised, rev 5).** Queue priority is set and cleared only by **Reception of the entry's clinic**, only while
+> the patient is **waiting**, through `set_queue_priority()`. Every change — **setting and clearing** — records who,
+> when, old and new value and a **reason code**. Raising: `nurse_escalation_accepted` (clinical; must cite an open
+> nurse escalation), `accessibility_need`, `safeguarding`, `operational` (short note required). Clearing:
+> `no_longer_required`, `entered_in_error`, `escalation_withdrawn`. Reception never classifies a patient clinically:
+> on an apparent emergency they contact a nurse immediately and follow the clinic's emergency procedure (D-P2).
+> Nurses escalate with a **reason code only** (`nurse_assessed_urgent`, `nurse_requests_early_review`) — no symptoms
+> or other clinical text reaches Reception (D-P3). Admins have read-only oversight (D-P1). Patients cannot affect
+> priority. The history is append-only and survives deletion or archiving of the queue entry. Queue order remains
+> `priority desc, checked_in_at, token_number`.
 
 ### 2.4 Proposed implementation (`queue_priority_reception.sql`) [design, tested locally]
 
 - **Part 1 (additive):** `queue_priority_events` (append-only history), `queue_priority_escalations` (nurse → Reception,
-  one open per entry), `set_queue_priority()`, `request_priority_escalation()`, `decline_priority_escalation()`.
+  one open per entry, reason code only), `set_queue_priority()`, `request_priority_escalation()`,
+  `decline_priority_escalation()`. **Retention (rev 5):** neither table has a foreign key to `queue_entries`; each row
+  snapshots `clinic_id`, `service_id`/`token`/`queue_date`; triggers make events append-only and escalations
+  resolve-once / never deleted — for every role including the service role. Asserted: history and escalations survive
+  deleting the queue entry; updates and deletes refused.
   Row lock (`FOR NO KEY UPDATE`, the strength `next_patient()` uses) for check-then-write; two simultaneous requests →
   one change, one event (asserted). Same "Queue entry not found" for another clinic (no oracle).
 - **Part 2 (cutover, same release as the UI):** revoke `set_emergency_priority` from app roles (closes F12) and make
@@ -147,10 +186,7 @@ a clinically assessed emergency, and nurses keep a way to escalate clinical urge
 - With `clinical_records_access.sql`, direct `queue_entries` updates are gone (F11), so the functions are the only path.
 - **Must ship together** with: Reception V3 Queue control + escalation inbox, removal of the Nurse toggle (classic and
   V3), and a Nurse "escalate to reception" action. Part 2 before the UI change would break the deployed Nurse toggle.
-- *Decisions:* D-P1 may an **admin** also set priority (proposal: no — Reception only)? D-P2 when Reception itself
-  sees an obvious emergency (collapse, bleeding), record it as administrative-with-note and call a nurse, or allow a
-  "reception-observed emergency" reason? D-P3 should an escalation note be restricted to non-clinical wording, since
-  Reception reads it?
+- D-P1/D-P2/D-P3 are decided (table above) and implemented in the rev-5 SQL.
 
 ---
 
