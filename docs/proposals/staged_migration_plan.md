@@ -21,7 +21,7 @@ other policies match; gate G1 closes that.
   every public table. The proposals tighten only `consultation_notes`, `patient_vitals`, `consultations` and
   `queue_entries`. The other ten tables are `appointments`, `clinic_hours`, `clinic_settings`, `clinics`,
   `notifications`, `nurse_actions`, `profiles`, `queue_events`, `services` and `staff_invitations`. That needs a
-  separate grant-hygiene migration (M1b below). It is **drafted here only, not yet tested locally**.
+  separate grant-hygiene migration (M1b below). It is **specified here only: the SQL is not yet written or tested**.
 - **R2 — severity correction for F7/R1.** PostgREST and pg_graphql expose no TRUNCATE operation, and `anon` and
   `authenticated` cannot open database sessions. So TRUNCATE is reachable only if one of those roles gets SQL
   execution: a future SECURITY INVOKER function with dynamic SQL, or a misconfiguration. That makes it a
@@ -114,7 +114,7 @@ S1's three migrations may share one window but are applied and verified one at a
 - [ ] P4: nurse queue and dashboard load; reception queue loads
 - [ ] Rollback ready: section 11 of `clinical_records_access.md` (re-opens F1–F11; functional emergencies only)
 
-**M1b — grant hygiene, 10 tables** (to be drafted)
+**M1b — grant hygiene, 10 tables** (SQL not yet written)
 - [ ] Draft reviewed; local replay plus full probe/regression run
 - [ ] P1: an inventory section-3 re-read shows no TRUNCATE/REFERENCES/TRIGGER for anon/authenticated on any public table
 - [ ] Rollback: re-grant the three privileges
@@ -158,7 +158,7 @@ Not part of this plan's approvals.
 ## 6. Decisions needed
 
 - **Approve the stage order**, in particular M1a first with M1b and M1c in the same window.
-- **D-R1:** draft M1b now (TRUNCATE/REFERENCES/TRIGGER only), and leave per-table DML tightening to later work?
+- **D-R1:** write M1b now (TRUNCATE/REFERENCES/TRIGGER only), and leave per-table DML tightening to later work?
 - **D-R3:** leave Supabase default privileges unchanged and rely on per-migration revokes?
 - **Authorise G1:** a diff of the full production inventory output against the local baseline. This needs the raw
   output from the reviewer's run, or a fresh read-only run.
