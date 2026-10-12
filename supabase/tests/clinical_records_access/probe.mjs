@@ -111,6 +111,42 @@ const xNow = await must(svc.from('consultations').select('id, queue_entry:queue_
 if (xNow.queue_entry.patient_id !== X || xNow.queue_entry.status !== 'in_progress') throw new Error('setup: next_patient did not call X')
 await must(svc.from('profiles').update({ is_active: false }).eq('id', nurseI.id), 'deactivate')
 
+// Workflow alignment: a nurse on duty whose service has V2 WAITING (not called) — a "waiting-row" nurse.
+const nurseW = await user('waitingrow', 'nurse', CLINIC_A)
+const svcW = await service(CLINIC_A, `Probe WR ${RUN}`)
+const V2 = await newPatient(`Probe V2 ${RUN}`)
+const v2Prev = await visit(V2, CLINIC_A, svcA, nurseP, { clinical: true, hoursAgo: 80 })
+await entry(V2, CLINIC_A, svcW, 'waiting')
+await must(svc.from('profiles').update({ is_on_duty: true, current_service_id: svcW }).eq('id', nurseW.id), 'duty W')
+
+// Legacy two-step flow: an entry already in_progress with no consultation (what call_next_patient() leaves).
+const L = await newPatient(`Probe L ${RUN}`)
+const lPrev = await visit(L, CLINIC_A, svcA, nurseP, { clinical: true, hoursAgo: 90 })
+const lCalled = await entry(L, CLINIC_A, svcA2, 'in_progress')
+
+// Pagination: H has 25 earlier clinic-A visits, one staff_break visit (kept), one skipped and one demo-reset
+// closure (excluded), and one clinic-B visit (excluded); nurse T2 calls H through next_patient().
+const nurseT2 = await user('pager', 'nurse', CLINIC_A)
+const svcH = await service(CLINIC_A, `Probe H ${RUN}`)
+const H = await newPatient(`Probe H ${RUN}`)
+const hKept = []
+for (let i = 0; i < 25; i++) hKept.push((await visit(H, CLINIC_A, svcA, nurseP, { hoursAgo: 200 + i })).consultation)
+const hBreak = await visit(H, CLINIC_A, svcA, nurseP, { hoursAgo: 300 })
+await must(svc.from('consultations').update({ exclude_from_prediction: true, exclusion_reason: 'staff_break' }).eq('id', hBreak.consultation), 'break')
+hKept.push(hBreak.consultation)
+const hSkipped = await visit(H, CLINIC_A, svcA, nurseP, { hoursAgo: 310 })
+await must(svc.from('queue_entries').update({ status: 'skipped' }).eq('id', hSkipped.queue), 'skipped')
+await must(svc.from('consultations').update({ exclude_from_prediction: true, exclusion_reason: 'patient_skipped' }).eq('id', hSkipped.consultation), 'skipped reason')
+const hDemo = await visit(H, CLINIC_A, svcA, nurseP, { hoursAgo: 320 })
+await must(svc.from('consultations').update({ exclude_from_prediction: true, exclusion_reason: 'demo_reset' }).eq('id', hDemo.consultation), 'demo')
+const hB = await visit(H, CLINIC_B, svcB, nurseB, { hoursAgo: 330 })
+await entry(H, CLINIC_A, svcH, 'waiting')
+await must(svc.from('profiles').update({ is_on_duty: true, current_service_id: svcH }).eq('id', nurseT2.id), 'duty T2')
+const calledH = await nurseT2.client.rpc('next_patient', { p_action_id: crypto.randomUUID() })
+if (calledH.error) throw new Error(`setup next_patient H: ${calledH.error.message}`)
+const hNow = (await must(svc.from('consultations').select('id').eq('nurse_id', nurseT2.id).is('ended_at', null).single(), 'H current')).id
+hKept.push(hNow)
+
 // ---------------------------------------------------------------- assertions
 const results = []
 const rowsOf = (r) => (r.error || r.data == null ? 0 : Array.isArray(r.data) ? r.data.length : 1)
@@ -205,6 +241,47 @@ await check('forgery', 'treating nurse moves their note to another encounter', O
 if (PHASE === 'baseline') await svc.from('consultation_notes').update({ consultation_id: xNow.id }).eq('id', ownNote)
 await check('forgery', 'nurse deletes a note', DENY, write(nurseT.client.from('consultation_notes').delete().eq('id', ownNote).select('id')))
 
+// Workflow alignment: history follows next_patient(), and only next_patient().
+const hist = (client, patient, extra = {}) => client.rpc('get_patient_clinical_history', { p_patient_id: patient, ...extra })
+await check('workflow', "waiting-row nurse (patient waiting in their service, not called) reads V2's previous note", OPEN, read(notes(nurseW.client).eq('id', v2Prev.note)))
+await check('workflow', 'waiting-row nurse: get_patient_clinical_history(V2)', DENY, write(hist(nurseW.client, V2)))
+const actionW = crypto.randomUUID()
+await check('workflow', 'nurse calls V2 with next_patient() (opens the consultation atomically)', KEEP, write(nurseW.client.rpc('next_patient', { p_action_id: actionW })))
+await check('workflow', "after next_patient(): reads V2's previous note", KEEP, read(notes(nurseW.client).eq('id', v2Prev.note)))
+await check('workflow', 'after next_patient(): get_patient_clinical_history(V2)', NEW, write(hist(nurseW.client, V2)))
+await check('workflow', 'undo_next_patient()', KEEP, write(nurseW.client.rpc('undo_next_patient', { p_action_id: actionW })))
+await check('workflow', "after undo: reads V2's previous note", OPEN, read(notes(nurseW.client).eq('id', v2Prev.note)))
+await check('workflow', 'after undo: get_patient_clinical_history(V2)', DENY, write(hist(nurseW.client, V2)))
+await check('workflow', 'legacy call_next_patient() (marks in_progress without a consultation)', OPEN, write(nurseW.client.rpc('call_next_patient')))
+await check('workflow', "legacy start_consultation() on an entry the nurse did not call (second 'Begin Consultation')", OPEN, write(nurseU.client.rpc('start_consultation', { p_queue_entry_id: lCalled })))
+await check('workflow', "after that attempt, the nurse reads L's previous note", OPEN, read(notes(nurseU.client).eq('id', lPrev.note)))
+
+// Pagination and exclusions (D1: all visits at the current clinic, paginated, no cutoff).
+let page1 = []
+await check('history', 'page 1 (default size 20): 20 rows, newest first, current visit first', NEW, async () => {
+  const r = await hist(nurseT2.client, H)
+  page1 = r.data ?? []
+  const sorted = page1.every((v, i) => i === 0 || v.started_at <= page1[i - 1].started_at)
+  const ok = !r.error && page1.length === 20 && sorted && page1[0]?.consultation_id === hNow && page1[0]?.is_current === true
+  return { outcome: ok ? 'allowed' : 'denied', detail: r.error ? why(r) : `${page1.length} rows, sorted=${sorted}, first=current:${page1[0]?.consultation_id === hNow}` }
+})
+await check('history', 'page 2 via keyset: the remaining 7; all 27 kept visits exactly once', NEW, async () => {
+  const last = page1[page1.length - 1]
+  const r = await hist(nurseT2.client, H, { p_before_started_at: last?.started_at, p_before_id: last?.consultation_id })
+  const ids = [...page1, ...(r.data ?? [])].map((v) => v.consultation_id)
+  const ok = !r.error && (r.data ?? []).length === 7 && new Set(ids).size === 27 && hKept.every((id) => ids.includes(id))
+  return { outcome: ok ? 'allowed' : 'denied', detail: r.error ? why(r) : `${(r.data ?? []).length} rows; total distinct ${new Set(ids).size}` }
+})
+await check('history', 'skipped, demo-reset and clinic-B encounters excluded; staff_break kept', NEW, async () => {
+  const r = await hist(nurseT2.client, H, { p_page_size: 50 })
+  const ids = (r.data ?? []).map((v) => v.consultation_id)
+  const ok = !r.error && ids.length === 27 && ![hSkipped.consultation, hDemo.consultation, hB.consultation].some((id) => ids.includes(id)) && ids.includes(hBreak.consultation)
+  return { outcome: ok ? 'allowed' : 'denied', detail: r.error ? why(r) : `${ids.length} rows` }
+})
+await check('history', 'page size 51 refused', DENY, write(hist(nurseT2.client, H, { p_page_size: 51 })))
+await check('history', 'half a cursor refused', DENY, write(hist(nurseT2.client, H, { p_before_started_at: new Date().toISOString() })))
+await check('history', "nurse T2 cannot page through X's history (not in care)", DENY, write(hist(nurseT2.client, X, { p_page_size: 50 })))
+
 // After the consultation ends, the "previous records" link ends; authorship remains.
 await must(svc.from('consultations').update({ ended_at: new Date().toISOString() }).eq('id', xNow.id), 'end')
 await must(svc.from('queue_entries').update({ status: 'done' }).eq('id', (await must(svc.from('consultations').select('queue_entry_id').eq('id', xNow.id).single(), 'q')).queue_entry_id), 'done')
@@ -232,8 +309,8 @@ for (const [role, table] of [['authenticated', 'consultation_notes'], ['authenti
 // ---------------------------------------------------------------- catalog assertions (read-only SQL)
 const catalog = psql(readFileSync(join(here, 'assert_catalog.sql'), 'utf8')).trim().split('\n').filter(Boolean).map((l) => l.split('|'))
 for (const [pass, name, detail] of catalog) {
-  const want = PHASE === 'proposed' ? 'pass' : 'any'
-  results.push({ area: 'catalog', name, want, got: pass === 't' ? 'pass' : 'fail', ok: want === 'any' || pass === 't', detail })
+  const want = PHASE === 'proposed' ? 'pass' : 'info'
+  results.push({ area: 'catalog', name, want, got: pass === 't' ? 'pass' : 'fail', ok: want === 'info' || pass === 't', detail })
 }
 
 // ---------------------------------------------------------------- report

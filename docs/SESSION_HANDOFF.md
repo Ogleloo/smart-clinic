@@ -4,15 +4,14 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 3: security proposal revision 2 (awaiting review)
+## Latest checkpoint — Nurse V3 Phase 3: security proposal revision 3 (final review answered)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No feature code; nothing applied to the shared project.** Patient Details (`161:339`) / Patient History (`162:437`) remain on hold.
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No feature code; nothing applied to the shared project; not authorised for production.**
 
-- Reviewer direction (D1–D4) received: treatment-linked clinical access; least-privilege identifiers; writes only on an active consultation (addenda later); production read-only check + revoke TRUNCATE before deploy.
-- **Revision 2:** `docs/proposals/clinical_records_access.md` (+ `.sql`) and a separate `docs/proposals/profiles_identifier_access.sql` (Stage 1: drop the global admin profile policies; Stage 2 designed, needs app changes). New findings F10 (nurses can create/re-open consultations directly → could forge "treating") and F11 (any staff can update any queue_entries column, e.g. unaudited emergency priority). The clinical proposal closes both by revoking direct writes on `consultations`/`queue_entries`.
-- **Assertions** in `supabase/tests/clinical_records_access/`: `probe.mjs` 67 (baseline and proposed both hold), `probe_profiles.mjs` 15/15 both phases, `regression_workflows.mjs` 24/24, local Playwright specs 66/66 with both proposals applied, `assert_catalog.sql` (read-only; the D4 production check).
-- **Not verified:** production policies/grants; `reset_demo_state()` (fails on the local seed for an unrelated reason).
-- **Next:** reviewer decisions (D1 "relevant" scope, Stage 1 behaviour changes, F10/F11 revokes) → run `assert_catalog.sql` read-only on production → separately approved migration(s) → only then build the screens (history via `get_patient_clinical_history`, identifiers via a treating-gated function).
+- Design approved in principle (D1: all visits at the current clinic while treating, paginated). Revision 3 adds: paginated/excluding history function; revokes legacy `start_consultation`/`call_next_patient` (second consultation-opening path); Stage 1 profiles now also limits visit-based staff reads to patient profiles (clinic-B staff were visible on clinic A's Staff page) and scopes `find_duplicate_patients`/`search_patients`/`merge_patient_profiles` via `private.patient_scope`.
+- Read-only `production_inventory.sql` + `assert_catalog*.sql` prepared, **not run on production**.
+- Local results (two fresh stacks): baseline clinical 85/85, profiles 37/37, workflows 24/24; proposed 85/85, 37/37, 24/24; Playwright local specs 66 passed; clean health checks identical before/after (1 pre-existing FAIL).
+- Remaining blockers: authorise read-only production inventory; separate migration approval; Staff page explicit clinic filter (app); separate fixes for F12 (`set_emergency_priority` cross-clinic), F13 (`reset_demo_state` all clinics), F14 (`send_appointment_reminders` callable by anyone signed in).
 
 ---
 

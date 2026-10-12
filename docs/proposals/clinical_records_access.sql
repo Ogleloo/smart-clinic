@@ -9,7 +9,8 @@
 --      queue_entries directly (both were writable, which would let a nurse forge "currently treating").
 --      Every legitimate writer is a SECURITY DEFINER function owned by postgres and is unaffected.
 --   D. Least-privilege grants on all four tables, including TRUNCATE (D4).
---   E. get_patient_clinical_history(): the history query, without broadening the consultations policy.
+--   E. get_patient_clinical_history(): paginated history query, without broadening the consultations policy.
+--   F. Revoke the two legacy RPCs that open/claim consultations outside next_patient().
 --
 -- Every statement below is a production change the moment it is applied (shared database). Apply only after
 -- the read-only production check in supabase/tests/clinical_records_access/assert_catalog.sql, and commit it
@@ -197,11 +198,26 @@ grant select on public.queue_entries to authenticated;
 -- service_role keeps its own grants (admin tooling, local test seeding).
 
 -- ---------------------------------------------------------------------------------------------------------
--- E. History query. Returns the current patient's encounters at the caller's clinic (metadata only); clinical
---    content is then read through the RLS policies above, so there is one rule for clinical rows. Raises the
---    same error for "no such patient" and "not your patient", so it is not an existence oracle.
+-- E. History query (D1: every available visit at the patient's current clinic, paginated, no date cutoff).
+--    Metadata only; clinical content is then read through the RLS policies above, so there is one rule for
+--    clinical rows. Same 42501 for "no such patient" and "not your patient" (not an existence oracle).
+--
+--    Excluded as administrative / not a clinical encounter:
+--      * queue entry skipped or no_show (the patient was not seen; skip_patient() closes such consultations
+--        with exclusion_reason patient_skipped / patient_no_show);
+--      * exclusion_reason 'demo_reset' (closed by reset_demo_state()).
+--    Kept: 'staff_break' (a real encounter whose duration is only excluded from the wait-time average).
+--    Undone calls leave no row: undo_next_patient() deletes the consultation.
+--
+--    Keyset pagination, newest first: pass the last row's (started_at, consultation_id) to get the next page.
+--    Page size 1..50 (default 20).
 -- ---------------------------------------------------------------------------------------------------------
-create or replace function public.get_patient_clinical_history(p_patient_id uuid)
+create or replace function public.get_patient_clinical_history(
+  p_patient_id        uuid,
+  p_before_started_at timestamptz default null,
+  p_before_id         uuid        default null,
+  p_page_size         int         default 20
+)
 returns table (
   consultation_id uuid,
   started_at      timestamptz,
@@ -220,6 +236,12 @@ begin
   if me.profile_id is null or not private.nurse_treats_patient(p_patient_id) then
     raise exception 'Not authorised' using errcode = '42501';
   end if;
+  if (p_before_started_at is null) <> (p_before_id is null) then
+    raise exception 'Pass both p_before_started_at and p_before_id, or neither' using errcode = '22023';
+  end if;
+  if p_page_size is null or p_page_size < 1 or p_page_size > 50 then
+    raise exception 'p_page_size must be between 1 and 50' using errcode = '22023';
+  end if;
 
   return query
   select c.id, c.started_at, c.ended_at, s.name, n.full_name, (c.ended_at is null and c.nurse_id = me.profile_id)
@@ -229,15 +251,32 @@ begin
   join public.profiles n on n.id = c.nurse_id
   where q.patient_id = p_patient_id
     and q.clinic_id = me.clinic_id
-  order by c.started_at desc
-  limit 100;
+    and q.status not in ('skipped', 'no_show')
+    and coalesce(c.exclusion_reason, '') not in ('patient_skipped', 'patient_no_show', 'demo_reset')
+    and (p_before_started_at is null or (c.started_at, c.id) < (p_before_started_at, p_before_id))
+  order by c.started_at desc, c.id desc
+  limit p_page_size;
 end;
 $$;
-revoke all on function public.get_patient_clinical_history(uuid) from public, anon;
-grant execute on function public.get_patient_clinical_history(uuid) to authenticated;
+revoke all on function public.get_patient_clinical_history(uuid, timestamptz, uuid, int) from public, anon;
+grant execute on function public.get_patient_clinical_history(uuid, timestamptz, uuid, int) to authenticated;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- F. One way to open a consultation: next_patient(). Two legacy RPCs are still executable by every
+--    authenticated user and are not called by the app (or by any database function):
+--      * start_consultation(queue_entry_id): ANY nurse can open a consultation on ANY in-progress entry — no
+--        clinic check, no check that they called the patient. That is a second "Begin Consultation" path and a
+--        way to manufacture a treatment link.
+--      * call_next_patient(): marks an entry in_progress WITHOUT creating a consultation (the pre-next_patient
+--        two-step flow), leaving entries that start_consultation can then claim.
+--    Revoke EXECUTE (expand/contract: the functions stay, so nothing that might still reference them breaks at
+--    definition time; dropping them is a later clean-up).
+-- ---------------------------------------------------------------------------------------------------------
+revoke all on function public.start_consultation(uuid) from public, anon, authenticated;
+revoke all on function public.call_next_patient()      from public, anon, authenticated;
 
 commit;
 
--- ROLLBACK: see section 11 of the .md (re-creates the six clinical policies from 20261002003441,
+-- ROLLBACK: see the Rollback section of the .md (re-creates the six clinical policies from 20261002003441,
 -- consultations_nurse_write and queue_staff_update from 20260805103110, the previous grants, and drops the
 -- private schema objects, the two triggers and get_patient_clinical_history).

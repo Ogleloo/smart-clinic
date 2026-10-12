@@ -3,14 +3,23 @@
 //
 //   SB_URL=... SB_ANON=... SB_SERVICE=... PHASE=baseline|proposed node supabase/tests/clinical_records_access/probe_profiles.mjs
 //
+//   PSQL_CMD="docker exec -i supabase_db_<project> psql -U postgres -At -v ON_ERROR_STOP=1"  (catalog checks)
+//
 // Exit code 0 only if every assertion for the phase holds.
 import { createRequire } from 'node:module'
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 
 const require = createRequire(`${process.cwd()}/`)
 const { createClient } = require('@supabase/supabase-js')
-const { SB_URL, SB_ANON, SB_SERVICE, PHASE } = process.env
+const { SB_URL, SB_ANON, SB_SERVICE, PHASE, PSQL_CMD } = process.env
+const here = dirname(fileURLToPath(import.meta.url))
 if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(SB_URL ?? '')) throw new Error(`Refusing: SB_URL must be a local stack, got ${SB_URL}`)
 if (!['baseline', 'proposed'].includes(PHASE)) throw new Error('PHASE must be baseline or proposed')
+if (!PSQL_CMD || !/(supabase_db_[a-z0-9_-]+\s|@(127\.0\.0\.1|localhost)[:/])/.test(PSQL_CMD)) throw new Error('Refusing: PSQL_CMD must target a local supabase_db_* container or localhost')
+const psql = (sql) => execSync(PSQL_CMD, { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
 
 const opts = { auth: { persistSession: false, autoRefreshToken: false } }
 const svc = createClient(SB_URL, SB_SERVICE, opts)
@@ -49,6 +58,23 @@ const pA = await patient(`PP linked A ${RUN}`, CLINIC_A, svcA) // has a visit at
 const pB = await patient(`PP linked B ${RUN}`, CLINIC_B, svcB) // only ever at clinic B
 const pNone = await patient(`PP unlinked ${RUN}`, null, null) // registered, never visited anywhere
 
+// Staff member of clinic B who was checked in at clinic A as a patient (check_in_patient accepts any profile).
+const nurseB2 = await user('nurseb2', 'nurse', CLINIC_B)
+const recA_ci = await recA.client.rpc('check_in_patient', { p_service_id: svcA, p_patient_id: nurseB2.id })
+if (recA_ci.error) throw new Error(`setup staff-as-patient check-in: ${recA_ci.error.message}`)
+// A clinic-B staff profile with no login of its own, for the merge-a-staff-profile attempt.
+const staffNoLogin = (await must(svc.from('profiles').insert({ full_name: `PP staff nologin ${RUN}`, role: 'receptionist', clinic_id: CLINIC_B }).select('id').single(), 'staff no login')).id
+// Duplicate pairs.
+const dupName = `PP Dup ${RUN}`
+const dupB1 = await patient(dupName + ' B', CLINIC_B, svcB)
+const dupB2 = await patient(dupName + ' B', CLINIC_B, svcB) // clinic-B-only pair
+const dupA = await patient(dupName + ' A', CLINIC_A, svcA)
+const dupU = await patient(dupName + ' A', null, null) // linked(A) + unaffiliated pair
+const mergeB1 = await patient(`PP MergeB ${RUN}`, CLINIC_B, svcB)
+const mergeB2 = await patient(`PP MergeB ${RUN}`, CLINIC_B, svcB)
+const phoneB = `+27 83 ${String(Date.now()).slice(-3)} ${String(Date.now()).slice(-7, -3)}`
+await must(svc.from('profiles').update({ phone: phoneB }).eq('id', pB), 'phone B')
+
 const results = []
 const rows = (r) => (r.error || r.data == null ? 0 : Array.isArray(r.data) ? r.data.length : 1)
 const why = (r) => (r.error ? `${r.error.code ?? ''} ${r.error.message ?? ''}`.trim().slice(0, 70) : `${rows(r)} row(s)`)
@@ -62,6 +88,7 @@ const OPEN = { baseline: 'allowed', proposed: 'denied' }
 const KEEP = { baseline: 'allowed', proposed: 'allowed' }
 const DENY = { baseline: 'denied', proposed: 'denied' }
 const STAGE2 = { baseline: 'allowed', proposed: 'allowed' } // still allowed after Stage 1; Stage 2 design addresses it
+const DENY_IF_PROPOSED = () => ({ baseline: 'allowed', proposed: 'denied' })
 const ident = (c, id) => c.from('profiles').select('id, id_number, date_of_birth, phone').eq('id', id)
 
 await check('admin', 'admin A reads a clinic-B-only patient (ID number)', OPEN, ident(adminA.client, pB))
@@ -76,9 +103,43 @@ await check('reception', 'receptionist reads a linked patient for identity verif
 await check('reception', 'receptionist reads a clinic-B-only patient', DENY, ident(recA.client, pB))
 await check('reception', 'receptionist search_patients finds a never-visited patient by name (walk-in flow)', KEEP, recA.client.rpc('search_patients', { p_query: `PP unlinked ${RUN}` }))
 await check('nurse', 'nurse reads ID number of any clinic-A patient (no care link) — Stage 2', STAGE2, ident(nurseA.client, pA))
-await check('nurse', 'nurse search_patients across all clinics (name/phone) — Stage 2', STAGE2, nurseA.client.rpc('search_patients', { p_query: `PP linked B ${RUN}` }))
+// Item 1: other clinics' staff on the Admin Staff page (the page's own query: no clinic filter).
+await check('staff page', "clinic-B nurse checked in at clinic A as a patient appears on clinic A's Staff page", OPEN, adminA.client.from('profiles').select('*').in('role', ['receptionist', 'nurse', 'admin']).eq('id', nurseB2.id))
+await check('staff page', "clinic-A receptionist reads that clinic-B nurse's profile", OPEN, recA.client.from('profiles').select('id, phone').eq('id', nurseB2.id))
+await check('staff page', 'Staff page still lists own-clinic staff', KEEP, adminA.client.from('profiles').select('*').in('role', ['receptionist', 'nurse', 'admin']).eq('id', recA.id))
+
+// Item 2: duplicates, search, merge.
+const dupPairs = async () => {
+  const r = await adminA.client.rpc('find_duplicate_patients')
+  return r
+}
+const pairOf = (r, a, b) => ({ ...r, data: (r.data ?? []).filter((x) => [x.profile_a, x.profile_b].sort().join() === [a, b].sort().join()) })
+await check('duplicates', 'admin A sees a clinic-B-only duplicate pair (names, phones, visit counts)', OPEN, dupPairs().then((r) => pairOf(r, dupB1, dupB2)))
+await check('duplicates', 'admin A sees a clinic-A + never-visited duplicate pair', KEEP, dupPairs().then((r) => pairOf(r, dupA, dupU)))
+await check('search', 'receptionist A: partial-name search finds a clinic-B-only patient', OPEN, recA.client.rpc('search_patients', { p_query: `PP linked B ${RUN}` }))
+await check('search', 'receptionist A: exact phone finds a returning clinic-B-only patient (identity verification)', KEEP, recA.client.rpc('search_patients', { p_query: phoneB }))
+await check('search', 'receptionist A: partial phone does not find a clinic-B-only patient', DENY_IF_PROPOSED(), recA.client.rpc('search_patients', { p_query: phoneB.slice(0, 8) }))
+await check('search', 'receptionist A: partial-name search finds a clinic-A patient', KEEP, recA.client.rpc('search_patients', { p_query: `PP linked A ${RUN}` }))
+await check('search', 'nurse calls search_patients', OPEN, nurseA.client.rpc('search_patients', { p_query: `PP linked A ${RUN}` }))
+await check('merge', 'admin A merges two clinic-B-only patients', OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: mergeB1, p_merge_id: mergeB2 }))
+await check('merge', 'admin A merges a clinic-B staff profile into a clinic-A patient', OPEN, adminA.client.rpc('merge_patient_profiles', { p_keep_id: pA, p_merge_id: staffNoLogin }))
+await check('merge', 'admin A merges a never-visited duplicate into a clinic-A patient', KEEP, adminA.client.rpc('merge_patient_profiles', { p_keep_id: dupA, p_merge_id: dupU }))
+
+// Remaining cross-clinic paths found in the audit — NOT changed by these proposals (pre-existing; separate fix).
+const svcBForA = svcB
+await check('cross-clinic controls', 'nurse A cannot go on duty on a clinic-B service (refused today)', DENY, nurseA.client.rpc('set_duty', { p_on_duty: true, p_service_id: svcBForA }).then((r) => ({ ...r, data: r.error ? null : [1] })))
+await nurseA.client.rpc('set_duty', { p_on_duty: false })
+const bEntry = (await must(svc.from('queue_entries').insert({ clinic_id: CLINIC_B, service_id: svcB, patient_id: pB, token: `PPE-${RUN}`, token_number: 799, status: 'waiting' }).select('id').single(), 'b entry')).id
+await check('known open (separate fix)', 'nurse A sets emergency priority on a clinic-B entry (no clinic check)', { baseline: 'allowed', proposed: 'allowed' }, nurseA.client.rpc('set_emergency_priority', { p_queue_entry_id: bEntry, p_emergency: true }).then((r) => ({ ...r, data: r.error ? null : [1] })))
+
 await check('patient', 'patient reads own ID number / date of birth', KEEP, patSelf.client.from('profiles').select('id_number, date_of_birth').eq('id', patSelf.id))
 await check('patient', "patient reads another patient's profile", DENY, ident(patSelf.client, pA))
+
+const catalog = psql(readFileSync(join(here, 'assert_catalog_profiles.sql'), 'utf8')).trim().split('\n').filter(Boolean).map((l) => l.split('|'))
+for (const [pass, name, detail] of catalog) {
+  const want = PHASE === 'proposed' ? 'pass' : 'info'
+  results.push({ area: 'catalog', name, want, got: pass === 't' ? 'pass' : 'fail', ok: want === 'info' || pass === 't', detail })
+}
 
 const width = Math.max(...results.map((r) => r.name.length))
 let lastArea = ''

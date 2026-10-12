@@ -120,11 +120,21 @@ checks(check_name, pass, detail) as (
                             or exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0))),
          'pg_proc.proacl'
   union all
-  select 'get_patient_clinical_history: authenticated only, SECURITY DEFINER',
+  select 'get_patient_clinical_history(uuid, timestamptz, uuid, int): authenticated only, SECURITY DEFINER, paginated',
          coalesce((select p.prosecdef and not has_function_privilege('anon', p.oid, 'EXECUTE')
                           and has_function_privilege('authenticated', p.oid, 'EXECUTE')
-                   from pg_proc p where p.oid = to_regprocedure('public.get_patient_clinical_history(uuid)')), false),
+                   from pg_proc p where p.oid = to_regprocedure('public.get_patient_clinical_history(uuid,timestamptz,uuid,integer)')), false)
+         and to_regprocedure('public.get_patient_clinical_history(uuid)') is null,
          'pg_proc'
+  union all
+  select 'legacy start_consultation / call_next_patient not executable by authenticated, anon or PUBLIC',
+         not exists (select 1 from pg_proc p
+                     where p.pronamespace = 'public'::regnamespace and p.proname in ('start_consultation', 'call_next_patient')
+                       and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+                            or has_function_privilege('anon', p.oid, 'EXECUTE'))),
+         coalesce((select string_agg(p.proname, ', ') from pg_proc p
+                   where p.pronamespace = 'public'::regnamespace and p.proname in ('start_consultation', 'call_next_patient')
+                     and has_function_privilege('authenticated', p.oid, 'EXECUTE')), 'none')
   union all
   select 'still exactly one anon-callable public RPC (get_public_queue_display)',
          (select count(*) = 1 and bool_and(p.proname = 'get_public_queue_display') from pg_proc p
