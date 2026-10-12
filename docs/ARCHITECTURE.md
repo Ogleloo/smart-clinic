@@ -91,7 +91,7 @@ No nurse on duty → no estimate shown (never a guess).
 | Reception   | grace.reception@riverside.test     | staff-password-123  |
 | Admin       | admin@riverside.test               | admin-password-789  |
 
-Reset demo state: `SELECT * FROM public.reset_demo_state();`
+Reset demo state: **local, isolated Supabase stack only** (see `docs/proposals/staged_migration_plan.md` §7). Never run `reset_demo_state()` against the shared project — not from the SQL editor, not from a test.
 
 ---
 

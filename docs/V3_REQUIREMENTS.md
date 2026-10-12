@@ -71,6 +71,21 @@ Build approach: same as Patient V3.
 
 ---
 
+## Supervisor requirements (2026-10-12) — designed, not implemented
+
+Full design: `docs/proposals/supervisor_requirements.md`. Nothing is implemented or deployed yet.
+
+1. **Mandatory patient identification.** Every patient — self-registered or a Reception walk-in — must provide a
+   South African ID number or a passport number with its issuing country. Duplicate registration is **prevented**
+   (database-enforced uniqueness of active documents), not merged afterwards. Admin V3 has **no** routine duplicate
+   detection / merge screen; any exceptional merge is restricted and audited.
+2. **Queue priority belongs to Reception (revised BR-10).** Reception of the entry's clinic sets and clears priority
+   on waiting patients from the Reception V3 Queue, with a reason (clinical emergency from a nurse escalation, or
+   administrative with a note); every change is recorded. Nurses lose the routine emergency toggle and gain an
+   "escalate to reception" action. The Nurse toggle and the database function change together, in one release.
+
+---
+
 ## Cross-cutting requirements
 
 - **Input validation:** email format, SA phone (`+27` / `0xx`), name (non-empty), password strength — not yet implemented
