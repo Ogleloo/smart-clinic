@@ -1,4 +1,4 @@
-// Rotates the passwords of the SEVEN demonstration accounts — 1 admin, 4 nurses, 1 receptionist, 1 patient — through the
+// Rotates the passwords of the SIX demonstration accounts — 1 admin, 3 nurses, 1 receptionist, 1 patient — through the
 // official Supabase Auth Admin API, and writes the new passwords to a LOCAL FILE OUTSIDE THE REPOSITORY — never to the
 // terminal, a log, Git or chat.
 //
@@ -9,7 +9,7 @@
 //   Accounts (e-mail addresses come from the environment; every one must be a distinct, existing Auth user):
 //     admin         E2E_ADMIN_EMAIL           expected profile role: admin
 //     nurse         E2E_NURSE_EMAIL           nurse   (the primary nurse test account used by the E2E helpers)
-//     nurse2..4     E2E_NURSE2_EMAIL ... E2E_NURSE4_EMAIL   nurse
+//     nurse2, nurse3  E2E_NURSE2_EMAIL, E2E_NURSE3_EMAIL   nurse
 //     receptionist  E2E_RECEPTIONIST_EMAIL    receptionist
 //     patient       E2E_PATIENT_EMAIL         patient
 //
@@ -20,14 +20,14 @@
 //   VERIFY:   ... --project-ref <ref> --verify --out <same file>   (signs each account in with its new password and out again)
 //
 // Safety interlocks:
-//   * all seven users are matched by exact e-mail BEFORE anything changes; each must be exactly one Auth user whose single
-//     profile has the expected role, and the seven user ids must be distinct. A duplicate configured e-mail, a missing
+//   * all six users are matched by exact e-mail BEFORE anything changes; each must be exactly one Auth user whose single
+//     profile has the expected role, and the six user ids must be distinct. A duplicate configured e-mail, a missing
 //     account, a role mismatch or an ambiguous/missing profile aborts the run with NOTHING changed;
 //   * --project-ref must equal the project in SUPABASE_URL (hosted) — you confirm which project you are about to change;
-//   * seven unique passwords (CSPRNG, 40 characters) are written to the --out file, flushed and re-read BEFORE any account
+//   * six unique passwords (CSPRNG, 40 characters) are written to the --out file, flushed and re-read BEFORE any account
 //     is changed; the file is never overwritten and a path inside a Git work tree is refused;
 //   * only the password is updated: e-mail, role, metadata, profile and application data are untouched;
-//   * rotation order: admin, nurse, nurse2, nurse3, nurse4, receptionist, patient. The first failure stops the run and the
+//   * rotation order: admin, nurse, nurse2, nurse3, receptionist, patient. The first failure stops the run and the
 //     summary names every account as updated / FAILED / not attempted. Accounts not yet updated keep their OLD password;
 //     --resume re-applies the SAME file (idempotent) so the run can be finished without generating new passwords;
 //   * output is limited to labels, e-mail addresses, user ids and status — never a password or a key.
@@ -45,7 +45,6 @@ const ACCOUNTS: Account[] = [
   { label: 'nurse', role: 'nurse', envVar: 'E2E_NURSE_EMAIL' },
   { label: 'nurse2', role: 'nurse', envVar: 'E2E_NURSE2_EMAIL' },
   { label: 'nurse3', role: 'nurse', envVar: 'E2E_NURSE3_EMAIL' },
-  { label: 'nurse4', role: 'nurse', envVar: 'E2E_NURSE4_EMAIL' },
   { label: 'receptionist', role: 'receptionist', envVar: 'E2E_RECEPTIONIST_EMAIL' },
   { label: 'patient', role: 'patient', envVar: 'E2E_PATIENT_EMAIL' },
 ]
@@ -154,7 +153,7 @@ async function main() {
 
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
 
-  // 1. Identify exactly the seven target users — before anything is changed.
+  // 1. Identify exactly the six target users — before anything is changed.
   const all: { id: string; email?: string }[] = []
   for (let page = 1; ; page++) {
     const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 })
