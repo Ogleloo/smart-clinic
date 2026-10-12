@@ -80,7 +80,7 @@ that applies it, with the version Supabase records. **None is approved.**
 
 | Stage | Work | Fixes | Independent? | Prerequisites |
 |---|---|---|---|---|
-| **S0** | **Credential containment (C0)** — verify, rotate, remove from tree (§7). Not a migration. | C0 | needs its own approval; **should not wait for any migration** | reviewer verification (read-only) |
+| **S0** | **Credential containment (C0)** — verify, rotate, remove from tree (§7). Not a migration. **Status 2026-10-12:** rotation authorised by the project owner; tree clean-up done in draft PR #37 (one occurrence remains in an applied migration); **rotation NOT done** — the Claude Code environment had no service-role key and no password manager, so the authorisation's stop conditions applied. Owner runs `scripts/rotate-demo-passwords.ts` per `docs/proposals/credential_rotation_runbook.md` (on PR #37's branch). | C0 | needs its own approval; **should not wait for any migration** | owner action |
 | **S1-T** | **Test isolation (parallel to S1)** — local seed, local-only destructive suites, env-based credentials, CI against a local stack (§7). App/test change only. | prerequisite of M5; supports S0 | independent | S0 decisions |
 | **S1** | M1a `clinical_records_access` | F1–F7, F9–F11, F15 | Yes — DB only | G1–G6 |
 | **S1** | M1b `grant_hygiene_m1b` (**drafted**) | R1 (10 tables) | Yes — DB only | G1–G6 |
@@ -190,8 +190,11 @@ A migration is **not eligible for approval** until all of these exist:
    `select email, role-from-profiles, (encrypted_password = crypt('<password from e2e/helpers.ts>', encrypted_password)) as still_published from auth.users where email in (…)`.
    Also look (read-only) for sign-ins from unrecognised addresses since the repository became public
    (`auth.audit_log_entries`, `auth.sessions`).
-2. *Contain:* set a new random password (≥ 20 characters, CSPRNG) for each account that exists, stored in the team
-   password manager; revoke all sessions; consider disabling the admin account until S1-T replaces its use. The live
+2. *Contain:* set a new random password (≥ 24 characters, CSPRNG) for each account that exists, stored in the team
+   password manager. **Sessions (local GoTrue v2.197 experiment, runbook §3):** the admin password change itself ends the
+   user's Auth sessions; already-issued access tokens keep working for direct REST calls until the project's JWT expiry
+   (default 1 h); a ban adds nothing; there is no admin endpoint to end sessions by user id. Production's Auth version and
+   JWT expiry are unverified. Consider disabling the admin account until S1-T replaces its use. The live
    suites will fail — accepted, they are moved off production by S1-T.
 3. *Remove from the tree:* credentials come from environment variables (`E2E_*`); local seed accounts get random
    passwords written to a gitignored file; the `docs/ARCHITECTURE.md` table, `scripts/verify.ts`, `scripts/check-4b.ts`
