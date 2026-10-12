@@ -1,107 +1,248 @@
-// LOCAL STACK ONLY (refuses any URL that is not http://localhost|127.0.0.1:<port>). Never run against the shared project:
-// it creates users, a second clinic and clinical rows.
-// Usage: SB_URL=... SB_ANON=... SB_SERVICE=... node supabase/tests/clinical_records_access/probe.mjs
-// Run before and after applying docs/proposals/clinical_records_access.sql to a LOCAL stack. "gap" probes return rows or
-// succeed before and are denied after; control probes are denied both times; POSITIVE CONTROLS succeed both times.
-// CLINIC_A is the demo clinic id of the scratch local seed; adjust if your local seed differs.
+// Clinical-records access assertions. LOCAL SUPABASE STACK ONLY.
+//
+// Refuses any API URL that is not http://localhost|127.0.0.1:<port>, and any PSQL_CMD that does not target a
+// local `supabase_db_*` container or localhost. It creates users, a second clinic, queue entries,
+// consultations, notes and vitals, so it must never point at the shared project.
+//
+//   PHASE=baseline  -> asserts today's behaviour (the committed migrations): the gaps are expected to be OPEN.
+//   PHASE=proposed  -> asserts the behaviour after docs/proposals/clinical_records_access.sql: gaps CLOSED and the
+//                      legitimate flow still working.
+//
+//   SB_URL=... SB_ANON=... SB_SERVICE=... PHASE=proposed \
+//   PSQL_CMD="docker exec -i supabase_db_<project> psql -U postgres -At -v ON_ERROR_STOP=1" \
+//   node supabase/tests/clinical_records_access/probe.mjs
+//
+// Exit code 0 only if every assertion for the phase holds. CLINIC_A is the demo clinic id used by the local
+// scratch seed; set PROBE_CLINIC_A to override.
 import { createRequire } from 'node:module'
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+
 const require = createRequire(`${process.cwd()}/`)
 const { createClient } = require('@supabase/supabase-js')
-const { SB_URL, SB_ANON, SB_SERVICE } = process.env
-if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(SB_URL ?? '')) throw new Error('local only')
-const opts = { auth: { persistSession: false, autoRefreshToken: false } }
-const admin = createClient(SB_URL, SB_SERVICE, opts)
-const RUN = Date.now().toString(36)
-const CLINIC_A = '11111111-1111-1111-1111-111111111111'
-const CLINIC_B = crypto.randomUUID()
-const must = async (p, w) => { const r = await p; if (r.error) throw new Error(`${w}: ${r.error.message}`); return r.data }
-const letters = () => Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
+const { SB_URL, SB_ANON, SB_SERVICE, PHASE, PSQL_CMD } = process.env
+const here = dirname(fileURLToPath(import.meta.url))
 
-await must(admin.from('clinics').insert({ id: CLINIC_B, name: `Probe B ${RUN}` }), 'clinic B')
-const svcA = (await must(admin.from('services').insert({ clinic_id: CLINIC_A, name: `Probe A ${RUN}`, token_prefix: letters() }).select('id').single(), 'svcA')).id
-const svcB = (await must(admin.from('services').insert({ clinic_id: CLINIC_B, name: `Probe B ${RUN}`, token_prefix: letters() }).select('id').single(), 'svcB')).id
+if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(SB_URL ?? '')) throw new Error(`Refusing: SB_URL must be a local stack, got ${SB_URL}`)
+if (!['baseline', 'proposed'].includes(PHASE)) throw new Error('PHASE must be baseline or proposed')
+if (!PSQL_CMD || !/(supabase_db_[a-z0-9_-]+\s|@(127\.0\.0\.1|localhost)[:/])/.test(PSQL_CMD)) throw new Error('Refusing: PSQL_CMD must target a local supabase_db_* container or localhost')
+
+const opts = { auth: { persistSession: false, autoRefreshToken: false } }
+const svc = createClient(SB_URL, SB_SERVICE, opts)
+const RUN = Date.now().toString(36)
+const CLINIC_A = process.env.PROBE_CLINIC_A ?? '11111111-1111-1111-1111-111111111111'
+const CLINIC_B = crypto.randomUUID()
+const must = async (p, what) => { const r = await p; if (r.error) throw new Error(`setup ${what}: ${r.error.message}`); return r.data }
+const prefix = () => Array.from({ length: 4 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('')
+const psql = (sql) => execSync(PSQL_CMD, { input: sql, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] })
+
+// ---------------------------------------------------------------- fixtures (service role, local only)
+await must(svc.from('clinics').insert({ id: CLINIC_B, name: `Probe B ${RUN}` }), 'clinic B')
+const service = async (clinic, name) => (await must(svc.from('services').insert({ clinic_id: clinic, name, token_prefix: prefix() }).select('id').single(), name)).id
+const svcA = await service(CLINIC_A, `Probe A ${RUN}`)
+const svcA2 = await service(CLINIC_A, `Probe A2 ${RUN}`)
+const svcB = await service(CLINIC_B, `Probe B ${RUN}`)
 
 async function user(tag, role, clinic) {
   const email = `${tag}.${RUN}@probe.test`
-  const u = (await must(admin.auth.admin.createUser({ email, password: 'probe-password-1', email_confirm: true }), 'user')).user
-  await must(admin.from('profiles').update({ role, clinic_id: clinic }).eq('auth_user_id', u.id), 'role')
-  const prof = await must(admin.from('profiles').select('id').eq('auth_user_id', u.id).single(), 'prof')
+  const u = (await must(svc.auth.admin.createUser({ email, password: 'probe-password-1', email_confirm: true }), `user ${tag}`)).user
+  await must(svc.from('profiles').update({ role, clinic_id: clinic, full_name: `Probe ${tag}` }).eq('auth_user_id', u.id), `role ${tag}`)
+  const prof = await must(svc.from('profiles').select('id').eq('auth_user_id', u.id).single(), `profile ${tag}`)
   const client = createClient(SB_URL, SB_ANON, opts)
-  await must(client.auth.signInWithPassword({ email, password: 'probe-password-1' }), 'signin')
-  return { client, id: prof.id }
+  await must(client.auth.signInWithPassword({ email, password: 'probe-password-1' }), `sign in ${tag}`)
+  return { client, id: prof.id, tag }
 }
-const nurseA1 = await user('na1', 'nurse', CLINIC_A)
-const nurseA2 = await user('na2', 'nurse', CLINIC_A)
-const recA = await user('ra', 'receptionist', CLINIC_A)
-const adminA = await user('aa', 'admin', CLINIC_A)
-const nurseB1 = await user('nb1', 'nurse', CLINIC_B)
-const patientSelf = await user('pt', 'patient', null)
+const nurseT = await user('treating', 'nurse', CLINIC_A) // will call patient X through the real next_patient()
+const nurseU = await user('unrelated', 'nurse', CLINIC_A) // same clinic, no link to X
+const nurseP = await user('previous', 'nurse', CLINIC_A) // authored X's earlier visit
+const nurseI = await user('inactive', 'nurse', CLINIC_A) // treating W, then deactivated
+const nurseB = await user('otherclinic', 'nurse', CLINIC_B)
+const recA = await user('reception', 'receptionist', CLINIC_A)
+const adminA = await user('admin', 'admin', CLINIC_A)
+const patX = await user('patientx', 'patient', null) // a real login, to test the patient's own access
 const anon = createClient(SB_URL, SB_ANON, opts)
 
-// Patients X (clinic A) and Y (clinic B), with a visit each.
-let seqN = 0
-async function patientWithVisit(name, clinic, svc, nurse, withClinical) {
-  const seq = ++seqN
-  const p = await must(admin.from('profiles').insert({ full_name: name, role: 'patient', id_number: '9001015800085', date_of_birth: '1990-01-01', phone: '+27 82 000 0000' }).select('id').single(), 'patient')
-  const q = await must(admin.from('queue_entries').insert({ clinic_id: clinic, service_id: svc, patient_id: p.id, token: `P${seq}-${RUN}`, token_number: seq, status: 'done' }).select('id').single(), 'queue')
-  const c = await must(admin.from('consultations').insert({ queue_entry_id: q.id, nurse_id: nurse.id, service_id: svc, started_at: new Date(Date.now() - 3600_000).toISOString(), ended_at: new Date(Date.now() - 3000_000).toISOString() }).select('id').single(), 'cons')
-  if (withClinical) {
-    await must(admin.from('consultation_notes').insert({ consultation_id: c.id, nurse_id: nurse.id, diagnosis: `SECRET-DX-${name}`, treatment: 'SECRET-TX' }), 'note')
-    await must(admin.from('patient_vitals').insert({ consultation_id: c.id, patient_id: p.id, nurse_id: nurse.id, pulse: 77 }), 'vitals')
-  }
-  return { patient: p.id, queue: q.id, consultation: c.id }
+const newPatient = async (name) => (await must(svc.from('profiles').insert({ full_name: name, role: 'patient' }).select('id').single(), name)).id
+let tokenN = 0
+async function entry(patient, clinic, serviceId, status) {
+  const n = ++tokenN
+  return (await must(svc.from('queue_entries').insert({ clinic_id: clinic, service_id: serviceId, patient_id: patient, token: `Q${n}-${RUN}`, token_number: 900 + n, status }).select('id').single(), 'queue entry')).id
 }
-const X = await patientWithVisit(`Probe X ${RUN}`, CLINIC_A, svcA, nurseA1, true)
-const Y = await patientWithVisit(`Probe Y ${RUN}`, CLINIC_B, svcB, nurseB1, true)
-// A second, clinical-free consultation by nurse A1 on a different patient (a target for forged inserts).
-const Z = await patientWithVisit(`Probe Z ${RUN}`, CLINIC_A, svcA, nurseA1, false)
-const W = await patientWithVisit(`Probe W ${RUN}`, CLINIC_B, svcB, nurseB1, false)
-const V = await patientWithVisit(`Probe V ${RUN}`, CLINIC_A, svcA, nurseA1, false)
-await admin.from('profiles').update({ clinic_id: CLINIC_B }).eq('id', Y.patient)
+async function visit(patient, clinic, serviceId, nurse, { open = false, clinical = false, hoursAgo = 48 } = {}) {
+  const q = await entry(patient, clinic, serviceId, open ? 'in_progress' : 'done')
+  const started = new Date(Date.now() - hoursAgo * 3600_000)
+  const c = (await must(svc.from('consultations').insert({
+    queue_entry_id: q, nurse_id: nurse.id, service_id: serviceId, started_at: started.toISOString(),
+    ended_at: open ? null : new Date(started.getTime() + 600_000).toISOString(),
+  }).select('id').single(), 'consultation')).id
+  let note = null; let vitals = null
+  if (clinical) {
+    note = (await must(svc.from('consultation_notes').insert({ consultation_id: c, nurse_id: nurse.id, diagnosis: `DX-${RUN}` }).select('id').single(), 'note')).id
+    vitals = (await must(svc.from('patient_vitals').insert({ consultation_id: c, patient_id: patient, nurse_id: nurse.id, pulse: 72 }).select('id').single(), 'vitals')).id
+  }
+  return { queue: q, consultation: c, note, vitals }
+}
 
-const rows = []
-const probe = (label, expectGap, outcome) => { rows.push({ label, outcome, expectGap }); console.log(`${outcome.padEnd(34)} ${label}`) }
-const count = (r) => (r.error ? `ERROR ${r.error.code ?? ''}`.trim() : `${(r.data ?? []).length} row(s)`)
+const X = patX.id
+const Y = await newPatient(`Probe Y ${RUN}`) // seen before at clinic A, nobody treating them now
+const W = await newPatient(`Probe W ${RUN}`) // being treated by the nurse who is then deactivated
+const Z = await newPatient(`Probe Z ${RUN}`) // waiting, no consultation (target for a forged consultation)
+const R = await newPatient(`Probe R ${RUN}`) // nurse U's own current patient (for the re-target attempt)
 
-console.log('\n=== READS (what each role can see) ===')
-probe('nurse A2 (not the author, no visit with X) reads X\'s consultation note', 'gap', count(await nurseA2.client.from('consultation_notes').select('id, diagnosis, treatment').eq('consultation_id', X.consultation)))
-probe('nurse A2 reads ALL clinic notes at once (diagnosis column)', 'gap', count(await nurseA2.client.from('consultation_notes').select('id, diagnosis')))
-probe('nurse A2 reads X\'s vitals by patient_id (across visits)', 'gap', count(await nurseA2.client.from('patient_vitals').select('id, pulse').eq('patient_id', X.patient)))
-probe('RECEPTIONIST A reads clinical notes (diagnosis, treatment)', 'gap', count(await recA.client.from('consultation_notes').select('diagnosis, treatment')))
-probe('RECEPTIONIST A reads vitals', 'gap', count(await recA.client.from('patient_vitals').select('pulse')))
-probe('ADMIN A reads clinical notes', 'gap', count(await adminA.client.from('consultation_notes').select('diagnosis')))
-probe('nurse A2 lists other nurses\' consultations (visit history)', 'ok', count(await nurseA2.client.from('consultations').select('id').eq('queue_entry_id', X.queue)))
-probe('nurse of clinic B reads clinic A notes', 'ok', count(await nurseB1.client.from('consultation_notes').select('id').eq('consultation_id', X.consultation)))
-probe('patient reads any note', 'ok', count(await patientSelf.client.from('consultation_notes').select('id')))
-probe('patient reads any vitals', 'ok', count(await patientSelf.client.from('patient_vitals').select('id')))
-probe('anon reads notes', 'ok', count(await anon.from('consultation_notes').select('id')))
-probe('anon reads vitals', 'ok', count(await anon.from('patient_vitals').select('id')))
-const idr = await nurseA2.client.from('profiles').select('full_name, id_number, date_of_birth, phone').eq('id', X.patient)
-probe('nurse A2 reads X\'s ID number / DOB / phone (no care link)', 'gap', idr.error ? `ERROR ${idr.error.code}` : `${(idr.data ?? []).length} row(s), id_number=${idr.data?.[0]?.id_number ?? 'null'}`)
-const adm = await adminA.client.from('profiles').select('id, id_number').eq('id', Y.patient)
-probe('ADMIN of clinic A reads a clinic B patient\'s profile (ID number)', 'gap', adm.error ? `ERROR ${adm.error.code}` : `${(adm.data ?? []).length} row(s), id_number=${adm.data?.[0]?.id_number ?? 'null'}`)
+const xPrevA = await visit(X, CLINIC_A, svcA, nurseP, { clinical: true, hoursAgo: 72 }) // previous visit, clinic A
+const xPrevB = await visit(X, CLINIC_B, svcB, nurseB, { clinical: true, hoursAgo: 96 }) // previous visit, clinic B
+const yPrev = await visit(Y, CLINIC_A, svcA, nurseP, { clinical: true, hoursAgo: 50 })
+const wPrev = await visit(W, CLINIC_A, svcA, nurseP, { clinical: true, hoursAgo: 60 })
+await visit(W, CLINIC_A, svcA2, nurseI, { open: true })
+const tEnded = await visit(Y, CLINIC_A, svcA, nurseT, { hoursAgo: 30 }) // nurse T's own ENDED visit, no notes
+const uEnded = await visit(Z, CLINIC_A, svcA2, nurseU, { hoursAgo: 20 }) // nurse U's own ENDED visit
+const uOpen = await visit(R, CLINIC_A, svcA2, nurseU, { open: true })
+const bFresh = await visit(Z, CLINIC_B, svcB, nurseB, { open: true }) // clinic B consultation, no note yet
+const zWaiting = await entry(Z, CLINIC_A, svcA2, 'waiting')
 
-console.log('\n=== WRITES (can a nurse forge clinical history?) ===')
-// Z.consultation belongs to nurse A1 and patient Z; it has no note/vitals yet.
-const forgedNote = await nurseA2.client.from('consultation_notes').insert({ consultation_id: Z.consultation, nurse_id: nurseA2.id, diagnosis: 'FORGED by another nurse' }).select('id')
-probe('nurse A2 inserts a note on nurse A1\'s consultation (not theirs)', 'gap', forgedNote.error ? `ERROR ${forgedNote.error.code}` : `${forgedNote.data.length} row inserted`)
-const forgedX = await nurseA1.client.from('consultation_notes').insert({ consultation_id: W.consultation, nurse_id: nurseA1.id, diagnosis: 'FORGED into another clinic' })
-probe('nurse A1 (clinic A) inserts a note on a CLINIC B consultation', 'gap', forgedX.error ? `ERROR ${forgedX.error.code}` : 'row inserted')
-const forgedV = await nurseA1.client.from('patient_vitals').insert({ consultation_id: Z.consultation, patient_id: X.patient, nurse_id: nurseA1.id, pulse: 200 })
-probe('nurse A1 inserts vitals for patient X on patient Z\'s consultation', 'gap', forgedV.error ? `ERROR ${forgedV.error.code}` : 'row inserted (patient_id != consultation\'s patient)')
-const notes = await must(admin.from('consultation_notes').select('id').eq('consultation_id', X.consultation), 'n')
-const moved = await nurseA1.client.from('consultation_notes').update({ consultation_id: V.consultation }).eq('id', notes[0].id).select('id')
-probe('nurse A1 re-points their own note to a different consultation', 'gap', moved.error ? `ERROR ${moved.error.code}` : `${moved.data.length} row updated`)
-const del = await nurseA1.client.from('consultation_notes').delete().eq('id', notes[0].id).select('id')
-probe('nurse A1 deletes a note (no DELETE policy)', 'ok', del.error ? `ERROR ${del.error.code}` : `${del.data.length} row(s) deleted`)
+// X's current visit, through the real next_patient(): T is on duty on svcA and X is the only waiting entry.
+await entry(X, CLINIC_A, svcA, 'waiting')
+await must(svc.from('profiles').update({ is_on_duty: true, current_service_id: svcA }).eq('id', nurseT.id), 'duty')
+const called = await nurseT.client.rpc('next_patient', { p_action_id: crypto.randomUUID() })
+if (called.error) throw new Error(`setup next_patient: ${called.error.message}`)
+const xNow = await must(svc.from('consultations').select('id, queue_entry:queue_entries!consultations_queue_entry_id_fkey(patient_id, status)').eq('nurse_id', nurseT.id).is('ended_at', null).single(), 'current consultation')
+if (xNow.queue_entry.patient_id !== X || xNow.queue_entry.status !== 'in_progress') throw new Error('setup: next_patient did not call X')
+await must(svc.from('profiles').update({ is_active: false }).eq('id', nurseI.id), 'deactivate')
 
-console.log('\n=== POSITIVE CONTROLS (the legitimate flow must still work) ===')
-const vc = await patientWithVisit(`Probe OK ${RUN}`, CLINIC_A, svcA, nurseA1, false)
-const okN = await nurseA1.client.from('consultation_notes').insert({ consultation_id: vc.consultation, nurse_id: nurseA1.id, diagnosis: 'own note' }).select('id')
-probe('author nurse inserts a note on their own consultation', 'ok', okN.error ? `ERROR ${okN.error.code}` : `${okN.data.length} row inserted`)
-const okV = await nurseA1.client.from('patient_vitals').insert({ consultation_id: vc.consultation, patient_id: vc.patient, nurse_id: nurseA1.id, pulse: 70 }).select('id')
-probe('author nurse inserts vitals for the consultation\'s patient', 'ok', okV.error ? `ERROR ${okV.error.code}` : `${okV.data.length} row inserted`)
-const okU = await nurseA1.client.from('consultation_notes').update({ treatment: 'edited' }).eq('id', okN.data?.[0]?.id).select('id')
-probe('author nurse edits their own note', 'ok', okU.error ? `ERROR ${okU.error.code}` : `${okU.data.length} row updated`)
-probe('author nurse reads it back', 'ok', count(await nurseA1.client.from('consultation_notes').select('id').eq('consultation_id', vc.consultation)))
-console.log(`\nSummary: ${rows.filter((r) => r.expectGap === 'gap').length} gap probes, ${rows.filter((r) => r.expectGap === "ok").length} control probes (read the outcomes above).`)
+// ---------------------------------------------------------------- assertions
+const results = []
+const rowsOf = (r) => (r.error || r.data == null ? 0 : Array.isArray(r.data) ? r.data.length : 1)
+const readOutcome = (r) => (rowsOf(r) > 0 ? 'allowed' : 'denied')
+const writeOutcome = (r) => (!r.error && rowsOf(r) > 0 ? 'allowed' : 'denied')
+const why = (r) => (r.error ? `${r.error.code ?? ''} ${r.error.message ?? ''}`.trim().slice(0, 70) : `${rowsOf(r)} row(s)`)
+
+/** expect: { baseline, proposed } each 'allowed' | 'denied' | 'skip' */
+async function check(area, name, expect, run) {
+  const want = expect[PHASE]
+  if (want === 'skip') { results.push({ area, name, want, got: 'skip', ok: true, detail: 'not applicable in this phase' }); return }
+  const { outcome, detail } = await run()
+  results.push({ area, name, want, got: outcome, ok: outcome === want, detail })
+}
+const read = (q) => async () => { const r = await q; return { outcome: readOutcome(r), detail: why(r) } }
+const write = (q) => async () => { const r = await q; return { outcome: writeOutcome(r), detail: why(r) } }
+const OPEN = { baseline: 'allowed', proposed: 'denied' } // a gap today, closed by the proposal
+const KEEP = { baseline: 'allowed', proposed: 'allowed' } // legitimate, must keep working
+const DENY = { baseline: 'denied', proposed: 'denied' } // already denied, must stay denied
+const NEW = { baseline: 'skip', proposed: 'allowed' } // only exists after the proposal
+
+const notes = (c) => c.from('consultation_notes').select('id')
+const vit = (c) => c.from('patient_vitals').select('id')
+
+// Treating nurse
+await check('treating nurse', "reads current patient X's previous clinic-A note (other author)", KEEP, read(notes(nurseT.client).eq('id', xPrevA.note)))
+await check('treating nurse', "reads current patient X's previous clinic-A vitals", KEEP, read(vit(nurseT.client).eq('id', xPrevA.vitals)))
+await check('treating nurse', "reads X's clinic-B note (cross-clinic history)", DENY, read(notes(nurseT.client).eq('id', xPrevB.note)))
+await check('treating nurse', "reads Y's note (not currently treating Y)", OPEN, read(notes(nurseT.client).eq('id', yPrev.note)))
+await check('treating nurse', "reads X's previous consultation row directly (policy not broadened)", DENY, read(nurseT.client.from('consultations').select('id').eq('id', xPrevA.consultation)))
+await check('treating nurse', 'get_patient_clinical_history(X) returns the clinic-A visits', NEW, async () => {
+  const r = await nurseT.client.rpc('get_patient_clinical_history', { p_patient_id: X })
+  const ids = (r.data ?? []).map((v) => v.consultation_id)
+  const ok = !r.error && ids.includes(xPrevA.consultation) && ids.includes(xNow.id) && !ids.includes(xPrevB.consultation)
+  return { outcome: ok ? 'allowed' : 'denied', detail: r.error ? why(r) : `${ids.length} visit(s); prevA=${ids.includes(xPrevA.consultation)} current=${ids.includes(xNow.id)} clinicB=${ids.includes(xPrevB.consultation)}` }
+})
+await check('treating nurse', 'get_patient_clinical_history(Y) for a patient not in care', DENY, write(nurseT.client.rpc('get_patient_clinical_history', { p_patient_id: Y })))
+
+// Unrelated / other nurses
+await check('unrelated nurse', "same-clinic nurse with no link reads X's previous note", OPEN, read(notes(nurseU.client).eq('id', xPrevA.note)))
+await check('unrelated nurse', "same-clinic nurse with no link reads X's vitals by patient_id", OPEN, read(vit(nurseU.client).eq('patient_id', X)))
+await check('unrelated nurse', 'same-clinic nurse lists every note in the clinic', OPEN, read(notes(nurseU.client)))
+await check('unrelated nurse', 'get_patient_clinical_history(X) by an unrelated nurse', DENY, write(nurseU.client.rpc('get_patient_clinical_history', { p_patient_id: X })))
+await check('author nurse', 'author reads the note they wrote (patient no longer in their care)', KEEP, read(notes(nurseP.client).eq('id', xPrevA.note)))
+await check('other clinic', "clinic-B nurse reads X's clinic-A note", DENY, read(notes(nurseB.client).eq('id', xPrevA.note)))
+await check('other clinic', 'clinic-B nurse reads the clinic-B note they authored', KEEP, read(notes(nurseB.client).eq('id', xPrevB.note)))
+await check('inactive nurse', "deactivated nurse still holding W's open consultation reads W's history", OPEN, read(notes(nurseI.client).eq('id', wPrev.note)))
+
+// Non-nurse roles
+await check('receptionist', 'receptionist reads clinical notes', OPEN, read(notes(recA.client)))
+await check('receptionist', 'receptionist reads vitals', OPEN, read(vit(recA.client)))
+await check('admin', 'admin reads clinical notes', OPEN, read(notes(adminA.client)))
+await check('admin', 'admin reads vitals', OPEN, read(vit(adminA.client)))
+await check('patient', 'patient X reads their own notes (POPIA review pending)', DENY, read(notes(patX.client)))
+await check('patient', 'patient X reads their own vitals', DENY, read(vit(patX.client)))
+await check('anon', 'anon reads notes', DENY, read(notes(anon)))
+await check('anon', 'anon reads vitals', DENY, read(vit(anon)))
+await check('anon', 'anon inserts a note', DENY, write(anon.from('consultation_notes').insert({ consultation_id: xNow.id, nurse_id: nurseT.id, diagnosis: 'anon' }).select('id')))
+await check('receptionist', 'receptionist inserts a note', DENY, write(recA.client.from('consultation_notes').insert({ consultation_id: xNow.id, nurse_id: recA.id, diagnosis: 'rec' }).select('id')))
+
+// Helper exposure
+await check('helpers', 'private.nurse_treats_patient is not callable as an RPC', DENY, write(nurseT.client.rpc('nurse_treats_patient', { p_patient_id: X })))
+await check('helpers', 'private schema not reachable through PostgREST', DENY, write(nurseT.client.schema('private').rpc('nurse_treats_patient', { p_patient_id: X })))
+
+// Forgery (must be denied before the legitimate write so the unique(consultation_id) slot is still free)
+await check('forgery', "unrelated nurse writes a note on the treating nurse's consultation", OPEN, write(nurseU.client.from('consultation_notes').insert({ consultation_id: xNow.id, nurse_id: nurseU.id, diagnosis: 'forged' }).select('id')))
+if (PHASE === 'baseline') await svc.from('consultation_notes').delete().eq('consultation_id', xNow.id) // free the slot again
+await check('forgery', 'clinic-A nurse writes a note on a clinic-B consultation', OPEN, write(nurseT.client.from('consultation_notes').insert({ consultation_id: bFresh.consultation, nurse_id: nurseT.id, diagnosis: 'forged' }).select('id')))
+await check('forgery', "treating nurse records vitals for Y on X's consultation", OPEN, write(nurseT.client.from('patient_vitals').insert({ consultation_id: xNow.id, patient_id: Y, nurse_id: nurseT.id, pulse: 199 }).select('id')))
+if (PHASE === 'baseline') await svc.from('patient_vitals').delete().eq('consultation_id', xNow.id)
+await check('forgery', 'nurse writes a note on their own ENDED consultation (D3: addendum workflow later)', OPEN, write(nurseT.client.from('consultation_notes').insert({ consultation_id: tEnded.consultation, nurse_id: nurseT.id, diagnosis: 'late' }).select('id')))
+if (PHASE === 'baseline') await svc.from('consultation_notes').delete().eq('consultation_id', tEnded.consultation)
+await check('forgery', 'note authored as another nurse (nurse_id spoofed)', DENY, write(nurseU.client.from('consultation_notes').insert({ consultation_id: uOpen.consultation, nurse_id: nurseT.id, diagnosis: 'spoof' }).select('id')))
+
+// Treatment-link spoofing
+await check('link spoofing', "nurse inserts a consultation on Z's waiting entry (self-assigned care)", OPEN, write(nurseU.client.from('consultations').insert({ queue_entry_id: zWaiting, nurse_id: nurseU.id, service_id: svcA2 }).select('id')))
+await check('link spoofing', 'nurse re-opens their own ended consultation', OPEN, write(nurseU.client.from('consultations').update({ ended_at: null }).eq('id', uEnded.consultation).select('id')))
+await check('link spoofing', 'nurse changes patient_id on the queue entry they are serving to X', OPEN, write(nurseU.client.from('queue_entries').update({ patient_id: X }).eq('id', uOpen.queue).select('id')))
+await check('link spoofing', "after those attempts, unrelated nurse reads X's previous note", OPEN, read(notes(nurseU.client).eq('id', xPrevA.note)))
+
+// Legitimate author flow
+let ownNote = null
+await check('legitimate', 'treating nurse writes a note on their own active consultation', KEEP, async () => {
+  const r = await nurseT.client.from('consultation_notes').insert({ consultation_id: xNow.id, nurse_id: nurseT.id, chief_complaint: 'cough' }).select('id')
+  ownNote = r.data?.[0]?.id ?? null
+  return { outcome: writeOutcome(r), detail: why(r) }
+})
+await check('legitimate', "treating nurse records vitals for the consultation's patient", KEEP, write(nurseT.client.from('patient_vitals').insert({ consultation_id: xNow.id, patient_id: X, nurse_id: nurseT.id, pulse: 80 }).select('id')))
+await check('legitimate', 'treating nurse edits their note while the consultation is active', KEEP, write(nurseT.client.from('consultation_notes').update({ treatment: 'rest' }).eq('id', ownNote).select('id')))
+await check('legitimate', 'treating nurse reads their note back', KEEP, read(notes(nurseT.client).eq('id', ownNote)))
+await check('forgery', 'treating nurse moves their note to another encounter', OPEN, write(nurseT.client.from('consultation_notes').update({ consultation_id: tEnded.consultation }).eq('id', ownNote).select('id')))
+if (PHASE === 'baseline') await svc.from('consultation_notes').update({ consultation_id: xNow.id }).eq('id', ownNote)
+await check('forgery', 'nurse deletes a note', DENY, write(nurseT.client.from('consultation_notes').delete().eq('id', ownNote).select('id')))
+
+// After the consultation ends, the "previous records" link ends; authorship remains.
+await must(svc.from('consultations').update({ ended_at: new Date().toISOString() }).eq('id', xNow.id), 'end')
+await must(svc.from('queue_entries').update({ status: 'done' }).eq('id', (await must(svc.from('consultations').select('queue_entry_id').eq('id', xNow.id).single(), 'q')).queue_entry_id), 'done')
+await check('after completion', "nurse T reads X's previous note once X is no longer in their care", OPEN, read(notes(nurseT.client).eq('id', xPrevA.note)))
+await check('after completion', 'nurse T still reads the note they wrote', KEEP, read(notes(nurseT.client).eq('id', ownNote)))
+await check('after completion', 'nurse T edits their note after completion (silent change)', OPEN, write(nurseT.client.from('consultation_notes').update({ treatment: 'changed later' }).eq('id', ownNote).select('id')))
+
+// Privileges that RLS does not govern: TRUNCATE as authenticated, inside a transaction that is rolled back.
+// (queue_entries is covered by the catalog assertions: a CASCADE truncate of it also needs privileges on
+// unrelated referencing tables, which would make the result about those tables rather than this one.)
+for (const [role, table] of [['authenticated', 'consultation_notes'], ['authenticated', 'patient_vitals'], ['authenticated', 'consultations'], ['anon', 'consultation_notes']]) {
+  await check('grants', `${role} can TRUNCATE ${table} (inside a rolled-back transaction)`, OPEN, async () => {
+    const sql = `begin;\nset local role ${role};\ntruncate public.${table} cascade;\nrollback;\n`
+    try {
+      psql(sql)
+      return { outcome: 'allowed', detail: 'TRUNCATE succeeded (rolled back)' }
+    } catch (e) {
+      const msg = String(e.stderr ?? e.message)
+      if (/permission denied/i.test(msg)) return { outcome: 'denied', detail: msg.trim().split('\n')[0].slice(0, 70) }
+      throw e
+    }
+  })
+}
+
+// ---------------------------------------------------------------- catalog assertions (read-only SQL)
+const catalog = psql(readFileSync(join(here, 'assert_catalog.sql'), 'utf8')).trim().split('\n').filter(Boolean).map((l) => l.split('|'))
+for (const [pass, name, detail] of catalog) {
+  const want = PHASE === 'proposed' ? 'pass' : 'any'
+  results.push({ area: 'catalog', name, want, got: pass === 't' ? 'pass' : 'fail', ok: want === 'any' || pass === 't', detail })
+}
+
+// ---------------------------------------------------------------- report
+const width = Math.max(...results.map((r) => r.name.length))
+let lastArea = ''
+for (const r of results) {
+  if (r.area !== lastArea) { console.log(`\n[${r.area}]`); lastArea = r.area }
+  console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name.padEnd(width)}  expected ${r.want.padEnd(7)} got ${r.got.padEnd(7)} ${r.detail ?? ''}`)
+}
+const failed = results.filter((r) => !r.ok)
+console.log(`\nPHASE=${PHASE}: ${results.length - failed.length}/${results.length} assertions hold${failed.length ? `, ${failed.length} FAILED` : ''}.`)
+process.exit(failed.length ? 1 : 0)

@@ -4,14 +4,15 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 3: stopped at the security gate
+## Latest checkpoint — Nurse V3 Phase 3: security proposal revision 2 (awaiting review)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` (from `main` at `35c7ae9`, which contains Phase 2 / PR #31 squashed). **No feature code written.** Phase 3 (Patient Details Figma `161:339`, Patient History `162:437`) is blocked on review of `docs/proposals/clinical_records_access.md`.
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-patient-details-history` · **Draft PR #36** (do not merge). **No feature code; nothing applied to the shared project.** Patient Details (`161:339`) / Patient History (`162:437`) remain on hold.
 
-- **Gate result: access-control gap.** On the committed migrations (replayed on a local stack): receptionists/admins read all notes/vitals; any clinic nurse reads all notes/vitals; a nurse can forge notes/vitals onto another nurse's, another clinic's or another patient's consultation and re-point records; `anon`/`authenticated` hold TRUNCATE/DELETE etc. on both tables; admins read every clinic's profiles (ID numbers). Details, evidence and decisions D1–D4 are in the `.md`.
-- **Proposal (not applied):** `docs/proposals/clinical_records_access.sql`; verified only on the disposable local database, including positive controls for the author-nurse flow. Probe: `supabase/tests/clinical_records_access/probe.mjs`.
-- **Not verified:** production's live policies/grants (no Supabase connector this session); the Figma frames (no Figma connector — not inspected, so no screen was designed from them).
-- **Next:** reviewer answers D1–D4 → confirm production read-only → approve and apply the migration (commit it in the same change) → then build Patient Details/History (fields available: `full_name`, `phone`, `date_of_birth`, `id_number`; gender, allergies, alerts, reason for visit, prescriptions, documents are not in the database — show "Not recorded"). Re-inspect the Figma frames with the connector.
+- Reviewer direction (D1–D4) received: treatment-linked clinical access; least-privilege identifiers; writes only on an active consultation (addenda later); production read-only check + revoke TRUNCATE before deploy.
+- **Revision 2:** `docs/proposals/clinical_records_access.md` (+ `.sql`) and a separate `docs/proposals/profiles_identifier_access.sql` (Stage 1: drop the global admin profile policies; Stage 2 designed, needs app changes). New findings F10 (nurses can create/re-open consultations directly → could forge "treating") and F11 (any staff can update any queue_entries column, e.g. unaudited emergency priority). The clinical proposal closes both by revoking direct writes on `consultations`/`queue_entries`.
+- **Assertions** in `supabase/tests/clinical_records_access/`: `probe.mjs` 67 (baseline and proposed both hold), `probe_profiles.mjs` 15/15 both phases, `regression_workflows.mjs` 24/24, local Playwright specs 66/66 with both proposals applied, `assert_catalog.sql` (read-only; the D4 production check).
+- **Not verified:** production policies/grants; `reset_demo_state()` (fails on the local seed for an unrelated reason).
+- **Next:** reviewer decisions (D1 "relevant" scope, Stage 1 behaviour changes, F10/F11 revokes) → run `assert_catalog.sql` read-only on production → separately approved migration(s) → only then build the screens (history via `get_patient_clinical_history`, identifiers via a treating-gated function).
 
 ---
 
