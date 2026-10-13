@@ -165,22 +165,54 @@ most the project's JWT expiry (default 3600 s), so for the October 2026 rotation
 
 ## 7. Test safety — how the suite is kept away from the shared project
 
-Specs are classified in `e2e/support/e2e-safety.ts` as **safe**, **self-guarded** or **destructive**; anything unclassified is
-treated as destructive. By default only safe and self-guarded specs run. A destructive spec writes shared state (check-ins,
-call/undo/record a consultation, bookings, clinic-settings saves, `reset_demo_state`) and runs only with
-`E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack:
+Specs are classified in `e2e/support/e2e-safety.ts`; anything unclassified is treated as destructive.
 
-- the Playwright config **throws** (nothing runs) on any unsafe setting — a value other than `1`, the shared project named in
-  any Supabase/E2E variable, missing or non-local `LOCAL_SUPABASE_*` / `E2E_*` values, `E2E_SUPABASE_*` differing from the
-  local stack — and never auto-starts a dev server in that mode (it would read `.env.local`);
-- a global setup proves the app **server** reads the local stack (a canary that exists only there);
-- destructive specs use a guarded `test` that blocks any browser request to a non-local Supabase host;
-- the destructive helpers (`resetDemoState`, `setStaffIdleTimeoutMinutes`) and the write-capable scripts refuse any target that
-  is not a plain local origin, before any network call.
+| Class | May do | Runs by default |
+|---|---|---|
+| **offline** | nothing outside the test: pure logic, or a mocked harness that intercepts every request; **no sign-in** | yes |
+| **read-only** (live) | sign in, sign out, navigate, look. **Never submits anything a server could act on — not even input that is expected to be rejected** | yes |
+| **self-guarded** | local-stack suites that prove their own local target; skip unless opted in | yes (they skip) |
+| **destructive** | anything that writes, **and anything that submits a mutation-capable action even if it is expected to fail** (forged queue ids, invalid profile fields, a wrong current password, double-submit attempts) | **no** — `E2E_ENABLE_DESTRUCTIVE=1`, verified local stack only |
 
-The safeguards are covered by `e2e/e2e-safety.spec.ts` (pure: no browser, database or network). The audit of every spec found two
-state-changing specs that the earlier, helper-based list had missed: `nurse-v2` (calls the next patient, records and undoes a
-consultation) and the saving test inside `clinic-hours` (an admin settings write, now its own spec, `clinic-hours-edit`).
+"Expected to fail" is not "cannot write": a submission calls a mutation-capable endpoint, and if the rejection logic ever
+regressed the test would write. So `reception-queue.spec.ts` and `reception-profile.spec.ts` are now strictly read-only, and
+their submissions moved to `reception-queue-actions.spec.ts` (Skip, forged ids, repeated submits) and
+`reception-profile-actions.spec.ts` (Save Changes, Update password, double submit), both destructive. The live blocks of
+`nurse-v3-queue.spec.ts` moved to `nurse-v3-queue-live.spec.ts`, leaving that file fully offline.
+
+Layers, in order:
+
+1. **Classification and the default ignore list** — destructive and unclassified specs are ignored unless explicitly enabled.
+2. **Static audit** (`findMutationSubmissions`, run over every read-only spec by `e2e/e2e-safety.spec.ts`): rejects clicks on
+   mutation-capable controls (Skip, Save, Update password, Book, Confirm, Check in, Call next, Undo…), Server Action handling
+   (`next-action`), forged or rewritten requests, same-tick multi-click, form-submit selectors and password-field typing. It is a
+   tripwire, not a proof — it cannot see what a click ends up calling — so anything it cannot rule out belongs in a destructive
+   spec. Offline specs may not use the live helpers at all.
+3. **Browser-level guard** (`e2e/support/safe-test.ts`, used by every read-only spec): aborts, records and fails the test on any
+   browser request to a Supabase API that would change data (PATCH/PUT/DELETE, a POST to a table or a write RPC, auth changes
+   other than sign-in/out, storage, edge functions). *Limit:* a Server Action runs on the app server and its writes are invisible
+   to the browser — layer 2 is what covers those.
+4. **Configuration** — with `E2E_ENABLE_DESTRUCTIVE` set, the config **throws** (nothing runs) on any unsafe setting: a value other
+   than `1`, the shared project named in any Supabase/E2E variable, missing or non-local `LOCAL_SUPABASE_*` / `E2E_*` values,
+   `E2E_SUPABASE_*` differing from the local stack; and it never auto-starts a dev server in that mode.
+5. **Run time (destructive mode)** — a global setup proves the app **server** reads the local stack (a canary that exists only
+   there); destructive specs use a guarded `test` that blocks any browser request to a non-local Supabase host; the destructive
+   helpers and write-capable scripts refuse any target that is not a plain local origin, before any network call.
+
+All of this is covered by `e2e/e2e-safety.spec.ts` (pure apart from one about:blank browser test that sends nothing to any
+server). The audit of every spec found, over two rounds, these state-changing or submitting tests that the earlier lists had
+missed or mis-classified: `nurse-v2` (calls, records and undoes a consultation); the saving test inside `clinic-hours` (now
+`clinic-hours-edit`); the Skip-submission tests in `reception-queue`; the Save/Update-password submissions in
+`reception-profile`.
+
+**Running the local suites:** write the app origin as **`http://localhost:<port>`**, not `http://127.0.0.1:<port>`. Next.js 16's dev
+server blocks `/_next/hmr` for any origin other than `localhost` unless it is in `allowedDevOrigins`; with `127.0.0.1` the page
+reloads while a test is waiting for a control and the test times out (two local-suite failures were traced to exactly this). The
+guards treat the two spellings as the same machine, so it is a convenience rule, not a safety one.
+
+**Remaining exposure of the default configuration:** a default run still auto-starts `npm run dev` when `E2E_BASE_URL` is unset,
+and that server reads `.env.local` (normally the shared project) — even for offline specs, which then make no requests to it. Setting
+`E2E_BASE_URL` yourself (an app you started, wired to a local stack) avoids it.
 
 ## 8. How the rotation script was tested (local stack only; no production access)
 

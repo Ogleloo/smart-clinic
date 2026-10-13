@@ -7,7 +7,7 @@
  * missing variable, a typo, a value like "true", a dev server that quietly reads .env.local, or a spec nobody
  * classified. Three layers use these rules:
  *
- *  1. SPEC CLASSIFICATION. Every e2e/*.spec.ts is declared safe, self-guarded or destructive below. Anything not
+ *  1. SPEC CLASSIFICATION. Every e2e/*.spec.ts is declared offline, read-only, self-guarded or destructive below. Anything not
  *     declared is treated as DESTRUCTIVE (the default fails closed) and a test fails until someone classifies it.
  *  2. playwright.config.ts: destructive and unclassified specs are ignored unless E2E_ENABLE_DESTRUCTIVE=1; with it,
  *     evaluateE2eSafety() must find NO problem or the config throws and nothing runs; the config never auto-starts a
@@ -21,28 +21,38 @@ import { PRODUCTION_PROJECT_REF, resolveLocalTarget } from './local-supabase-gua
 // ---------------------------------------------------------------------------------------------------- classification
 
 /**
- * Run by default. No backend at all (pure logic, mocked harness) or LIVE READ-ONLY: they sign in with the E2E_* demo
- * accounts (which creates an Auth session, nothing else) and look. reception-profile and reception-queue exercise write
- * controls only with input the server rejects before touching data (invalid fields, a forged nonexistent queue id).
+ * OFFLINE: no backend at all — pure logic, or the mocked harness that intercepts and fulfils every request itself. They
+ * sign in nowhere (they must not use the live helpers: ACCOUNTS, loginAs, ...).
  */
-export const SAFE_SPECS = [
+export const OFFLINE_SPECS = ['e2e-safety', 'nurse-v3-queue', 'reception-profile-validation']
+
+/**
+ * READ-ONLY (live): run by default against whatever project the app server is wired to — possibly the shared one. They may
+ * sign in (an Auth session) and sign out, navigate and look. They must NOT submit anything a server could act on, not even
+ * input that is expected to be rejected: no Skip/Save/Update-password/Book/Check-in clicks, no Server Action handling, no
+ * forged or repeated submissions. Enforced by findMutationSubmissions() below (static) and by safe-test.ts (browser level).
+ */
+export const READ_ONLY_SPECS = [
   'admin-v2',
   'clinic-hours',
   'logout',
   'nurse-v3-dashboard',
-  'nurse-v3-queue',
+  'nurse-v3-queue-live',
   'reception-profile',
-  'reception-profile-validation',
   'reception-queue',
-  'e2e-safety',
 ]
+
+/** OFFLINE + READ-ONLY (everything that may run by default without being self-guarded). */
+export const SAFE_SPECS = [...OFFLINE_SPECS, ...READ_ONLY_SPECS]
 
 /** Opt in through LOCAL_SUPABASE_* and prove their own local target (canary + browser guard); skip otherwise. */
 export const SELF_GUARDED_SPECS = ['nurse-classic-skip.local', 'nurse-v3-skip.local']
 
 /**
- * WRITE shared state (reset_demo_state, check-ins, call/undo/record a consultation, settings saves, bookings).
- * Disabled by default; they run only with E2E_ENABLE_DESTRUCTIVE=1 against a verified local stack.
+ * SUBMIT or WRITE: reset_demo_state, check-ins, call/undo/record a consultation, bookings, clinic-settings saves — and any
+ * test that submits a mutation-capable action even when the submission is EXPECTED TO FAIL (forged queue ids, invalid
+ * profile fields, a wrong current password, double-submit attempts). Disabled by default; they run only with
+ * E2E_ENABLE_DESTRUCTIVE=1 against a verified local Supabase stack.
  */
 export const DESTRUCTIVE_SPECS = [
   'appointment-cancel',
@@ -55,14 +65,17 @@ export const DESTRUCTIVE_SPECS = [
   'patient-v3',
   'queue-explainability',
   'reception-checkin',
+  'reception-profile-actions',
+  'reception-queue-actions',
   'reception-walkin',
 ]
 
-export type SpecClass = 'safe' | 'self-guarded' | 'destructive' | 'unclassified'
+export type SpecClass = 'offline' | 'read-only' | 'self-guarded' | 'destructive' | 'unclassified'
 
 export function classifySpec(name: string): SpecClass {
   const hits = [
-    SAFE_SPECS.includes(name) && 'safe',
+    OFFLINE_SPECS.includes(name) && 'offline',
+    READ_ONLY_SPECS.includes(name) && 'read-only',
     SELF_GUARDED_SPECS.includes(name) && 'self-guarded',
     DESTRUCTIVE_SPECS.includes(name) && 'destructive',
   ].filter(Boolean) as SpecClass[]
@@ -82,7 +95,7 @@ export function ignoredSpecGlobs(specFiles: string[], destructiveEnabled: boolea
     .map(specName)
     .filter((name) => {
       const c = classifySpec(name)
-      return c !== 'safe' && c !== 'self-guarded'
+      return c !== 'offline' && c !== 'read-only' && c !== 'self-guarded'
     })
     .map((name) => `**/${name}.spec.ts`)
 }
@@ -196,3 +209,76 @@ export function mayAutoStartWebServer(env: Env): boolean {
   if ((env.E2E_ENABLE_DESTRUCTIVE ?? '').trim() !== '' && (env.E2E_ENABLE_DESTRUCTIVE ?? '').trim() !== '0') return false
   return true
 }
+
+// ---------------------------------------------------------------------------------------------------- read-only enforcement
+
+/** RPC names that write. Anything matching is blocked in the browser of a read-only spec. */
+const MUTATING_RPC =
+  /^(check_in|create_|next_|undo_|skip_|set_|end_|book_|cancel_|merge_|admin_|mark_|start_|call_|reset_|accept_|send_|update_|delete_|insert_|upsert_|register_|issue_|redeem_|replace_|request_|decline_)/
+
+/**
+ * True for a browser request to a Supabase API that would change data: any PATCH/PUT/DELETE, any POST to a table, a POST
+ * to a write RPC, auth changes other than signing in and out, storage writes and edge-function calls. Sign-in (token) and
+ * logout are the only allowed session operations. Used by safe-test.ts, which aborts and reports such requests.
+ */
+export function isMutatingSupabaseRequest(method: string, url: string): boolean {
+  let u: URL
+  try {
+    u = new URL(url)
+  } catch {
+    return false
+  }
+  const m = method.toUpperCase()
+  const api = /^\/(rest|auth|storage|functions|graphql)\/v1(\/.*)?$/.exec(u.pathname)
+  if (!api) return false
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return false
+  const kind = api[1]
+  const rest = api[2] ?? ''
+  if (kind === 'auth') return !(m === 'POST' && (rest === '/token' || rest === '/logout'))
+  if (kind === 'graphql') return false
+  if (kind === 'rest') {
+    const rpc = /^\/rpc\/([^/?]+)/.exec(rest)
+    return rpc ? MUTATING_RPC.test(rpc[1]) : true
+  }
+  return true // storage and edge functions: any non-read request
+}
+
+/** Names of controls that submit or change something. Matched against button names in read-only specs. */
+const MUTATING_CONTROL =
+  /\b(skip|save|update password|create account|register|sign up|confirm|book|check.?in|call next|next patient|undo|record|emergency|start session|end session|go (on|off) duty|off duty|on duty|remove photo|upload|submit|send|delete|remove|approve|merge|invite|revoke|reset|cancel (appointment|booking)|pay)\b/i
+
+/**
+ * A deliberately conservative STATIC tripwire for specs that run against a possibly-shared backend. Returns a description
+ * for every pattern that submits, or prepares to submit, something a server could act on — including submissions that are
+ * expected to be rejected. It is heuristic (it cannot see what a click ends up calling), which is why the browser-level
+ * guard in safe-test.ts exists too, and why anything it cannot rule out belongs in a destructive spec. Comment lines are
+ * ignored.
+ */
+export function findMutationSubmissions(source: string): string[] {
+  const code = source
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n')
+  const findings: string[] = []
+  if (/next-action/i.test(code)) findings.push('tracks or handles Server Action POSTs ("next-action")')
+  if (/\bforge\w*\b|\bpostData\b|route\.continue\(\s*\{/.test(code)) findings.push('rewrites or forges requests')
+  if (/\[type=["']submit["']\]/.test(code)) findings.push('clicks a form submit button by selector')
+  if (/\.requestSubmit\(|\.submit\(\)/.test(code)) findings.push('submits a form programmatically')
+  if (/\.evaluate\([^]{0,400}?\.click\(\)/.test(code)) findings.push('clicks inside evaluate() (same-tick double-submit pattern)')
+  if (/(getByLabel|locator)\(\s*['"`/#][^)]*password[^)]*\)\s*\.fill\(/i.test(code)) findings.push('types into a password field')
+  const button = /getByRole\(\s*['"]button['"]\s*,\s*\{[^}]*?name:\s*(?:'([^']*)'|"([^"]*)"|\/((?:\\.|[^/\\])+)\/[a-z]*)[^}]*\}\s*\)/g
+  for (const m of code.matchAll(button)) {
+    const name = m[1] ?? m[2] ?? m[3] ?? ''
+    if (!MUTATING_CONTROL.test(name)) continue
+    const end = (m.index ?? 0) + m[0].length
+    const after = code.slice(end, end + 80)
+    const before = code.slice(Math.max(0, (m.index ?? 0) - 60), m.index ?? 0).replace(/\s+/g, ' ')
+    const used = /^\s*(\.(first\(\)|last\(\)|nth\(\d+\)))*\s*\.(click|dblclick|press|tap|evaluate|dispatchEvent)\(/.test(after)
+    const stored = /(const|let|var)\s+\w+\s*=\s*[\w.]*$/.test(before)
+    if (used || stored) findings.push(`uses the "${name}" control`)
+  }
+  return findings
+}
+
+/** Live helpers that sign in or write; offline specs must not touch them. */
+export const LIVE_HELPERS = /\b(ACCOUNTS|loginAs|createTestClient|resetDemoState|setStaffIdleTimeoutMinutes)\b/

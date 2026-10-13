@@ -96,8 +96,9 @@ after being exposed in git history (see `docs/proposals/credential_rotation_runb
 | Reception   | `E2E_RECEPTIONIST_EMAIL`  | `E2E_RECEPTIONIST_PASSWORD`  |
 | Admin       | `E2E_ADMIN_EMAIL`         | `E2E_ADMIN_PASSWORD`         |
 
-Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Specs are classified in `e2e/support/e2e-safety.ts`:
-those that write data (and any spec nobody has classified) are **disabled by default** and run only with
+Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Specs are classified in `e2e/support/e2e-safety.ts`
+(offline / read-only / self-guarded / destructive). Default live specs are strictly read-only; those that write **or submit a
+mutation-capable action, even one expected to fail**, (and any spec nobody has classified) are **disabled by default** and run only with
 `E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack. The shared Supabase project is rejected in that mode.
 
 Reset demo state: `SELECT * FROM public.reset_demo_state();`

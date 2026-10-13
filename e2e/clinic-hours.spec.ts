@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/safe-test'
 import { loginAs, ACCOUNTS, chooseBookingService, pickBookingDate } from './helpers'
 
 // Migration 0052: clinic_hours drives the landing-page footer, the

@@ -4,17 +4,22 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   DESTRUCTIVE_SPECS,
-  SAFE_SPECS,
+  LIVE_HELPERS,
+  OFFLINE_SPECS,
+  READ_ONLY_SPECS,
   SELF_GUARDED_SPECS,
   assertLocalSupabaseUrl,
   classifySpec,
   evaluateE2eSafety,
+  findMutationSubmissions,
   ignoredSpecGlobs,
   isLocalOrigin,
+  isMutatingSupabaseRequest,
   mayAutoStartWebServer,
   sameLocalOrigin,
   specName,
 } from './support/e2e-safety'
+import { installReadOnlyGuard } from './support/safe-test'
 import { PRODUCTION_PROJECT_REF } from './support/local-supabase-guard'
 import { assertLocalStack, resetDemoState, setStaffIdleTimeoutMinutes } from './helpers'
 
@@ -49,8 +54,8 @@ test.describe('spec classification (an unclassified spec fails closed)', () => {
 
   test('the lists name only specs that exist, and no spec is in two lists', () => {
     const names = new Set(specFiles.map(specName))
-    for (const n of [...SAFE_SPECS, ...SELF_GUARDED_SPECS, ...DESTRUCTIVE_SPECS]) expect(names.has(n), `${n} is listed but has no spec file`).toBe(true)
-    const all = [...SAFE_SPECS, ...SELF_GUARDED_SPECS, ...DESTRUCTIVE_SPECS]
+    for (const n of [...OFFLINE_SPECS, ...READ_ONLY_SPECS, ...SELF_GUARDED_SPECS, ...DESTRUCTIVE_SPECS]) expect(names.has(n), `${n} is listed but has no spec file`).toBe(true)
+    const all = [...OFFLINE_SPECS, ...READ_ONLY_SPECS, ...SELF_GUARDED_SPECS, ...DESTRUCTIVE_SPECS]
     expect(new Set(all).size).toBe(all.length)
   })
 
@@ -66,7 +71,9 @@ test.describe('spec classification (an unclassified spec fails closed)', () => {
 
   test('a spec listed twice is unclassified, not silently safe', () => {
     expect(classifySpec('nurse-v2')).toBe('destructive')
-    expect(classifySpec('e2e-safety')).toBe('safe')
+    expect(classifySpec('e2e-safety')).toBe('offline')
+    expect(classifySpec('reception-queue')).toBe('read-only')
+    expect(classifySpec('reception-queue-actions')).toBe('destructive')
     expect(classifySpec('nurse-v3-skip.local')).toBe('self-guarded')
   })
 })
@@ -87,12 +94,44 @@ test.describe('static audit of the suite (writes cannot hide in a "safe" spec)',
     }
   })
 
-  test('safe specs never import a destructive helper or create a Supabase client', () => {
-    for (const n of SAFE_SPECS.filter((s) => s !== 'e2e-safety')) {
+  test('OFFLINE specs use no live helper, no sign-in and no Supabase client', () => {
+    for (const n of OFFLINE_SPECS.filter((s) => s !== 'e2e-safety')) {
       const code = sourceOf(n).replace(/^\s*(\/\/|\*).*$/gm, '')
-      expect(DESTRUCTIVE_HELPERS.test(code), `${n} imports a destructive helper`).toBe(false)
+      expect(LIVE_HELPERS.test(code), `${n} references a live helper (ACCOUNTS / loginAs / ...)`).toBe(false)
+      expect(/from '\.\/helpers'/.test(code), `${n} imports ./helpers`).toBe(false)
       expect(/\bcreateClient\s*\(/.test(code), `${n} creates a Supabase client`).toBe(false)
     }
+  })
+
+  test('READ-ONLY specs never submit anything: no mutation-capable control, no Server Action handling, no forged requests', () => {
+    for (const n of READ_ONLY_SPECS) {
+      expect(findMutationSubmissions(sourceOf(n)), `${n} submits, or prepares to submit, something a server could act on — move it to a destructive spec`).toEqual([])
+    }
+  })
+
+  test('READ-ONLY specs run on the read-only guarded test and use only sign-in helpers', () => {
+    for (const n of READ_ONLY_SPECS) {
+      const src = sourceOf(n)
+      expect(src, `${n} must import test from ./support/safe-test`).toContain("from './support/safe-test'")
+      expect(/import\s*\{[^}]*\btest\b[^}]*\}\s*from\s*'@playwright\/test'/.test(src), `${n} imports test straight from @playwright/test`).toBe(false)
+      const code = src.replace(/^\s*(\/\/|\*).*$/gm, '')
+      expect(DESTRUCTIVE_HELPERS.test(code), `${n} uses a destructive helper`).toBe(false)
+      expect(/\bcreateClient\s*\(/.test(code), `${n} creates a Supabase client`).toBe(false)
+    }
+  })
+
+  test('the specs the review flagged were SPLIT: their submissions now live in destructive specs and are detected there', () => {
+    for (const n of ['reception-queue-actions', 'reception-profile-actions']) {
+      expect(classifySpec(n)).toBe('destructive')
+      expect(findMutationSubmissions(sourceOf(n)).length, `${n} should contain the submissions that were moved out`).toBeGreaterThan(0)
+    }
+    const queueActions = sourceOf('reception-queue-actions')
+    expect(queueActions).toContain('forgeSkipId')
+    expect(queueActions).toMatch(/double submit/)
+    expect(sourceOf('reception-profile-actions')).toMatch(/Update password/)
+    // …and are gone from the read-only specs.
+    expect(sourceOf('reception-queue')).not.toMatch(/forgeSkipId|NONEXISTENT_ID|next-action/)
+    expect(sourceOf('reception-profile')).not.toMatch(/Update password'|rejects .* with a clear message|next-action/)
   })
 
   test('destructive specs run on the guarded test and open only guarded contexts', () => {
@@ -117,6 +156,142 @@ test.describe('static audit of the suite (writes cannot hide in a "safe" spec)',
 
   test('the write-capable scripts refuse a non-local target through the shared guard', () => {
     for (const f of ['scripts/verify.ts', 'scripts/check-4b.ts']) expect(read(f)).toContain("assertLocalSupabaseUrl(URL,")
+  })
+})
+
+// ---------------------------------------------------------------------------------------------- read-only enforcement
+test.describe('findMutationSubmissions: what a read-only spec may never contain (regression fixtures)', () => {
+  const benign = `
+    await loginAs(page, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
+    await page.goto('/nurse/queue')
+    await expect(page.getByRole('heading', { name: 'My Queue' })).toBeVisible()
+    await expect(actionsCell.getByRole('button', { name: 'Skip' })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
+    await page.getByRole('button', { name: 'Sign Out' }).click()
+    await page.getByRole('button', { name: 'Log out' }).click()
+    await page.getByRole('button', { name: 'Cancel' }).click()
+    await page.getByRole('button', { name: 'Change Password' }).click()
+    await page.getByRole('link', { name: 'Assign a nurse' }).click()
+    // await page.getByRole('button', { name: 'Skip' }).click()   <- a comment is not code
+  `
+  test('a benign read-only snippet is clean (assertions on mutating controls, sign-out, panel toggles and links are fine)', () => {
+    expect(findMutationSubmissions(benign)).toEqual([])
+  })
+
+  const offending: Array<[string, string]> = [
+    ['clicking Skip', `await page.getByRole('button', { name: 'Skip' }).first().click()`],
+    ['pressing Skip via nth()', `await rows.nth(0).getByRole('button', { name: 'Skip' }).nth(0).press('Enter')`],
+    ['holding the Skip confirm button', `const confirm = dialog.getByRole('button', { name: /Skip patient|Please wait/i })`],
+    ['clicking Save Changes', `await page.getByRole('button', { name: 'Save Changes' }).click()`],
+    ['clicking Update password', `await panel.getByRole('button', { name: 'Update password' }).click()`],
+    ['clicking a regex-named booking button', `await page.getByRole('button', { name: /Confirm booking/ }).click()`],
+    ['calling the next patient', `await page.getByRole('button', { name: /Next patient|Call next patient/ }).click()`],
+    ['tracking Server Action POSTs', `if (req.method() === 'POST' && req.headers()['next-action']) posts.push(req.url())`],
+    ['forging a queue id', `const actionPosts = await forgeSkipId(page, 3000)`],
+    ['rewriting post data', `await route.continue({ postData: forged })`],
+    ['same-tick double submit', `await confirm.evaluate((el) => { const b = el as HTMLButtonElement; b.click(); b.click() })`],
+    ['typing a password', `await panel.getByLabel('Current password').fill('whatever-current')`],
+    ['clicking a submit selector', `await page.click('button[type="submit"]')`],
+    ['submitting a form programmatically', `await form.evaluate((f) => f.requestSubmit())`],
+  ]
+  for (const [label, snippet] of offending) {
+    test(`flags: ${label}`, () => {
+      expect(findMutationSubmissions(snippet).length, snippet).toBeGreaterThan(0)
+    })
+  }
+
+  test('the exact constructs the review flagged are caught', () => {
+    // reception-queue.spec.ts at f9949e5: forged ids through the real Skip action, repeatedly.
+    const queue = `
+      const actionPosts = await forgeSkipId(page)
+      await skipButton.click()
+      const dialog = page.getByRole('dialog', { name: 'Skip patient' })
+      await dialog.getByRole('button', { name: /Skip patient/i }).click()
+      expect(actionPosts.aborted).toEqual([])
+      await confirm.evaluate((el) => { const button = el as HTMLButtonElement; button.click(); button.click(); button.click() })`
+    expect(findMutationSubmissions(queue).length).toBeGreaterThanOrEqual(3)
+    // reception-profile.spec.ts at f9949e5: deliberately invalid profile / password submissions.
+    const profile = `
+      await page.locator('#full_name').fill('A')
+      await page.getByRole('button', { name: 'Save Changes' }).click()
+      await panel.getByLabel('New password', { exact: true }).fill('short')
+      await panel.getByRole('button', { name: 'Update password' }).click()`
+    expect(findMutationSubmissions(profile).length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+test.describe('isMutatingSupabaseRequest: the browser-level classifier', () => {
+  const base = 'http://127.0.0.1:54321'
+  const allowed: Array<[string, string]> = [
+    ['GET', `${base}/rest/v1/queue_entries?select=*`],
+    ['HEAD', `${base}/rest/v1/profiles`],
+    ['OPTIONS', `${base}/rest/v1/profiles`],
+    ['POST', `${base}/auth/v1/token?grant_type=password`],
+    ['POST', `${base}/auth/v1/logout`],
+    ['POST', `${base}/rest/v1/rpc/get_service_queue`],
+    ['POST', `${base}/rest/v1/rpc/get_wait_estimate`],
+    ['POST', `${base}/rest/v1/rpc/get_available_slots`],
+    ['POST', `${base}/rest/v1/rpc/service_consultation_stats`],
+    ['POST', `${base}/graphql/v1`],
+    ['POST', 'http://127.0.0.1:3000/login'],
+    ['PATCH', 'http://127.0.0.1:3000/api/anything-not-supabase'],
+  ]
+  for (const [m, u] of allowed) test(`allows ${m} ${u.replace(base, '')}`, () => expect(isMutatingSupabaseRequest(m, u)).toBe(false))
+
+  const blocked: Array<[string, string]> = [
+    ['PATCH', `${base}/rest/v1/profiles?id=eq.1`],
+    ['PUT', `${base}/rest/v1/profiles`],
+    ['DELETE', `${base}/rest/v1/queue_entries?id=eq.1`],
+    ['POST', `${base}/rest/v1/queue_entries`],
+    ['POST', `${base}/rest/v1/rpc/check_in_patient`],
+    ['POST', `${base}/rest/v1/rpc/next_patient`],
+    ['POST', `${base}/rest/v1/rpc/skip_waiting_patient`],
+    ['POST', `${base}/rest/v1/rpc/set_emergency_priority`],
+    ['POST', `${base}/rest/v1/rpc/book_appointment`],
+    ['POST', `${base}/rest/v1/rpc/admin_set_staff_status`],
+    ['POST', `${base}/rest/v1/rpc/merge_patient_profiles`],
+    ['POST', `${base}/rest/v1/rpc/mark_notifications_read`],
+    ['PUT', `${base}/auth/v1/user`],
+    ['POST', `${base}/auth/v1/signup`],
+    ['POST', `${base}/auth/v1/recover`],
+    ['POST', `${base}/storage/v1/object/avatars/x.png`],
+    ['POST', `${base}/functions/v1/anything`],
+    ['DELETE', `https://example-project.supabase.co/rest/v1/profiles`],
+  ]
+  for (const [m, u] of blocked) test(`blocks ${m} ${u.replace(base, '')}`, () => expect(isMutatingSupabaseRequest(m, u)).toBe(true))
+
+  test('malformed URLs are not classified as mutations (and never throw)', () => {
+    expect(isMutatingSupabaseRequest('POST', 'not a url')).toBe(false)
+  })
+})
+
+test.describe('the read-only browser guard (installReadOnlyGuard) blocks writes in a real browser context', () => {
+  // No server involved: requests go to the closed local port 9; the guard decides before any connection is attempted.
+  test('a write is aborted and recorded; reads and sign-in pass through to the (closed) port untouched', async ({ context, page }) => {
+    const blocked = await installReadOnlyGuard(context)
+    await page.goto('about:blank')
+    const fire = (method: string, path: string) =>
+      page.evaluate(
+        ([m, p]) => fetch(`http://127.0.0.1:9${p}`, { method: m, mode: 'no-cors', body: m === 'GET' ? undefined : 'x' }).then(() => 'sent', () => 'failed'),
+        [method, path]
+      )
+    await fire('POST', '/rest/v1/queue_entries')
+    await fire('POST', '/rest/v1/rpc/check_in_patient')
+    await fire('POST', '/rest/v1/rpc/next_patient')
+    await fire('POST', '/storage/v1/object/avatars/x')
+    await fire('POST', '/auth/v1/signup')
+    expect(blocked).toEqual([
+      'POST /rest/v1/queue_entries',
+      'POST /rest/v1/rpc/check_in_patient',
+      'POST /rest/v1/rpc/next_patient',
+      'POST /storage/v1/object/avatars/x',
+      'POST /auth/v1/signup',
+    ])
+    await fire('GET', '/rest/v1/queue_entries')
+    await fire('POST', '/auth/v1/token')
+    await fire('POST', '/auth/v1/logout')
+    await fire('POST', '/rest/v1/rpc/get_service_queue')
+    expect(blocked.length, 'reads, sign-in, logout and read RPCs must not be blocked').toBe(5)
   })
 })
 
