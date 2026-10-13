@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/safe-test'
 import { ACCOUNTS, loginAs, waitSettled } from './helpers'
 
 test('patient logout: happy path clears session and redirects to /login', async ({ page }) => {

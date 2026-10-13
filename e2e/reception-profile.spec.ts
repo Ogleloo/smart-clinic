@@ -1,16 +1,15 @@
-import { test, expect as baseExpect, type Page } from '@playwright/test'
+import { expect as baseExpect, type Page } from '@playwright/test'
+import { test } from './support/safe-test'
 import { ACCOUNTS, loginAs as rawLoginAs } from './helpers'
 
 /**
- * Reception Profile Settings (Phase 4 — Figma frame 222:1755).
+ * Reception Profile Settings (Phase 4 — Figma frame 222:1755) — READ-ONLY.
  *
- * Runs against the shared dev Supabase project, so it is strictly read-only:
- * no valid profile save, no real password change, no upload. Every form
- * submission below uses input that the Server Action rejects BEFORE it touches
- * the database (empty or one-character name, malformed phone, mismatched or
- * too-short passwords), so a rejected submit proves the validation and the
- * error path without writing anything. Success paths (save, password change,
- * upload) are covered with injected mock actions on a throwaway harness, not here.
+ * Runs against the shared dev Supabase project, so it submits NOTHING: no Save Changes, no Update password, no upload —
+ * not even input the Server Action is expected to reject ("expected to fail" still calls a mutation-capable endpoint). Every
+ * test that submits the profile or password form lives in reception-profile-actions.spec.ts (destructive-class, local stack
+ * only). Here: access rules, rendering, edit-state controls (nothing is sent), the password panel's open/close behaviour,
+ * navigation, layout and Sign Out.
  */
 const SETTINGS = '/reception/profile/settings'
 
@@ -27,15 +26,6 @@ async function openSettings(page: Page) {
   await loginAs(page, ACCOUNTS.receptionist.email, ACCOUNTS.receptionist.password)
   await page.goto(SETTINGS)
   await expect(page.getByRole('heading', { name: 'Profile Settings', level: 1 })).toBeVisible()
-}
-
-/** Every Server Action invocation is a browser POST carrying a `next-action` header. */
-function trackActions(page: Page) {
-  const posts: string[] = []
-  page.on('request', (req) => {
-    if (req.method() === 'POST' && req.headers()['next-action']) posts.push(req.url())
-  })
-  return posts
 }
 
 test.describe('Profile Settings — access', () => {
@@ -101,18 +91,18 @@ test.describe('Profile Settings — page', () => {
   })
 
   test('Save and Cancel are only available when something changed; Cancel discards phone edits too', async ({ page }) => {
-    const save = page.getByRole('button', { name: 'Save Changes' })
+    // The Save button is only ever ASSERTED on here (state), never clicked: submitting the form is a destructive spec's job.
     const cancel = page.getByRole('button', { name: 'Cancel' })
-    await expect(save).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
     await expect(cancel).toBeDisabled()
 
     const phoneBefore = await page.locator('#phone').inputValue()
     await page.locator('#phone').fill('082 000 0000')
-    await expect(save).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Save Changes' })).toBeEnabled()
     await expect(cancel).toBeEnabled()
     await cancel.click()
     await expect(page.locator('#phone')).toHaveValue(phoneBefore)
-    await expect(save).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Save Changes' })).toBeDisabled()
   })
 
   test('photo upload is honestly unavailable: Upload and Remove are disabled and say why', async ({ page }) => {
@@ -122,41 +112,7 @@ test.describe('Profile Settings — page', () => {
     await expect(page.getByText(/Photo upload isn.t available yet/)).toBeVisible()
   })
 
-  for (const [label, name, phone, expected] of [
-    ['an empty name', '', '', /enter your full name/i],
-    ['a one-character name', 'A', '', /at least 2 characters/i],
-    ['a letters-only phone number', 'Valid Name', 'abc', /digits, spaces, dashes/i],
-    ['a too-short phone number', 'Valid Name', '12345', /south african number/i],
-  ] as const) {
-    test(`rejects ${label} with a clear message and writes nothing`, async ({ page }) => {
-      await page.locator('#full_name').fill(name)
-      await page.locator('#phone').fill(phone)
-      await page.getByRole('button', { name: 'Save Changes' }).click()
-      await expect(page.getByRole('alert').filter({ hasText: expected })).toBeVisible({ timeout: 30_000 })
-      // The header chip still shows the saved name: nothing was persisted.
-      await expect(page.locator('[aria-label="Signed in as"]')).not.toContainText('Valid Name')
-    })
-  }
 
-  test('double submit: three same-tick clicks send exactly one Server Action, even while the first is in flight', async ({ page }) => {
-    // Invalid input again, so nothing is written whichever way this goes. A 1.5s hold keeps the first request pending.
-    await page.route('**/*', async (route) => {
-      const req = route.request()
-      if (req.method() === 'POST' && req.headers()['next-action']) await new Promise((r) => setTimeout(r, 1500))
-      await route.continue()
-    })
-    await page.locator('#full_name').fill('A')
-    const posts = trackActions(page)
-    await page.getByRole('button', { name: 'Save Changes' }).evaluate((el) => {
-      const b = el as HTMLButtonElement
-      b.click()
-      b.click()
-      b.click()
-    })
-    await expect(page.getByRole('alert').filter({ hasText: /at least 2 characters/i })).toBeVisible({ timeout: 30_000 })
-    await page.waitForTimeout(1500)
-    expect(posts.length).toBe(1)
-  })
 })
 
 test.describe('Profile Settings — Change Password (validation only; no real change is attempted)', () => {
@@ -179,33 +135,7 @@ test.describe('Profile Settings — Change Password (validation only; no real ch
     await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 
-  for (const [label, current, next, confirm, expected] of [
-    ['a too-short new password', 'whatever-current', 'short', 'short', /at least 8 characters/i],
-    ['mismatched confirmation', 'whatever-current', 'newpassword1', 'newpassword2', /don.t match/i],
-    ['a new password equal to the current one', 'same-password-1', 'same-password-1', 'same-password-1', /different from your current/i],
-  ] as const) {
-    test(`rejects ${label} before any sign-in attempt`, async ({ page }) => {
-      await page.getByRole('button', { name: 'Change Password' }).click()
-      const panel = page.getByRole('form', { name: 'Change password' })
-      await panel.getByLabel('Current password').fill(current)
-      await panel.getByLabel('New password', { exact: true }).fill(next)
-      await panel.getByLabel('Confirm new password', { exact: true }).fill(confirm)
-      await panel.getByRole('button', { name: 'Update password' }).click()
-      await expect(panel.getByRole('alert').filter({ hasText: expected })).toBeVisible({ timeout: 30_000 })
-    })
-  }
 
-  test('a missing current password is stopped by the browser before anything is sent', async ({ page }) => {
-    const posts = trackActions(page)
-    await page.getByRole('button', { name: 'Change Password' }).click()
-    const panel = page.getByRole('form', { name: 'Change password' })
-    await panel.getByLabel('New password', { exact: true }).fill('newpassword1')
-    await panel.getByLabel('Confirm new password').fill('newpassword1')
-    await panel.getByRole('button', { name: 'Update password' }).click()
-    await expect(panel.getByLabel('Current password')).toHaveJSProperty('validity.valueMissing', true)
-    await page.waitForTimeout(500)
-    expect(posts).toHaveLength(0)
-  })
 })
 
 test.describe('Profile Settings — navigation, responsiveness, Sign Out', () => {

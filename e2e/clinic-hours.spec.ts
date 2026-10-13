@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/safe-test'
 import { loginAs, ACCOUNTS, chooseBookingService, pickBookingDate } from './helpers'
 
 // Migration 0052: clinic_hours drives the landing-page footer, the
@@ -55,23 +55,4 @@ test('a fully booked open day says so explicitly, not the closed-day message or 
   await expect(page.getByText('Fully booked for this date. Choose another day.')).toBeVisible()
   await expect(page.getByText(/The clinic is closed/)).toHaveCount(0)
   await expect(page.locator('.grid.grid-cols-3')).toHaveCount(0)
-})
-
-test('admin opening-hours editor loads current values and saves', async ({ page }) => {
-  await loginAs(page, ACCOUNTS.admin.email, ACCOUNTS.admin.password)
-  await page.goto('/admin/settings')
-  await expect(page.getByRole('heading', { name: 'Opening hours' })).toBeVisible()
-
-  const sundayRow = page.locator('div.rounded-lg', { has: page.getByText('Sunday', { exact: true }) })
-  await expect(sundayRow.getByRole('checkbox')).toBeChecked()
-
-  const mondayRow = page.locator('div.rounded-lg', { has: page.getByText('Monday', { exact: true }) })
-  await expect(mondayRow.getByRole('checkbox')).not.toBeChecked()
-  await expect(mondayRow.locator('input[type="time"]').first()).toHaveValue('07:30')
-
-  // Submits the form's own current (unchanged) values — proves the
-  // server action, grant and admin-scoped RLS policy all work without
-  // altering what production actually serves.
-  await page.getByRole('button', { name: 'Save opening hours' }).click()
-  await expect(page.getByText('Saved.')).toBeVisible()
 })
