@@ -7,20 +7,18 @@
 // Run with (LOCAL stack + E2E_* environment variables): npx tsx scripts/check-4b.ts
 import { createClient } from '@supabase/supabase-js'
 
-import { PRODUCTION_PROJECT_REF } from '../e2e/support/local-supabase-guard'
+import { assertLocalSupabaseUrl } from '../e2e/support/e2e-safety'
 
-// Target and credentials come from the environment — nothing is committed (see docs/proposals/staged_migration_plan.md, C0).
+// Target and credentials come from the environment — nothing is committed (see docs/proposals/credential_rotation_runbook.md).
 // This script WRITES (check-ins), so it only runs against a LOCAL Supabase stack, never the shared project.
 function need(name: string): string {
   const value = process.env[name]?.trim()
-  if (!value) throw new Error(`${name} is not set (credentials are kept in the team password manager, never in this repository)`)
+  if (!value) throw new Error(`${name} is not set (credentials are held by the project owner in secure offline storage, never in this repository)`)
   return value
 }
 const URL = need('E2E_SUPABASE_URL')
 const KEY = need('E2E_SUPABASE_ANON_KEY')
-if (URL.includes(PRODUCTION_PROJECT_REF) || !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(URL)) {
-  throw new Error(`Refusing to run: E2E_SUPABASE_URL must be a local stack (http://127.0.0.1:<port>), got "${URL}". This script writes data.`)
-}
+assertLocalSupabaseUrl(URL, 'This script (it writes data)')
 const SERVICE_GC = '22222222-2222-2222-2222-222222222221'
 
 async function signIn(email: string, password: string) {

@@ -188,7 +188,7 @@ async function main() {
     if (existsSync(file)) abort(`refusing to overwrite an existing file: ${file} (to finish an interrupted run use --resume)`)
     passwords = generatePasswords()
     const body =
-      `# Smart Clinic demonstration accounts — NEW passwords (${matched.length}). Move into the team password manager, then securely delete this file.\n` +
+      `# Smart Clinic demonstration accounts — NEW passwords (${matched.length}). Move into secure offline storage, then securely delete this file.\n` +
       matched.map((m) => `${m.label}\t${m.email}\t${passwords[m.label]}`).join('\n') +
       '\n'
     const fd = openSync(file, 'wx', 0o600)

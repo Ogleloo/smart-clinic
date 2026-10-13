@@ -1,11 +1,19 @@
-# Runbook — rotate the six demonstration-account passwords (stage S0)
+# Runbook — demonstration-account passwords (stage S0)
 
-**Status: NOT YET ROTATED.** The project owner authorised the rotation, but the Claude Code environment holds **no Supabase
-service-role key** and **no password manager**, so the authorisation's stop conditions applied and nothing was changed in
-the production project. The owner runs the procedure below. This runbook never contains a password or a key.
+**Status: ROTATION COMPLETED — owner-confirmed (2026-10-13).** The project owner reports that the passwords of the six
+demonstration accounts (Admin, Nurse 1, Nurse 2, Nurse 3, Receptionist, Patient) were rotated and that all six new passwords
+were verified through Supabase Auth. The owner holds a paper backup and a tested Windows DPAPI-encrypted backup; the
+temporary plaintext password file was deleted and the administrative credentials were cleared from the PowerShell session.
 
-Six accounts currently share one exposed password (three of them are Nurses). They are identified by e-mail address, which
-you supply through environment variables — the addresses are not stored in this repository:
+What this document does and does not establish: the rotation and its verification were performed by the owner; **the
+Claude Code session did not perform, observe or independently verify it** (it never held an administrative key, and made no
+request to the production project). This repository now contains no live credential (one *obsolete* password remains in an
+applied, append-only migration). No password, key, private path or command output is recorded here.
+
+The procedure below stays as the reference for the **next** rotation, which should happen whenever a credential may have been
+exposed, when someone with access leaves, and at least on a schedule the owner sets.
+
+Accounts, identified by e-mail address supplied through environment variables (the addresses are not stored in the repository):
 
 | Label | Environment variable | Expected profile role |
 |---|---|---|
@@ -15,24 +23,32 @@ you supply through environment variables — the addresses are not stored in thi
 | `receptionist` | `E2E_RECEPTIONIST_EMAIL` | receptionist |
 | `patient` | `E2E_PATIENT_EMAIL` | patient |
 
-## 1. Before you start
+## 1. Storing credentials — secure offline storage
 
-- [ ] A **password manager** (team vault) is ready with a place for six entries.
-- [ ] You have the project's **service-role key** (Dashboard → Project Settings → API). It bypasses all security: type it only
-      into the secure prompt below — never into chat, a repository file, a commit message, a ticket or a log.
-- [ ] You know the project's **JWT expiry** (Dashboard → Project Settings → API/JWT) — the length of the residual window in §4.
-- [ ] You know the **project ref** (the part of `https://<ref>.supabase.co`).
-- [ ] The six e-mail addresses are to hand, with no typos and no duplicates.
-- [ ] Group members know their tests stop working until they receive new credentials (§5).
+The project owner keeps the demonstration credentials **offline**; the project does not depend on a hosted password manager.
+Principles for any storage method:
 
-## 2. What the script guarantees (all asserted by the local tests, §6)
+- **At least two independent copies, in different forms**, so that losing one is not losing the credentials. The owner's
+  arrangement: a **paper backup** kept somewhere physically secure, and a **Windows DPAPI-encrypted file** on the owner's
+  machine whose restore has been **tested** (an untested backup is not a backup).
+- **DPAPI limits:** a DPAPI-protected file can be decrypted only by the same Windows user on the same machine (unless
+  domain-roaming applies). A reinstall, a profile loss or a hardware failure makes it unreadable — which is why a second,
+  physical copy exists. Re-test the restore after any Windows or profile change.
+- **Paper:** store like any physical secret; do not photograph it, do not keep it with the machine, and record *where* the
+  copy is, not what it says, anywhere else.
+- **Never** put credentials in the repository, a commit message, a pull request, an issue, chat, e-mail, a ticket, a shared
+  drive, a screenshot or a log. Do not leave the plaintext file from a rotation on disk after the credentials are stored.
+- **Sharing:** give a team member only the credentials they need, in person or through a channel the owner trusts, and
+  rotate after a person with access leaves. Environment variables are set per terminal session and cleared afterwards.
+
+## 2. What the rotation script guarantees (asserted by local tests, §8)
 
 `scripts/rotate-demo-passwords.ts` uses the official Auth Admin API (`auth.admin.updateUserById`). It is a **dry run unless
 `--apply` is given**.
 
 - **Before anything changes** all six accounts are matched by exact e-mail: each must be exactly one Auth user, with exactly
   one profile whose role is the expected one, and the six user ids must be distinct. A **duplicate configured address, a
-  missing account, a role mismatch or a missing/ambiguous profile aborts the whole run with nothing changed.**
+  missing account, a role mismatch or a missing/ambiguous profile aborts the run with nothing changed.**
 - `--project-ref` must equal the project in `SUPABASE_URL`, so you confirm which project is about to change.
 - Six **different** passwords (40 characters, CSPRNG) are written to your private `--out` file and re-read **before** any
   account is touched. The file is never overwritten; a path inside a Git work tree is refused.
@@ -40,19 +56,21 @@ you supply through environment variables — the addresses are not stored in thi
 - Only the password changes — user ids, e-mail, role, metadata, profiles and application data are untouched.
 - Output is limited to labels, e-mail addresses, user ids and status. **No password and no key is ever printed.**
 - **Partial failure:** the first failure stops the run; the summary names every account as `updated`, `FAILED` or
-  `not attempted`. Accounts not yet updated keep their OLD password. Finish with `--resume` (§3 step 7), which re-applies the
-  **same file** (idempotent) — no new passwords are generated.
+  `not attempted`. Accounts not yet updated keep their OLD password. Finish with `--resume`, which re-applies the **same
+  file** (idempotent) — no new passwords are generated.
 
-## 3. Procedure — Windows PowerShell
+## 3. Procedure for a future rotation — Windows PowerShell
 
-Run in a **fresh PowerShell window** opened at the repository root. Replace every `<...>`.
+Prerequisites: your storage method (§1) is ready; you hold the project's **service-role key** (Dashboard → Project Settings →
+API) — it bypasses all security, so type it only into the secure prompt below; you know the **project ref** and the six
+e-mail addresses. Run in a **fresh PowerShell window** at the repository root. Replace every `<...>`.
 
 ```powershell
-# --- 0. Where you are -----------------------------------------------------------------------------------------------
-Set-Location C:\Users\dell\smart-clinic          # the branch that contains scripts\rotate-demo-passwords.ts (PR #37)
-git branch --show-current                        # expect: chore/remove-demo-credentials (or main once PR #37 is merged)
+# --- 0. Where you are ------------------------------------------------------------------------------------------------
+Set-Location <path to the repository>
+git branch --show-current                        # expect main (or the branch that contains scripts\rotate-demo-passwords.ts)
 
-# --- 1. Target project and the six e-mail addresses (not secret) ----------------------------------------------------
+# --- 1. Target project and the six e-mail addresses (not secret) ------------------------------------------------------
 $ref = "<project-ref>"
 $env:SUPABASE_URL            = "https://$ref.supabase.co"
 $env:E2E_ADMIN_EMAIL         = "<admin e-mail>"
@@ -62,35 +80,35 @@ $env:E2E_NURSE3_EMAIL        = "<nurse 3 e-mail>"
 $env:E2E_RECEPTIONIST_EMAIL  = "<receptionist e-mail>"
 $env:E2E_PATIENT_EMAIL       = "<patient e-mail>"
 
-# --- 2. Service-role key through a SECURE prompt (not echoed, not stored in PowerShell history) -----------------------
+# --- 2. Service-role key through a SECURE prompt (not echoed, not stored in PowerShell history) ------------------------
 $k = Read-Host "Paste the service-role key and press Enter" -AsSecureString
 $env:SUPABASE_SERVICE_ROLE_KEY = [System.Net.NetworkCredential]::new("", $k).Password
 $k.Dispose()
 
-# --- 3. A private output folder OUTSIDE the repository and outside OneDrive; only your account can read it ----------------
-$dir = Join-Path $env:LOCALAPPDATA "SmartClinicSecrets"
+# --- 3. A private output folder OUTSIDE the repository and outside OneDrive; only your account can read it ---------------
+$dir = Join-Path $env:LOCALAPPDATA "<a folder name of your choice>"
 New-Item -ItemType Directory -Force $dir | Out-Null
 icacls $dir /inheritance:r /grant:r "${env:USERNAME}:(OI)(CI)F" | Out-Null
 $out = Join-Path $dir ("demo-passwords-" + (Get-Date -Format "yyyyMMdd-HHmm") + ".txt")
 
-# --- 4. DRY RUN: changes nothing. Check the six lines: right e-mail, right role, six different user ids. ------------
+# --- 4. DRY RUN: changes nothing. Check the six lines: right e-mail, right role, six different user ids. ----------------
 npx tsx scripts/rotate-demo-passwords.ts --project-ref $ref
 
-# --- 5. APPLY (only after the dry run looked right) -----------------------------------------------------------------------
+# --- 5. APPLY (only after the dry run looked right) -------------------------------------------------------------------------
 npx tsx scripts/rotate-demo-passwords.ts --project-ref $ref --apply --out $out
 $LASTEXITCODE                                      # 0 = all six updated; 2 = incomplete (see step 7); 1 = refused, nothing changed
 
-# --- 6. VERIFY: signs each account in with its new password and out again; prints OK / FAILED per account ---------------
+# --- 6. VERIFY: signs each account in with its new password and out again; prints OK / FAILED per account -----------------
 $env:SUPABASE_ANON_KEY = "<the project's public anon / publishable key>"   # public, safe to type
 npx tsx scripts/rotate-demo-passwords.ts --project-ref $ref --verify --out $out
 
-# --- 7. ONLY IF step 5 reported 'INCOMPLETE': fix the cause, then finish with the SAME file --------------------------------
+# --- 7. ONLY IF step 5 reported 'INCOMPLETE': fix the cause, then finish with the SAME file ---------------------------------
 npx tsx scripts/rotate-demo-passwords.ts --project-ref $ref --resume --out $out
 
-# --- 8. Move the passwords into the password manager (open the file, copy each entry; do NOT print it in the terminal) ---
+# --- 8. Store the credentials (§1) from the file; do NOT print it in the terminal ------------------------------------------
 notepad $out                                       # close WITHOUT saving; clear the clipboard afterwards
 
-# --- 9. Remove the file and every secret from this session ----------------------------------------------------------------
+# --- 9. Remove the file and every secret from this session -----------------------------------------------------------------
 Remove-Item $out -Force
 cipher /w:$dir                                     # optional: overwrite free space (a delete alone is not a secure erase on an SSD)
 Remove-Item Env:SUPABASE_SERVICE_ROLE_KEY, Env:SUPABASE_ANON_KEY -ErrorAction SilentlyContinue
@@ -99,34 +117,20 @@ Get-ChildItem Env: | Where-Object Name -like "E2E_*" | Remove-Item
 ```
 
 Notes
-- Do not run these commands with `-Verbose`, with `Start-Transcript` active, or in a screen share. The key never appears in
-  a command line (it is typed at the prompt), but the environment variable exists for the life of the window.
-- Reading the key out of the environment in other tools, or printing `Get-ChildItem Env:`, would expose it.
-- After rotating, consider rotating the **service-role key** itself if it has been exposed anywhere.
-- If the script cannot be used (Auth Admin API unreachable, key unavailable): use the Dashboard (Authentication → Users) to set
-  a new random password or send a recovery e-mail for each of the six users, admin first — what is offered depends on your
-  dashboard version. Do not edit `auth.users` or `auth.sessions` with SQL.
-
-### What the dry run and apply print (no secrets)
-
-```
-Target accounts (6; matched by exact e-mail, one profile each, profile role confirmed):
-  admin         admin         <e-mail>  user id <uuid>
-  nurse         nurse         <e-mail>  user id <uuid>
-  ... nurse2, nurse3, receptionist, patient ...
-Summary: admin: updated · nurse: updated · nurse2: updated · nurse3: updated · receptionist: updated · patient: updated
-```
+- Do not run these commands with `-Verbose`, with `Start-Transcript` active, or in a screen share. Do not print `Get-ChildItem Env:`.
+- Rotate the **service-role key** itself if it has ever been exposed.
+- If the script cannot be used: use the Dashboard (Authentication → Users) to set a new random password or send a recovery
+  e-mail for each user, admin first. Do not edit `auth.users` or `auth.sessions` with SQL.
 
 | Outcome | Meaning | What to do |
 |---|---|---|
 | exit **1**, `ERROR: …` | refused **before any change** (missing/duplicate e-mail, account not found, role mismatch, profile missing, key unusable, bad `--out`) | fix the cause, re-run the dry run |
-| exit **2**, `INCOMPLETE` | some accounts were updated; those marked FAILED / not attempted still have the OLD password | fix the cause, then `--resume --out $out` with the SAME file |
-| exit **0** | all six updated | verify (step 6), move the passwords, clean up |
+| exit **2**, `INCOMPLETE` | some accounts were updated; those marked FAILED / not attempted still have the OLD password | fix the cause, then `--resume` with the SAME file |
+| exit **0** | all six updated | verify (step 6), store the credentials, clean up |
 
-## 4. Sessions — what was established (local, not yet verified on the production project)
+## 4. Sessions — what was established (local experiment; not examined on the production project)
 
-Experiment on a disposable local stack running GoTrue **v2.197.0** (throwaway user, admin API); production's Auth version and
-settings were not examined:
+Disposable local stack running GoTrue **v2.197.0** (throwaway user, admin API):
 
 | Observation | Result |
 |---|---|
@@ -135,45 +139,57 @@ settings were not examined:
 | Auth `/user` with the **already-issued access token** afterwards | **403** — the Next.js app, which verifies users through Auth, rejects it |
 | **PostgREST with the already-issued access token** afterwards | **200 until the token expires** (signature + expiry only) |
 | `ban_duration` | blocks sign-in; does not shorten the access-token window; unnecessary for revocation |
-| `auth.admin.signOut(jwt)` | needs the user's own token (an administrator cannot supply it) |
 | admin endpoint to end sessions by user id | does not exist (404) |
 
-**Residual window:** someone holding a valid access token can still make direct REST calls (RLS-governed) until it expires —
-at most the project's JWT expiry (default 3600 s). They cannot refresh it. Rotate the admin first, wait out the JWT expiry,
-and review sign-ins (§6).
+**Residual window:** a holder of a valid access token could still make direct REST calls (RLS-governed) until it expired — at
+most the project's JWT expiry (default 3600 s), so for the October 2026 rotation it has elapsed. They could not refresh it.
 
-## 5. After rotation
+## 5. After the October 2026 rotation
 
-- Group members get credentials **only through the password manager**, then set the `E2E_*` environment variables (see
+- Credentials reach team members only from the owner's secure offline storage, then into `E2E_*` environment variables (see
   `.env.example`). The E2E helpers use the primary nurse (`E2E_NURSE_*`); `nurse2` and `nurse3` are for manual demos.
-- Tests affected: every spec that signs in as a demo account needs its `E2E_*` variables; the nine destructive suites are
-  **disabled by default** (`E2E_ENABLE_DESTRUCTIVE=1`, local stack only); `scripts/verify.ts` and `scripts/check-4b.ts` refuse
-  anything but a local stack.
-- The applied migration `20260808154202_admin_account_and_profile_merge.sql` still contains the old admin password
-  (append-only). After rotation it no longer works, but anyone may have copied it — which is why rotation is the control.
+- The applied migration `20260808154202_admin_account_and_profile_merge.sql` still contains the **old** admin password
+  (migrations are append-only). It no longer works; it remains in history, as do all the old values — which is why rotation, not
+  clean-up, was the control.
+- Test safety: see §7.
 
-## 6. Still to do after rotation (not part of this authorisation)
+## 6. Still to do (not part of this change)
 
 1. **Review sign-ins** since the repository became public (read-only): `auth.audit_log_entries` and `auth.sessions` for the six
    user ids — unrecognised addresses or times.
 2. **Information officer:** if real personal information was reachable through these accounts, decide whether a POPIA
    section 22 notification duty is engaged.
-3. Move destructive tests off the shared project (staged plan S1-T); give demo accounts their own demo clinic (D-ID5);
-   consider retiring the shared admin demo account.
+3. Give demo accounts their own demo clinic (decision D-ID5); consider retiring the shared admin demo account.
 4. Add secret scanning (GitHub push protection / gitleaks) so a credential cannot be committed again.
+5. Add a committed local seed so the destructive suites have something to run against (§7): until then they are disabled.
 
-## 7. How the script was tested (local stack only; no production access)
+## 7. Test safety — how the suite is kept away from the shared project
 
-`scripts/rotate-demo-passwords.ts` against a disposable Supabase stack with six users that **share one old password**, as in
-production: **71 checks, 0 failed**. They cover: argument/environment interlocks; the dry run changing nothing and listing
-**exactly six** accounts (a leftover `E2E_NURSE4_EMAIL` is ignored); a missing nurse, missing patient, nurse that is really a
-patient, nurse without a profile, receptionist whose role was changed, unusable key, duplicate addresses (including different
-letter case) — each refused with **nothing changed and no file written**; a full apply (admin first, **six different**
-≥24-character passwords, old shared password rejected for all six, `--verify` OK for all six); **user ids, e-mails, metadata,
-profiles and roles identical before and after**; no password or key in any output or tracked file; a simulated failure of
-`nurse3` (admin, nurse, nurse2 updated; nurse3 FAILED; receptionist and patient not attempted; old password still working for
-the untouched three); `--verify` after the partial run (3 OK / 3 FAILED); refusal of tampered or short-password files on
-`--resume`; `--resume` finishing all six without changing the file. Five deliberately broken copies of the script (printing a
-password, sharing one password among the nurses, wrong rotation order, skipping the role check, adding a fourth nurse) each
-fail the suite. A bug found by these tests — failures after network calls exited with status 127 on Windows / Node 24 — is
-fixed (the script now sets the exit code instead of calling `process.exit`).
+Specs are classified in `e2e/support/e2e-safety.ts` as **safe**, **self-guarded** or **destructive**; anything unclassified is
+treated as destructive. By default only safe and self-guarded specs run. A destructive spec writes shared state (check-ins,
+call/undo/record a consultation, bookings, clinic-settings saves, `reset_demo_state`) and runs only with
+`E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack:
+
+- the Playwright config **throws** (nothing runs) on any unsafe setting — a value other than `1`, the shared project named in
+  any Supabase/E2E variable, missing or non-local `LOCAL_SUPABASE_*` / `E2E_*` values, `E2E_SUPABASE_*` differing from the
+  local stack — and never auto-starts a dev server in that mode (it would read `.env.local`);
+- a global setup proves the app **server** reads the local stack (a canary that exists only there);
+- destructive specs use a guarded `test` that blocks any browser request to a non-local Supabase host;
+- the destructive helpers (`resetDemoState`, `setStaffIdleTimeoutMinutes`) and the write-capable scripts refuse any target that
+  is not a plain local origin, before any network call.
+
+The safeguards are covered by `e2e/e2e-safety.spec.ts` (pure: no browser, database or network). The audit of every spec found two
+state-changing specs that the earlier, helper-based list had missed: `nurse-v2` (calls the next patient, records and undoes a
+consultation) and the saving test inside `clinic-hours` (an admin settings write, now its own spec, `clinic-hours-edit`).
+
+## 8. How the rotation script was tested (local stack only; no production access)
+
+`scripts/rotate-demo-passwords.ts` against a disposable Supabase stack with six users that **share one old password**: **71
+checks, 0 failed**. They cover: argument/environment interlocks; the dry run changing nothing and listing **exactly six** accounts
+(a leftover `E2E_NURSE4_EMAIL` is ignored); a missing nurse, missing patient, nurse that is really a patient, nurse without a
+profile, receptionist whose role was changed, unusable key, duplicate addresses (including different letter case) — each
+refused with **nothing changed and no file written**; a full apply (admin first, six different ≥24-character passwords, old
+shared password rejected for all six, `--verify` OK for all six); **user ids, e-mails, metadata, profiles and roles identical
+before and after**; no password or key in any output or tracked file; a simulated failure of `nurse3` followed by `--resume`;
+refusal of tampered or short-password files. Five deliberately broken copies of the script each fail the suite. A bug found by
+these tests — failures after network calls exited with status 127 on Windows / Node 24 — is fixed.

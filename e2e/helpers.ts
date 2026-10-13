@@ -1,12 +1,12 @@
 import type { Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../lib/types/database.types'
-import { PRODUCTION_PROJECT_REF } from './support/local-supabase-guard'
+import { assertLocalSupabaseUrl } from './support/e2e-safety'
 
 /**
  * Where these specs run and who they sign in as come from the ENVIRONMENT. Nothing here defaults to the shared
  * production project and no credential is committed (they were, and the repository is public — see
- * docs/proposals/staged_migration_plan.md, finding C0). Test-account passwords live in the team password manager.
+ * docs/proposals/staged_migration_plan.md, finding C0). Test-account passwords are held by the project owner in secure offline storage.
  *
  *   E2E_SUPABASE_URL, E2E_SUPABASE_ANON_KEY            the project the specs talk to
  *   E2E_{PATIENT,RECEPTIONIST,NURSE,ADMIN}_EMAIL / _PASSWORD
@@ -23,7 +23,7 @@ function required(name: string): string {
   const value = process.env[name]?.trim()
   if (!value) {
     throw new Error(
-      `${name} is not set. Test-account credentials are kept in the team password manager and supplied through the environment — they are never committed.`
+      `${name} is not set. Test-account credentials are kept in the project owner's secure offline storage and supplied through the environment — they are never committed.`
     )
   }
   return value
@@ -49,22 +49,16 @@ export const ACCOUNTS = {
 }
 
 /**
- * Refuses unless the configured project is a local stack. Destructive helpers (reset_demo_state, clinic-settings
- * writes) must never touch the shared project: it is production and previews share it.
+ * Refuses unless destructive testing was explicitly enabled (E2E_ENABLE_DESTRUCTIVE=1) AND the configured project is a
+ * plain local origin. Destructive helpers (reset_demo_state, clinic-settings writes) must never touch the shared project:
+ * it is production and previews share it. Runs before any network call. Parameters default to the environment; tests
+ * pass them explicitly.
  */
-function assertLocalStack(action: string) {
-  let host = ''
-  try {
-    host = new URL(SUPABASE_URL).hostname
-  } catch {
-    /* handled below */
+export function assertLocalStack(action: string, url: string = SUPABASE_URL, enabled: string | undefined = process.env.E2E_ENABLE_DESTRUCTIVE) {
+  if ((enabled ?? '').trim() !== '1') {
+    throw new Error(`${action} is destructive and disabled by default. It only runs with E2E_ENABLE_DESTRUCTIVE=1 against a local Supabase stack.`)
   }
-  if (!SUPABASE_URL || SUPABASE_URL.includes(PRODUCTION_PROJECT_REF) || !['localhost', '127.0.0.1'].includes(host)) {
-    throw new Error(
-      `${action} is destructive and only runs against a local Supabase stack. E2E_SUPABASE_URL is "${SUPABASE_URL || '(not set)'}". ` +
-        'Start a local stack and set E2E_SUPABASE_URL to http://127.0.0.1:<port>.'
-    )
-  }
+  assertLocalSupabaseUrl(url, action)
 }
 
 /** A fresh client signed in as admin — only ever used by the destructive helpers below, which require a local stack. Always sign out when done. */

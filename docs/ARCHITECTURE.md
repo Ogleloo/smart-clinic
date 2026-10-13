@@ -84,20 +84,21 @@ No nurse on duty → no estimate shown (never a guess).
 
 ## Test accounts
 
-The demonstration accounts' passwords are **not stored in this repository**. They are kept in the team password
-manager and supplied to tests and scripts through the environment (never committed):
+The demonstration accounts' passwords are **not stored in this repository**. They are held by the project owner in
+secure offline storage and supplied to tests and scripts through the environment (never committed). They were rotated
+after being exposed in git history (see `docs/proposals/credential_rotation_runbook.md`):
 
 | Role        | E-mail variable           | Password variable            |
 |-------------|---------------------------|------------------------------|
 | Patient     | `E2E_PATIENT_EMAIL`       | `E2E_PATIENT_PASSWORD`       |
 | Nurse       | `E2E_NURSE_EMAIL`         | `E2E_NURSE_PASSWORD`         |
-| Nurses 2-3  | `E2E_NURSE2_EMAIL`, `E2E_NURSE3_EMAIL` | (passwords in the password manager; used for manual demos) |
+| Nurses 2-3  | `E2E_NURSE2_EMAIL`, `E2E_NURSE3_EMAIL` | (passwords held by the project owner in secure offline storage; used for manual demos) |
 | Reception   | `E2E_RECEPTIONIST_EMAIL`  | `E2E_RECEPTIONIST_PASSWORD`  |
 | Admin       | `E2E_ADMIN_EMAIL`         | `E2E_ADMIN_PASSWORD`         |
 
-Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Suites that write data are disabled by default and run
-only against a local Supabase stack (`E2E_ENABLE_DESTRUCTIVE=1`). Rotation procedure:
-`docs/proposals/credential_rotation_runbook.md`.
+Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Specs are classified in `e2e/support/e2e-safety.ts`:
+those that write data (and any spec nobody has classified) are **disabled by default** and run only with
+`E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack. The shared Supabase project is rejected in that mode.
 
 Reset demo state: `SELECT * FROM public.reset_demo_state();`
 

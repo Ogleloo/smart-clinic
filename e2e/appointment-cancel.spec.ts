@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './support/guarded-test'
 import { ACCOUNTS, createTestClient, loginAs, resetDemoState } from './helpers'
 import { CLINIC_TIMEZONE } from '../lib/clinicTime'
 

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { test, expect, guardedContext } from './support/guarded-test'
 import { ACCOUNTS, createTestClient, loginAs, resetDemoState, waitSettled } from './helpers'
 
 /**
@@ -110,7 +111,7 @@ test('multi-nurse shows the method sentence, no equation', async () => {
 test('no nurse on duty: no number anywhere, breakdown absent', async ({ page, browser }) => {
   await resetDemoState()
 
-  const nurseContext = await browser.newContext()
+  const nurseContext = await guardedContext(browser)
   const nursePage = await nurseContext.newPage()
   await loginAs(nursePage, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   await nursePage.getByRole('button', { name: 'End session' }).click()
@@ -139,7 +140,7 @@ test('no nurse on duty: no number anywhere, breakdown absent', async ({ page, br
 test('position 1 with a busy nurse shows a non-zero estimate', async ({ page, browser }) => {
   await resetDemoState()
 
-  const nurseContext = await browser.newContext()
+  const nurseContext = await guardedContext(browser)
   const nursePage = await nurseContext.newPage()
   await loginAs(nursePage, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   // Two calls: the first starts the nurse on the patient currently ahead
