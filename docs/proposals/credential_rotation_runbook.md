@@ -182,37 +182,89 @@ their submissions moved to `reception-queue-actions.spec.ts` (Skip, forged ids, 
 
 Layers, in order:
 
-1. **Classification and the default ignore list** — destructive and unclassified specs are ignored unless explicitly enabled.
-2. **Static audit** (`findMutationSubmissions`, run over every read-only spec by `e2e/e2e-safety.spec.ts`): rejects clicks on
-   mutation-capable controls (Skip, Save, Update password, Book, Confirm, Check in, Call next, Undo…), Server Action handling
-   (`next-action`), forged or rewritten requests, same-tick multi-click, form-submit selectors and password-field typing. It is a
-   tripwire, not a proof — it cannot see what a click ends up calling — so anything it cannot rule out belongs in a destructive
+1. **Classification and the spec allowlist** — the config's `testMatch` is an **allowlist**: exactly the classified, top-level
+   `e2e/<name>.spec.ts` files. Offline, read-only and self-guarded specs are on it by default; destructive specs only with the
+   opt-in. A spec nobody classified — in a sub-folder, or named `.test.ts`, `.spec.tsx`, `.spec.js`, `.spec.mjs`… — can never
+   match, in any mode, even if named on the command line. (The earlier design *ignored the unclassified files it could see*, which
+   missed every shape Playwright discovers that the listing did not; that was review finding H1.) A test also fails if any
+   test-shaped file exists under `e2e/` that is not a classified top-level spec.
+2. **Static audit** (`read-only-audit.ts`, run over every read-only spec and the sign-in helpers by `e2e/e2e-safety.spec.ts`).
+   It parses the source with the TypeScript compiler and is **deny-by-default**: it lists what a read-only spec *may* do and
+   rejects every other submission-capable or ambiguous interaction, instead of listing dangerous button labels (review finding
+   H2: a label list let 27 of 35 realistic variants through).
+   - *Clicks* only on a link, a button whose literal name is on the allowlist (Sign Out / Log out everywhere; a few named
+     client-side controls per spec, in `CLICK_ALLOW_BY_SPEC`), or an allowlisted selector. Anything else — `getByText`, CSS,
+     `getByTestId`, a name built from a variable or template, `page.click(selector)`, element handles, a receiver that is a
+     parameter or loop variable, `.or()` — is denied.
+   - *Keys*: navigation keys only. Enter and Space (they submit forms and activate buttons) and key-by-key typing are denied.
+   - *`evaluate()` / `waitForFunction()`* callbacks may only read the page.
+   - *No other route to a server*: `fetch`/XHR, `request` / `page.request`, `page.route` / `context.route`, new contexts, init
+     scripts, extra headers, `dispatchEvent`, `submit()`, dialogs accepted, `next-action` handling, forged or rewritten requests,
+     password typing.
+   - *Imports* from a short allowlist; `./helpers` only for the sign-in/booking helpers, which are themselves audited, with six
+     reviewed exact-statement exemptions (`APPROVED_HELPER_CALLS`).
+   It is still static: it cannot see what a permitted click ends up calling, and a Server Action's writes are invisible to layer
+   3. That is why the allowlists are short and every entry is a reviewed decision in `read-only-audit.ts`, not a comment in a
    spec. Offline specs may not use the live helpers at all.
-3. **Browser-level guard** (`e2e/support/safe-test.ts`, used by every read-only spec): aborts, records and fails the test on any
-   browser request to a Supabase API that would change data (PATCH/PUT/DELETE, a POST to a table or a write RPC, auth changes
-   other than sign-in/out, storage, edge functions). *Limit:* a Server Action runs on the app server and its writes are invisible
-   to the browser — layer 2 is what covers those.
+3. **Browser-level guard** (`e2e/support/safe-test.ts`, used by every read-only spec): aborts, records and **fails the test at
+   teardown** on any browser request to a Supabase API that would change data: PATCH/PUT/DELETE; a POST to a table; a POST to
+   **any RPC not on the positive read allowlist** (`READ_ONLY_RPCS` — unknown and future RPC names are blocked); **any
+   non-GET GraphQL request** (a mutation travels in a POST body); auth changes other than sign-in/out; storage; edge functions.
+   The fixture is also **sealed at run time**: `page.route`, `context.route`, `routeFromHAR`, `addInitScript`, `exposeFunction`,
+   extra headers, and the request-sending methods of `page.request`, `context.request` and the `request` fixture all throw —
+   a page-level `route.continue()` would otherwise skip the context guard, and an `APIRequestContext` is never routed.
+   *Limits:* a Server Action runs on the app server and its writes are invisible to the browser — layer 2 is what covers those;
+   the `browser` fixture cannot be sealed (Playwright builds the context from it), so `browser.newContext()` is rejected
+   statically only; realtime websockets are not inspected.
 4. **Configuration** — with `E2E_ENABLE_DESTRUCTIVE` set, the config **throws** (nothing runs) on any unsafe setting: a value other
    than `1`, the shared project named in any Supabase/E2E variable, missing or non-local `LOCAL_SUPABASE_*` / `E2E_*` values,
    `E2E_SUPABASE_*` differing from the local stack; and it never auto-starts a dev server in that mode.
+   **The dev server is only started when it cannot reach the shared project** (`web-server-plan.ts`, review finding M3). Before
+   starting `npm run dev` the config reads what that server would read — the process environment over `.env.development.local`,
+   `.env.local`, `.env.development`, `.env`, in Next.js's order — and **refuses** (it runs a command that prints why and exits;
+   nothing is started) unless `NEXT_PUBLIC_SUPABASE_URL` is a plain local origin and no related variable names a hosted project.
+   Messages name variables and files, never values.
 5. **Run time (destructive mode)** — a global setup proves the app **server** reads the local stack (a canary that exists only
    there); destructive specs use a guarded `test` that blocks any browser request to a non-local Supabase host; the destructive
    helpers and write-capable scripts refuse any target that is not a plain local origin, before any network call.
 
-All of this is covered by `e2e/e2e-safety.spec.ts` (pure apart from one about:blank browser test that sends nothing to any
-server). The audit of every spec found, over two rounds, these state-changing or submitting tests that the earlier lists had
-missed or mis-classified: `nurse-v2` (calls, records and undoes a consultation); the saving test inside `clinic-hours` (now
+All of this is covered by `e2e/e2e-safety.spec.ts`. It sends nothing to any server: its browser tests use `about:blank` and the
+closed local port 9, and its child `playwright test` runs only `--list` or run throw-away specs against that same closed port. The
+audit of every spec found, over two rounds, these state-changing or submitting tests that the earlier lists had missed or
+mis-classified: `nurse-v2` (calls, records and undoes a consultation); the saving test inside `clinic-hours` (now
 `clinic-hours-edit`); the Skip-submission tests in `reception-queue`; the Save/Update-password submissions in
 `reception-profile`.
 
-**Running the local suites:** write the app origin as **`http://localhost:<port>`**, not `http://127.0.0.1:<port>`. Next.js 16's dev
-server blocks `/_next/hmr` for any origin other than `localhost` unless it is in `allowedDevOrigins`; with `127.0.0.1` the page
-reloads while a test is waiting for a control and the test times out (two local-suite failures were traced to exactly this). The
-guards treat the two spellings as the same machine, so it is a convenience rule, not a safety one.
+**How to run the suite**
 
-**Remaining exposure of the default configuration:** a default run still auto-starts `npm run dev` when `E2E_BASE_URL` is unset,
-and that server reads `.env.local` (normally the shared project) — even for offline specs, which then make no requests to it. Setting
-`E2E_BASE_URL` yourself (an app you started, wired to a local stack) avoids it.
+| You want | Run | What starts |
+|---|---|---|
+| Offline specs only — no backend, no credentials, no `.env.local` | `npm run test:e2e:offline` | a dev server whose Supabase settings are forced to a dead local port (`127.0.0.1:9`) and whose Supabase/database/secret-looking variables are blanked, so it cannot reach any real project whatever `.env.local` says |
+| Everything that is safe by default, against a local stack | start the app against the local stack yourself, then set `E2E_BASE_URL=http://localhost:<port>` and the `E2E_*` variables, and run `npm run test:e2e` | nothing — you started the app |
+| The same, letting Playwright start the app | only if the environment you run in already names a plain local `NEXT_PUBLIC_SUPABASE_URL` | `npm run dev`, after the plan has checked its configuration |
+| Read-only specs against an app wired to shared data | start it yourself and set `E2E_BASE_URL` deliberately | nothing — this is a conscious choice; the config will not start it for you |
+| Destructive specs | `E2E_ENABLE_DESTRUCTIVE=1` plus a verified local stack (§ above) | nothing; a canary proves the app reads the local stack |
+
+A plain `npx playwright test` on a machine whose `.env.local` names the shared project now stops with an explanation and starts
+nothing. Observed on this repository's own `.env.local`: the run exits with `REFUSING TO START THE APP … NEXT_PUBLIC_SUPABASE_URL
+(from .env.local) is not a plain local origin`. The offline entry point was checked with Next.js's own env loader (`@next/env`): given
+the plan's environment it resolves the Supabase URL to the placeholder and every other Supabase/secret variable to empty, whereas
+the same loader in a fresh process without the overrides does load the shared project from `.env.local`.
+
+**Running the local suites:** write the app origin as **`http://localhost:<port>`**, not `http://127.0.0.1:<port>`. The guards
+treat the two spellings as the same machine, so this is a convenience rule, not a safety one.
+
+What was observed, and what is only suspected, about the two failures that led to this rule:
+
+| Observed (reproduced in this repository) | Not established |
+|---|---|
+| With the app at `http://127.0.0.1:3100`, two local-suite tests failed (2 failed, 52 passed, 12 did not run); the call log shows "waiting for navigation to finish… navigated to /nurse" three times, then a 180 s timeout waiting for the Confirm button. | That those repeated navigations are page **reloads** caused by Next's dev client. An idle `/login` page opened through `127.0.0.1` showed **no** full-page reload in 25 s (one navigation, against two through `localhost`), so "the page reloads while a test waits" is an inference, not something that was traced. |
+| The dev-server log for those runs says: "Blocked cross-origin request to Next.js dev resource /_next/hmr from 127.0.0.1" and names `allowedDevOrigins`. Next 16 allows only `localhost` by default. | That the blocked HMR connection **is** what makes those two tests fail. It is the leading suspect: the correlation is complete (every `127.0.0.1` run, no `localhost` run) but the causal path was not isolated. |
+| In a scripted browser, the `/_next/hmr` WebSocket handshake **failed and was retried about ten times in 25 s** through `127.0.0.1`, and connected once ("[HMR] connected") through `localhost`. | Whether adding `allowedDevOrigins: ['127.0.0.1']` to `next.config.ts` would remove the failures. It was not tried: it changes application configuration, which this change does not touch. |
+| The same two tests against the same server written as `http://localhost:3100` **pass (2/2)**, and the whole local suites pass (66/66) on `localhost`. | |
+
+So: the rule "use `localhost`" rests on the A/B result, not on a proven mechanism. It is a test-environment spelling issue; no
+application or safeguard defect was found, and nothing is suppressed.
 
 ## 8. How the rotation script was tested (local stack only; no production access)
 

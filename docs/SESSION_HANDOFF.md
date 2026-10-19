@@ -4,7 +4,19 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Nurse V3 Phase 2: My Queue (ready for final review)
+## Latest checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37)
+
+**Date:** 2026-10-20 · **Branch:** `chore/remove-demo-credentials` · **Draft PR #37** (do not merge until re-reviewed; PR #36 is separate and also unmerged). Touches no `app/`, `lib/`, `components/` or `supabase/` file.
+
+**Done:** committed demo credentials removed and the six-account rotation recorded (owner-confirmed); rotation tooling; the Playwright suite fails closed. After the independent review (H1, H2, M1, M3) the hardening is: the config runs an **allowlist** of classified top-level specs (`specMatchPattern`; sub-folders and other extensions never match); the read-only static audit is **deny-by-default** and AST-based (`e2e/support/read-only-audit.ts`); the browser guard uses a **positive RPC allowlist**, blocks non-GET GraphQL, is **sealed at run time** against routes / `APIRequestContext`, and its teardown assertion is tested in a child run; the dev server is **only auto-started when it cannot reach the shared project** (`web-server-plan.ts`), and `npm run test:e2e:offline` runs the offline specs with no backend. Rules, run modes and the observed-vs-suspected HMR note: `docs/proposals/credential_rotation_runbook.md` §7.
+
+**Remaining (owner / process, not code):** review sign-ins to the shared project since the repository became public; the POPIA s.22 information-officer question; secret scanning in CI (there is no CI yet, so nothing enforces `e2e/e2e-safety.spec.ts` — the offline job needs no secrets); a committed local seed (S1-T) so the 51 destructive tests have somewhere to run (until then they run nowhere); optionally `allowedDevOrigins: ['127.0.0.1']` in `next.config.ts` (not tried — it is application config).
+
+**Rules to remember:** a new read-only spec's clicks must be on `CLICK_ALLOW_BY_SPEC` / `CLICK_ALLOW_EVERYWHERE`, and a new read RPC on `READ_ONLY_RPCS` — each is a reviewed decision, not a convenience; anything that submits belongs in a destructive spec.
+
+---
+
+## Previous checkpoint — Nurse V3 Phase 2: My Queue (ready for final review; since merged as PR #31)
 
 **Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge until the final Phase 2 review; Phase 3 not started). `main` already contains everything below it in the table; this branch was brought up to date by merging `main` (no conflicts beyond `app/actions/nurse.ts`, which auto-merged and was checked by hand).
 

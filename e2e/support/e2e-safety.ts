@@ -7,11 +7,12 @@
  * missing variable, a typo, a value like "true", a dev server that quietly reads .env.local, or a spec nobody
  * classified. Three layers use these rules:
  *
- *  1. SPEC CLASSIFICATION. Every e2e/*.spec.ts is declared offline, read-only, self-guarded or destructive below. Anything not
- *     declared is treated as DESTRUCTIVE (the default fails closed) and a test fails until someone classifies it.
- *  2. playwright.config.ts: destructive and unclassified specs are ignored unless E2E_ENABLE_DESTRUCTIVE=1; with it,
+ *  1. SPEC CLASSIFICATION. Every e2e/<name>.spec.ts is declared offline, read-only, self-guarded or destructive below. The
+ *     config runs an ALLOWLIST of exactly those files (specMatchPattern): anything not declared — in any sub-folder, with any
+ *     test-file extension — is never run, in any mode, and a test fails until someone classifies it.
+ *  2. playwright.config.ts: destructive specs are only on the allowlist when E2E_ENABLE_DESTRUCTIVE=1; with it,
  *     evaluateE2eSafety() must find NO problem or the config throws and nothing runs; the config never auto-starts a
- *     dev server in that mode (it would read .env.local, normally production).
+ *     dev server in that mode (it would read .env.local, normally production) — see web-server-plan.ts.
  *  3. At run time: the destructive specs use the guarded `test` (browser requests to any non-local Supabase host are
  *     blocked), a global setup proves the app SERVER reads the local stack (canary), and the destructive helpers
  *     refuse any target that is not a local origin.
@@ -30,7 +31,7 @@ export const OFFLINE_SPECS = ['e2e-safety', 'nurse-v3-queue', 'reception-profile
  * READ-ONLY (live): run by default against whatever project the app server is wired to — possibly the shared one. They may
  * sign in (an Auth session) and sign out, navigate and look. They must NOT submit anything a server could act on, not even
  * input that is expected to be rejected: no Skip/Save/Update-password/Book/Check-in clicks, no Server Action handling, no
- * forged or repeated submissions. Enforced by findMutationSubmissions() below (static) and by safe-test.ts (browser level).
+ * forged or repeated submissions. Enforced by findMutationSubmissions() (read-only-audit.ts, static) and by safe-test.ts (browser level).
  */
 export const READ_ONLY_SPECS = [
   'admin-v2',
@@ -86,27 +87,60 @@ export function classifySpec(name: string): SpecClass {
 export const specName = (file: string): string => file.replace(/^.*[\\/]/, '').replace(/\.spec\.ts$/, '')
 
 /**
- * Globs for Playwright's testIgnore. Without the explicit opt-in, everything that is not declared safe or self-guarded is
- * ignored — including specs nobody has classified yet.
+ * Every file Playwright would treat as a test file by default (its default testMatch is `**\/*.@(spec|test).?(c|m)[jt]s?(x)`,
+ * recursive). Used to prove nothing of that shape exists outside the classified top-level list.
  */
-export function ignoredSpecGlobs(specFiles: string[], destructiveEnabled: boolean): string[] {
-  if (destructiveEnabled) return []
-  return specFiles
-    .map(specName)
-    .filter((name) => {
-      const c = classifySpec(name)
-      return c !== 'offline' && c !== 'read-only' && c !== 'self-guarded'
-    })
-    .map((name) => `**/${name}.spec.ts`)
+export const TEST_FILE_PATTERN = /\.(spec|test)\.[cm]?[jt]sx?$/i
+
+/** The classified specs that may run: offline, read-only and self-guarded always; destructive only with the explicit opt-in. */
+export function runnableSpecNames(destructiveEnabled: boolean): string[] {
+  return [...OFFLINE_SPECS, ...READ_ONLY_SPECS, ...SELF_GUARDED_SPECS, ...(destructiveEnabled ? DESTRUCTIVE_SPECS : [])].filter(
+    (n) => classifySpec(n) !== 'unclassified'
+  )
+}
+
+const escapeRegex = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * The ONLY files the config may run, as a Playwright `testMatch` regular expression: exactly `<testDir>/<name>.spec.ts` for
+ * each runnable classified name. It is an allowlist, so a spec nobody classified, a spec in a sub-folder, a `.test.ts`, a
+ * `.spec.tsx`/`.js`/`.mjs`… can never match, whatever its name — unlike a deny-list built from the files that happen to exist.
+ * Case-sensitive on purpose. Accepts either path separator (Playwright matches against the native absolute path).
+ * `only` narrows the allowlist further (the offline config passes OFFLINE_SPECS); it can never widen it.
+ */
+export function specMatchPattern(testDir: string, destructiveEnabled: boolean, only?: readonly string[]): RegExp {
+  const dir = testDir
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map(escapeRegex)
+    .join('[\\\\/]')
+  const names = runnableSpecNames(destructiveEnabled)
+    .filter((n) => !only || only.includes(n))
+    .map(escapeRegex)
+    .join('|')
+  // `^[\\/]*` covers a leading separator (POSIX absolute paths); a Windows drive letter is part of `dir`. Nothing else is optional.
+  return new RegExp(`^[\\\\/]*${dir}[\\\\/](?:${names})\\.spec\\.ts$`)
+}
+
+/**
+ * Test-shaped files (any depth, any extension Playwright recognises) that are not a classified top-level `<name>.spec.ts`.
+ * `relPaths` are relative to the e2e directory. Must be empty: such a file would be silently ignored by the allowlist, which
+ * is safe, but it is also a test nobody will ever run, so it is reported.
+ */
+export function unclassifiedTestFiles(relPaths: string[]): string[] {
+  return relPaths
+    .map((p) => p.replace(/\\/g, '/'))
+    .filter((p) => TEST_FILE_PATTERN.test(p))
+    .filter((p) => p.includes('/') || !p.endsWith('.spec.ts') || classifySpec(specName(p)) === 'unclassified')
 }
 
 // ---------------------------------------------------------------------------------------------------- environment
 
 type Env = Record<string, string | undefined>
 
-const HOSTED_SUPABASE_HOST = /supabase\.(co|in|net|com)\b/i
+export const HOSTED_SUPABASE_HOST = /supabase\.(co|in|net|com)\b/i
 /** Variables worth scanning for a hosted/production target (the scan reports the NAME, never the value). */
-const SCANNED_NAMES = /supabase|e2e|local_|database|postgres|api_url|base_url|next_public|jwt|service_role|anon/i
+export const SCANNED_NAMES = /supabase|e2e|local_|database|postgres|api_url|base_url|next_public|jwt|service_role|anon/i
 
 /** A plain http://localhost|127.0.0.1:<explicit port> origin and nothing else (no path, query, credentials). */
 export function isLocalOrigin(value: string | undefined): boolean {
@@ -199,27 +233,32 @@ export function unsafeConfigurationError(problems: string[]): Error {
   return new Error(`REFUSING TO RUN: unsafe destructive-test configuration. Nothing was sent anywhere.\n  - ${problems.join('\n  - ')}`)
 }
 
-/**
- * Whether playwright.config.ts may start `npm run dev` itself. It must NOT when destructive testing is enabled or the
- * local-only suites are opted in: that server reads .env.local, which is normally the shared production project.
- */
-export function mayAutoStartWebServer(env: Env): boolean {
-  if (env.E2E_BASE_URL?.trim()) return false
-  if (['LOCAL_SUPABASE_URL', 'LOCAL_SUPABASE_ANON', 'LOCAL_SUPABASE_SERVICE'].some((k) => env[k]?.trim())) return false
-  if ((env.E2E_ENABLE_DESTRUCTIVE ?? '').trim() !== '' && (env.E2E_ENABLE_DESTRUCTIVE ?? '').trim() !== '0') return false
-  return true
-}
-
 // ---------------------------------------------------------------------------------------------------- read-only enforcement
 
-/** RPC names that write. Anything matching is blocked in the browser of a read-only spec. */
-const MUTATING_RPC =
-  /^(check_in|create_|next_|undo_|skip_|set_|end_|book_|cancel_|merge_|admin_|mark_|start_|call_|reset_|accept_|send_|update_|delete_|insert_|upsert_|register_|issue_|redeem_|replace_|request_|decline_)/
+/**
+ * RPCs a read-only spec's browser may call: a POSITIVE allowlist (every other RPC name — including ones this list has never
+ * heard of — is treated as a write and blocked). These are the read functions the app's client components call
+ * (`grep "\.rpc("` in components/); PostgREST also refuses a GET on a volatile function, so GET /rpc/* needs no entry.
+ * Each is declared STABLE in its latest migration, and PostgreSQL does not let a STABLE function modify the database (checked
+ * when this list was written). Add a name here only after confirming the same of the new function.
+ */
+export const READ_ONLY_RPCS: ReadonlySet<string> = new Set([
+  'available_nurses',
+  'confidence_label',
+  'find_duplicate_patients',
+  'get_available_slots',
+  'get_public_queue_display',
+  'get_service_queue',
+  'get_wait_estimate',
+  'search_patients',
+  'service_consultation_stats',
+])
 
 /**
- * True for a browser request to a Supabase API that would change data: any PATCH/PUT/DELETE, any POST to a table, a POST
- * to a write RPC, auth changes other than signing in and out, storage writes and edge-function calls. Sign-in (token) and
- * logout are the only allowed session operations. Used by safe-test.ts, which aborts and reports such requests.
+ * True for a browser request to a Supabase API that would change data: any PATCH/PUT/DELETE, any POST to a table, a POST to
+ * an RPC that is not on READ_ONLY_RPCS, any non-GET GraphQL request (a mutation travels in a POST body, which cannot be
+ * told from a query here), auth changes other than signing in and out, storage writes and edge-function calls. Sign-in
+ * (token) and logout are the only allowed session operations. Used by safe-test.ts, which aborts and reports such requests.
  */
 export function isMutatingSupabaseRequest(method: string, url: string): boolean {
   let u: URL
@@ -235,49 +274,19 @@ export function isMutatingSupabaseRequest(method: string, url: string): boolean 
   const kind = api[1]
   const rest = api[2] ?? ''
   if (kind === 'auth') return !(m === 'POST' && (rest === '/token' || rest === '/logout'))
-  if (kind === 'graphql') return false
+  if (kind === 'graphql') return true
   if (kind === 'rest') {
-    const rpc = /^\/rpc\/([^/?]+)/.exec(rest)
-    return rpc ? MUTATING_RPC.test(rpc[1]) : true
+    const rpc = /^\/rpc\/([^/]+)$/.exec(rest)
+    if (!rpc || m !== 'POST') return true
+    let name: string
+    try {
+      name = decodeURIComponent(rpc[1])
+    } catch {
+      return true
+    }
+    return !READ_ONLY_RPCS.has(name)
   }
   return true // storage and edge functions: any non-read request
-}
-
-/** Names of controls that submit or change something. Matched against button names in read-only specs. */
-const MUTATING_CONTROL =
-  /\b(skip|save|update password|create account|register|sign up|confirm|book|check.?in|call next|next patient|undo|record|emergency|start session|end session|go (on|off) duty|off duty|on duty|remove photo|upload|submit|send|delete|remove|approve|merge|invite|revoke|reset|cancel (appointment|booking)|pay)\b/i
-
-/**
- * A deliberately conservative STATIC tripwire for specs that run against a possibly-shared backend. Returns a description
- * for every pattern that submits, or prepares to submit, something a server could act on — including submissions that are
- * expected to be rejected. It is heuristic (it cannot see what a click ends up calling), which is why the browser-level
- * guard in safe-test.ts exists too, and why anything it cannot rule out belongs in a destructive spec. Comment lines are
- * ignored.
- */
-export function findMutationSubmissions(source: string): string[] {
-  const code = source
-    .split('\n')
-    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-    .join('\n')
-  const findings: string[] = []
-  if (/next-action/i.test(code)) findings.push('tracks or handles Server Action POSTs ("next-action")')
-  if (/\bforge\w*\b|\bpostData\b|route\.continue\(\s*\{/.test(code)) findings.push('rewrites or forges requests')
-  if (/\[type=["']submit["']\]/.test(code)) findings.push('clicks a form submit button by selector')
-  if (/\.requestSubmit\(|\.submit\(\)/.test(code)) findings.push('submits a form programmatically')
-  if (/\.evaluate\([^]{0,400}?\.click\(\)/.test(code)) findings.push('clicks inside evaluate() (same-tick double-submit pattern)')
-  if (/(getByLabel|locator)\(\s*['"`/#][^)]*password[^)]*\)\s*\.fill\(/i.test(code)) findings.push('types into a password field')
-  const button = /getByRole\(\s*['"]button['"]\s*,\s*\{[^}]*?name:\s*(?:'([^']*)'|"([^"]*)"|\/((?:\\.|[^/\\])+)\/[a-z]*)[^}]*\}\s*\)/g
-  for (const m of code.matchAll(button)) {
-    const name = m[1] ?? m[2] ?? m[3] ?? ''
-    if (!MUTATING_CONTROL.test(name)) continue
-    const end = (m.index ?? 0) + m[0].length
-    const after = code.slice(end, end + 80)
-    const before = code.slice(Math.max(0, (m.index ?? 0) - 60), m.index ?? 0).replace(/\s+/g, ' ')
-    const used = /^\s*(\.(first\(\)|last\(\)|nth\(\d+\)))*\s*\.(click|dblclick|press|tap|evaluate|dispatchEvent)\(/.test(after)
-    const stored = /(const|let|var)\s+\w+\s*=\s*[\w.]*$/.test(before)
-    if (used || stored) findings.push(`uses the "${name}" control`)
-  }
-  return findings
 }
 
 /** Live helpers that sign in or write; offline specs must not touch them. */

@@ -100,6 +100,9 @@ Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Specs are classi
 (offline / read-only / self-guarded / destructive). Default live specs are strictly read-only; those that write **or submit a
 mutation-capable action, even one expected to fail**, (and any spec nobody has classified) are **disabled by default** and run only with
 `E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack. The shared Supabase project is rejected in that mode.
+The config runs an **allowlist** of classified top-level specs, and it will not start the dev server when that server's configuration
+names the shared project. `npm run test:e2e:offline` runs the offline specs with no backend and no credentials. Details:
+`docs/proposals/credential_rotation_runbook.md` §7.
 
 Reset demo state: `SELECT * FROM public.reset_demo_state();`
 
