@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import type { Page } from '@playwright/test'
+import { test, expect, guardedContext } from './support/guarded-test'
 import { ACCOUNTS, loginAs, resetDemoState, waitSettled } from './helpers'
 
 /**
@@ -25,7 +26,7 @@ test('dashboard with zero active queues shows the empty state, not a stale card'
   // /login for the patient login below would render the "Signed in
   // as..." interstitial (the new Part 1a feature) instead of the login
   // form, since both pages would appear to be the same session.
-  const nurseContext = await browser.newContext()
+  const nurseContext = await guardedContext(browser)
   const nursePage = await nurseContext.newPage()
   await loginAs(nursePage, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   await callNextPatientTimes(nursePage, 4) // 3 calls to cycle through, 4th closes the last one with nobody left
@@ -50,7 +51,7 @@ test('dashboard with one active queue and an available estimate shows position, 
 test('dashboard shows "not currently being served" with no number when no nurse is on duty', async ({ page, browser }) => {
   await resetDemoState()
 
-  const nurseContext = await browser.newContext()
+  const nurseContext = await guardedContext(browser)
   const nursePage = await nurseContext.newPage()
   await loginAs(nursePage, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   await nursePage.getByRole('button', { name: 'End session' }).click()
@@ -82,7 +83,7 @@ test('dashboard shows "not currently being served" with no number when no nurse 
 test('dashboard indicates additional queues without combining their estimates', async ({ page, browser }) => {
   await resetDemoState()
 
-  const receptionContext = await browser.newContext()
+  const receptionContext = await guardedContext(browser)
   const receptionPage = await receptionContext.newPage()
   await loginAs(receptionPage, ACCOUNTS.receptionist.email, ACCOUNTS.receptionist.password)
   await receptionPage.goto('/reception/walk-in')

@@ -1,4 +1,6 @@
-import { test, expect as baseExpect, type Page } from '@playwright/test'
+import { expect as baseExpect, type Page } from '@playwright/test'
+import { test } from './support/safe-test'
+import { observeServerActions } from './support/observe-actions'
 import { execFileSync } from 'node:child_process'
 import { ACCOUNTS, loginAs as rawLoginAs } from './helpers'
 import {
@@ -499,21 +501,6 @@ async function loginAs(page: Page, email: string, password: string) {
   }
 }
 
-/**
- * A Server Action is a browser POST carrying a `next-action` header, sent to the URL of the page that made it.
- * Optionally narrowed to one path: signing in lands on /nurse, whose own screen reads state through a (read-only)
- * Server Action as it hydrates, and that must not be blamed on the page under test.
- */
-function trackActions(page: Page, onlyPath?: string) {
-  const posts: string[] = []
-  page.on('request', (req) => {
-    if (req.method() !== 'POST' || !req.headers()['next-action']) return
-    if (onlyPath && new URL(req.url()).pathname !== onlyPath) return
-    posts.push(req.url())
-  })
-  return posts
-}
-
 async function openDashboard(page: Page) {
   await loginAs(page, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   await page.goto(DASHBOARD)
@@ -547,7 +534,7 @@ test.describe('Nurse V3 dashboard — live, read-only', () => {
 
   test('shows the real signed-in nurse, their service and a duty line; invents nothing; invokes no Server Action', async ({ page }) => {
     await loginAs(page, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
-    const actions = trackActions(page, DASHBOARD) // Server Actions posted from the dashboard page itself
+    const actions = observeServerActions(page, DASHBOARD) // Server Actions posted from the dashboard page itself
     await page.goto(DASHBOARD)
     await expect(page.getByRole('heading', { level: 1, name: /Welcome back/ })).toBeVisible({ timeout: 90_000 })
     const main = page.getByRole('main')

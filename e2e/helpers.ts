@@ -1,23 +1,67 @@
 import type { Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 import type { Database } from '../lib/types/database.types'
+import { assertLocalSupabaseUrl } from './support/e2e-safety'
 
-// Same publishable/anon values already committed in scripts/verify.ts —
-// not a secret, RLS is the security boundary (ADR-010). This suite runs
-// against the real shared dev backend, not a per-test-isolated database.
-export const SUPABASE_URL = 'https://bffhjvpkfivtbzqielve.supabase.co'
-export const SUPABASE_ANON_KEY = 'sb_publishable_uwBdyYKKd3bKm9SZ8tp8Rw_AbqRdoWD'
+/**
+ * Where these specs run and who they sign in as come from the ENVIRONMENT. Nothing here defaults to the shared
+ * production project and no credential is committed (they were, and the repository is public — see
+ * docs/proposals/staged_migration_plan.md, finding C0). Test-account passwords are held by the project owner in secure offline storage.
+ *
+ *   E2E_SUPABASE_URL, E2E_SUPABASE_ANON_KEY            the project the specs talk to
+ *   E2E_{PATIENT,RECEPTIONIST,NURSE,ADMIN}_EMAIL / _PASSWORD
+ *
+ * Specs that WRITE shared state (queue, consultations, notifications, clinic settings) are disabled by default
+ * (playwright.config.ts) and their helpers below refuse to run against anything but a local stack.
+ */
+export const SUPABASE_URL = (process.env.E2E_SUPABASE_URL ?? '').trim()
+export const SUPABASE_ANON_KEY = (process.env.E2E_SUPABASE_ANON_KEY ?? '').trim()
 
 export const CLINIC_ID = '11111111-1111-1111-1111-111111111111'
 
-export const ACCOUNTS = {
-  patient: { email: 'thabo.patient@test.local', password: 'pw12345678' },
-  receptionist: { email: 'grace.reception@riverside.test', password: 'staff-password-123' },
-  nurse: { email: 'mabaso.nurse@riverside.test', password: 'staff-password-456' },
-  admin: { email: 'admin@riverside.test', password: 'admin-password-789' },
+function required(name: string): string {
+  const value = process.env[name]?.trim()
+  if (!value) {
+    throw new Error(
+      `${name} is not set. Test-account credentials are kept in the project owner's secure offline storage and supplied through the environment — they are never committed.`
+    )
+  }
+  return value
 }
 
-/** A fresh client signed in as admin — reset_demo_state and clinic_settings writes both require this. Always sign out when done so the connection doesn't linger. */
+/** Looked up when read, so importing this module (or listing tests) needs no credentials. */
+function account(role: 'PATIENT' | 'RECEPTIONIST' | 'NURSE' | 'ADMIN') {
+  return {
+    get email() {
+      return required(`E2E_${role}_EMAIL`)
+    },
+    get password() {
+      return required(`E2E_${role}_PASSWORD`)
+    },
+  }
+}
+
+export const ACCOUNTS = {
+  patient: account('PATIENT'),
+  receptionist: account('RECEPTIONIST'),
+  nurse: account('NURSE'),
+  admin: account('ADMIN'),
+}
+
+/**
+ * Refuses unless destructive testing was explicitly enabled (E2E_ENABLE_DESTRUCTIVE=1) AND the configured project is a
+ * plain local origin. Destructive helpers (reset_demo_state, clinic-settings writes) must never touch the shared project:
+ * it is production and previews share it. Runs before any network call. Parameters default to the environment; tests
+ * pass them explicitly.
+ */
+export function assertLocalStack(action: string, url: string = SUPABASE_URL, enabled: string | undefined = process.env.E2E_ENABLE_DESTRUCTIVE) {
+  if ((enabled ?? '').trim() !== '1') {
+    throw new Error(`${action} is destructive and disabled by default. It only runs with E2E_ENABLE_DESTRUCTIVE=1 against a local Supabase stack.`)
+  }
+  assertLocalSupabaseUrl(url, action)
+}
+
+/** A fresh client signed in as admin — only ever used by the destructive helpers below, which require a local stack. Always sign out when done. */
 async function withAdmin<T>(fn: (admin: ReturnType<typeof createClient<Database>>) => Promise<T>): Promise<T> {
   const admin = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY)
   const { error } = await admin.auth.signInWithPassword(ACCOUNTS.admin)
@@ -30,20 +74,21 @@ async function withAdmin<T>(fn: (admin: ReturnType<typeof createClient<Database>
 }
 
 /**
- * Resets queue/consultation/notification state to a known baseline —
- * see migration demo_state_reset. Every test that touches shared queue
- * state calls this first; workers are forced to 1 (playwright.config.ts)
- * so no two tests race over it.
+ * Resets queue/consultation/notification state to a known baseline — see migration demo_state_reset. LOCAL STACK
+ * ONLY: it resets every clinic, so it is refused against the shared project. Specs that call it are disabled by
+ * default (E2E_ENABLE_DESTRUCTIVE=1, local stack required).
  */
 export async function resetDemoState() {
+  assertLocalStack('resetDemoState()')
   await withAdmin(async (admin) => {
     const { error } = await admin.rpc('reset_demo_state')
     if (error) throw new Error(`reset_demo_state failed: ${error.message}`)
   })
 }
 
-/** Admin-only write, same RLS path the admin settings page itself uses (settings_admin_write). */
+/** Admin-only write, same RLS path the admin settings page itself uses (settings_admin_write). LOCAL STACK ONLY. */
 export async function setStaffIdleTimeoutMinutes(minutes: number) {
+  assertLocalStack('setStaffIdleTimeoutMinutes()')
   await withAdmin(async (admin) => {
     const { error } = await admin
       .from('clinic_settings')

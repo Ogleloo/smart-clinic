@@ -84,12 +84,25 @@ No nurse on duty → no estimate shown (never a guess).
 
 ## Test accounts
 
-| Role        | Email                              | Password           |
-|-------------|------------------------------------|---------------------|
-| Patient     | thabo.patient@test.local           | pw12345678          |
-| Nurse       | mabaso.nurse@riverside.test        | staff-password-456  |
-| Reception   | grace.reception@riverside.test     | staff-password-123  |
-| Admin       | admin@riverside.test               | admin-password-789  |
+The demonstration accounts' passwords are **not stored in this repository**. They are held by the project owner in
+secure offline storage and supplied to tests and scripts through the environment (never committed). They were rotated
+after being exposed in git history (see `docs/proposals/credential_rotation_runbook.md`):
+
+| Role        | E-mail variable           | Password variable            |
+|-------------|---------------------------|------------------------------|
+| Patient     | `E2E_PATIENT_EMAIL`       | `E2E_PATIENT_PASSWORD`       |
+| Nurse       | `E2E_NURSE_EMAIL`         | `E2E_NURSE_PASSWORD`         |
+| Nurses 2-3  | `E2E_NURSE2_EMAIL`, `E2E_NURSE3_EMAIL` | (passwords held by the project owner in secure offline storage; used for manual demos) |
+| Reception   | `E2E_RECEPTIONIST_EMAIL`  | `E2E_RECEPTIONIST_PASSWORD`  |
+| Admin       | `E2E_ADMIN_EMAIL`         | `E2E_ADMIN_PASSWORD`         |
+
+Target project: `E2E_SUPABASE_URL` and `E2E_SUPABASE_ANON_KEY`. Specs are classified in `e2e/support/e2e-safety.ts`
+(offline / read-only / self-guarded / destructive). Default live specs are strictly read-only; those that write **or submit a
+mutation-capable action, even one expected to fail**, (and any spec nobody has classified) are **disabled by default** and run only with
+`E2E_ENABLE_DESTRUCTIVE=1` against a verified local Supabase stack. The shared Supabase project is rejected in that mode.
+The config runs an **allowlist** of classified top-level specs, and it will not start the dev server when that server's configuration
+names the shared project. `npm run test:e2e:offline` runs the offline specs with no backend and no credentials. Details:
+`docs/proposals/credential_rotation_runbook.md` §7.
 
 Reset demo state: `SELECT * FROM public.reset_demo_state();`
 
