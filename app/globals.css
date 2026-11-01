@@ -98,10 +98,14 @@
  * and text colour are split into the next rule). It is applied to the admin sidebar, mobile nav and dashboard,
  * not to the not-yet-redesigned V2 pages (Services, Staff, Settings, Patients, Reports), which keep the V2
  * palette and its stronger button contrast until their own phases.
+ *
+ * Public Landing V3 (Figma frame 16:6) uses the same palette; .theme-public is likewise token-only (the page sets its
+ * own background), so it can wrap the landing page without touching any other screen.
  */
 .theme-reception,
 .theme-nurse,
-.theme-admin {
+.theme-admin,
+.theme-public {
   --color-primary-50:  #E6FBF7;
   --color-primary-100: #E6FBF7;
   --color-primary-500: #08B9A8;
