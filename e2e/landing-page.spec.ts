@@ -428,6 +428,36 @@ test.describe('layout, geometry and accessibility (real component + real compile
     expect(services.every((h) => h >= 88 && h <= 96)).toBe(true)
   })
 
+  test('1440px: the four geometry details corrected after the Figma comparison stay corrected', async ({ page }) => {
+    await open(page, 'populated', 1440, 1000)
+    // 1. Hero text column is Figma's 560 (680 column − 80 left − 40 right), not 520: SECTION_PAD's xl:px-20 would
+    //    otherwise beat lg:pr-10, because Tailwind emits the xl variant after the lg one.
+    for (const sel of ['h1', '#top ul[aria-label]']) {
+      expect(Math.round((await page.locator(sel).first().boundingBox())!.width), sel).toBe(560)
+    }
+    // 2. Figma nests the card title and body in one block: 8px apart, 16px below the icon.
+    const cardGaps = await page.locator('#about ul > li').evaluateAll((els) =>
+      els.map((li) => {
+        const h3 = li.querySelector('h3')!.getBoundingClientRect()
+        const p = li.querySelector('p')!.getBoundingClientRect()
+        const icon = li.querySelector('span')!.getBoundingClientRect()
+        return [Math.round(p.top - h3.bottom), Math.round(h3.top - icon.bottom)]
+      })
+    )
+    for (const [titleToBody, iconToTitle] of cardGaps) {
+      expect(titleToBody).toBe(8)
+      expect(iconToTitle).toBe(16)
+    }
+    // 3. The CTA card is Figma's 160 tall with its content on a 40px vertical inset (48px padding made it 176).
+    const cta = (await page.locator('section[aria-labelledby="cta-title"] > div').boundingBox())!
+    expect(Math.round(cta.height)).toBe(160)
+    const ctaTitle = (await page.locator('#cta-title').boundingBox())!
+    expect(Math.round(ctaTitle.y - cta.y)).toBe(40)
+    // 4. The section eyebrow is Figma's Inter Regular, not semibold.
+    const eyebrow = page.locator('#about p').filter({ hasText: 'WHY SMART CLINIC' })
+    expect(await eyebrow.evaluate((el) => getComputedStyle(el).fontWeight)).toBe('400')
+  })
+
   test('1440px: the four steps sit in one row with a connector between each pair', async ({ page }) => {
     await open(page, 'populated', 1440, 1000)
     const ys = await page.locator('#how-it-works ol > li > div').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))

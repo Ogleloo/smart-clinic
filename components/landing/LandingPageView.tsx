@@ -77,7 +77,9 @@ function Hero() {
   return (
     <section id={ANCHORS.top} aria-labelledby="hero-title" className="bg-paper">
       <div className={`${INNER} lg:grid lg:min-h-[592px] lg:grid-cols-[680fr_760fr]`}>
-        <div className={`flex flex-col gap-8 py-12 ${SECTION_PAD} lg:pb-10 lg:pr-10 lg:pt-20 xl:pl-20`}>
+        {/* xl:pr-10 is repeated after SECTION_PAD's xl:px-20: Tailwind emits xl after lg, so lg:pr-10 alone loses to it
+            and the text column would be 520px instead of Figma's 560 (680 − 80 left − 40 right). */}
+        <div className={`flex flex-col gap-8 py-12 ${SECTION_PAD} lg:pb-10 lg:pr-10 lg:pt-20 xl:pl-20 xl:pr-10`}>
           <div className="flex flex-col gap-4">
             <h1 id="hero-title" className="font-display text-[34px] font-bold leading-[40px] text-ink sm:text-[40px] sm:leading-[44px]">
               Know where
@@ -136,7 +138,7 @@ function Why() {
       <div className={`${INNER} flex max-w-[1280px] flex-col gap-12`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="flex flex-col gap-3 lg:w-[740px]">
-            <p className="text-xs font-semibold leading-[18px] tracking-wide text-[#037F74]">WHY SMART CLINIC</p>
+            <p className="text-xs leading-[18px] tracking-wide text-[#037F74]">WHY SMART CLINIC</p>
             <h2 id="why-title" className={H2}>
               A simpler, <span className={ACCENT_WORDS}>smarter way</span> to experience care
             </h2>
@@ -152,8 +154,11 @@ function Why() {
               <span className={ICON_BADGE}>
                 <Icon src={f.icon} size={24} />
               </span>
-              <h3 className="font-display text-[22px] font-semibold leading-7 text-ink">{f.title}</h3>
-              <p className="text-base leading-6 text-muted">{f.body}</p>
+              {/* Figma nests title and body in one "Texts" block: 16px from the icon, 8px between the two. */}
+              <div className="flex flex-col gap-2">
+                <h3 className="font-display text-[22px] font-semibold leading-7 text-ink">{f.title}</h3>
+                <p className="text-base leading-6 text-muted">{f.body}</p>
+              </div>
             </li>
           ))}
         </ul>
@@ -295,7 +300,9 @@ function HowItWorks({ services }: { services: ServicesState }) {
 function CtaPanel() {
   return (
     <section aria-labelledby="cta-title" className={`bg-paper ${SECTION_PAD} py-12 lg:py-16 xl:px-16`}>
-      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-8 rounded-[16px] bg-[#037F74] p-8 shadow-[0_12px_32px_rgba(5,48,46,0.08)] lg:min-h-[160px] lg:flex-row lg:items-center lg:justify-between lg:p-12">
+      {/* py-10 at lg, not p-12: Figma's card is 160 tall with its 80px-tall content centred, i.e. a 40px vertical
+          inset. 48px padding would make it 176 and push the buttons 8px low. Horizontal padding stays 48. */}
+      <div className="mx-auto flex w-full max-w-[1280px] flex-col gap-8 rounded-[16px] bg-[#037F74] p-8 shadow-[0_12px_32px_rgba(5,48,46,0.08)] lg:min-h-[160px] lg:flex-row lg:items-center lg:justify-between lg:px-12 lg:py-10">
         <div className="flex flex-col gap-3 lg:w-[740px]">
           <h2 id="cta-title" className="font-display text-[28px] font-bold leading-8 text-white sm:text-[40px] sm:leading-[44px]">
             Experience a better way to clinic.
