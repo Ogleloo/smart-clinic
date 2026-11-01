@@ -1,7 +1,15 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect, type BrowserContext, type Page } from '@playwright/test'
-import { isValidSouthAfricanId, requireDateOfBirth, requireIdNumber } from '../lib/profileValidation'
+import { validatePassword } from '../lib/passwordValidation'
+import {
+  dobMatchesSaId,
+  isValidSouthAfricanId,
+  parseOptionalPhone,
+  requireDateOfBirth,
+  requireIdNumber,
+  saIdBirthDateCandidates,
+} from '../lib/profileValidation'
 import { validateRegistration, type RegistrationInput } from '../lib/registrationValidation'
 
 // OFFLINE spec. Part 1 is pure logic. Part 2 loads the real /register, /login and /reset-password pages from the offline dev
@@ -86,6 +94,7 @@ test.describe('isValidSouthAfricanId / requireIdNumber', () => {
 const VALID: RegistrationInput = {
   full_name: 'Thabo Mokoena',
   email: 'thabo@example.com',
+  phone: '',
   date_of_birth: '1980-01-01',
   id_number: SA_ID,
   password: 'longenough',
@@ -98,13 +107,14 @@ test.describe('validateRegistration', () => {
     expect(r.values).toEqual({
       fullName: 'Thabo Mokoena',
       email: 'thabo@example.com',
+      phone: null,
       dateOfBirth: '1980-01-01',
       idNumber: SA_ID,
       password: 'longenough',
     })
   })
   test('an empty form reports every required field, including date of birth and ID/passport number', () => {
-    const r = validateRegistration({ full_name: '', email: '', date_of_birth: '', id_number: '', password: '' }, TODAY)
+    const r = validateRegistration({ full_name: '', email: '', phone: '', date_of_birth: '', id_number: '', password: '' }, TODAY)
     expect(r.values).toBeNull()
     expect(Object.keys(r.errors).sort()).toEqual(['date_of_birth', 'email', 'full_name', 'id_number', 'password'])
   })
@@ -114,7 +124,135 @@ test.describe('validateRegistration', () => {
   })
   test('malformed email and short password are rejected', () => {
     expect(validateRegistration({ ...VALID, email: 'thabo@' }, TODAY).errors.email).toMatch(/valid email/i)
-    expect(validateRegistration({ ...VALID, password: '1234567' }, TODAY).errors.password).toMatch(/at least 8/i)
+    expect(validateRegistration({ ...VALID, password: '1234567' }, TODAY).errors.password).toMatch(/at least 8 characters/i)
+  })
+})
+
+const SA_ID_AMBIGUOUS = '0506155012087' // 15 June, year 05: 1905 or 2005
+const SA_ID_LEAP_AMBIGUOUS = '0402295001083' // 29 Feb, year 04: 1904 and 2004 were both leap years
+const SA_ID_BORN_TODAY = '2611015001086' // 2026-11-01 (TODAY) or 1926-11-01
+const SA_ID_BORN_TOMORROW = '2611025001084' // 2026-11-02 is in the future, so only 1926-11-02
+const SA_ID_1927 = '2703155001081' // 2027-03-15 is in the future, so only 1927-03-15
+
+test.describe('saIdBirthDateCandidates: the century is never assumed', () => {
+  test('an unambiguous ID yields one full date', () => {
+    expect(saIdBirthDateCandidates(SA_ID, TODAY)).toEqual(['1980-01-01'])
+    expect(saIdBirthDateCandidates(SA_ID_1927, TODAY)).toEqual(['1927-03-15'])
+  })
+  test('an ID whose year fits both centuries yields both, oldest first, for the person to choose', () => {
+    expect(saIdBirthDateCandidates(SA_ID_AMBIGUOUS, TODAY)).toEqual(['1905-06-15', '2005-06-15'])
+    expect(saIdBirthDateCandidates(SA_ID_BORN_TODAY, TODAY)).toEqual(['1926-11-01', '2026-11-01'])
+  })
+  test('a date in the future is not offered: tomorrow in 2026 is excluded, tomorrow in 1926 remains', () => {
+    expect(saIdBirthDateCandidates(SA_ID_BORN_TOMORROW, TODAY)).toEqual(['1926-11-02'])
+  })
+  test('leap years: 29 February 00 can only be 2000 (1900 was not a leap year); 29 February 04 is 1904 or 2004', () => {
+    expect(saIdBirthDateCandidates(SA_ID_LEAP_DAY, TODAY)).toEqual(['2000-02-29'])
+    expect(saIdBirthDateCandidates(SA_ID_LEAP_AMBIGUOUS, TODAY)).toEqual(['1904-02-29', '2004-02-29'])
+  })
+  test('nothing is derived from a passport number, an invalid ID, or an ID with an impossible date', () => {
+    expect(saIdBirthDateCandidates('A1234567', TODAY)).toEqual([])
+    expect(saIdBirthDateCandidates('123456789', TODAY)).toEqual([])
+    expect(saIdBirthDateCandidates('8001015009088', TODAY)).toEqual([]) // wrong check digit
+    expect(saIdBirthDateCandidates(SA_ID_BAD_DATE, TODAY)).toEqual([]) // 29 Feb 1990 / 2090 do not exist
+    expect(saIdBirthDateCandidates('', TODAY)).toEqual([])
+  })
+  test('dobMatchesSaId accepts only the dates the ID can mean', () => {
+    expect(dobMatchesSaId('1980-01-01', SA_ID, TODAY)).toBe(true)
+    expect(dobMatchesSaId('2080-01-01', SA_ID, TODAY)).toBe(false) // future
+    expect(dobMatchesSaId('1980-01-02', SA_ID, TODAY)).toBe(false)
+    expect(dobMatchesSaId('1981-01-01', SA_ID, TODAY)).toBe(false)
+    expect(dobMatchesSaId('1905-06-15', SA_ID_AMBIGUOUS, TODAY)).toBe(true)
+    expect(dobMatchesSaId('2005-06-15', SA_ID_AMBIGUOUS, TODAY)).toBe(true)
+    expect(dobMatchesSaId('1955-06-15', SA_ID_AMBIGUOUS, TODAY)).toBe(false)
+  })
+})
+
+test.describe('validateRegistration: date of birth against the ID number', () => {
+  test('a date of birth that contradicts a valid SA ID is refused, on the date field', () => {
+    for (const dob of ['1999-12-31', '1980-01-02', '1980-02-01', '1981-01-01']) {
+      const r = validateRegistration({ ...VALID, date_of_birth: dob }, TODAY)
+      expect(r.values, dob).toBeNull()
+      expect(r.errors.date_of_birth, dob).toMatch(/doesn.t match your south african id/i)
+      expect(r.errors.id_number, dob).toBeUndefined()
+    }
+  })
+  test('either year is accepted for an ambiguous ID; a third is not', () => {
+    for (const dob of ['1905-06-15', '2005-06-15']) {
+      expect(validateRegistration({ ...VALID, id_number: SA_ID_AMBIGUOUS, date_of_birth: dob }, TODAY).errors).toEqual({})
+    }
+    expect(validateRegistration({ ...VALID, id_number: SA_ID_AMBIGUOUS, date_of_birth: '1955-06-15' }, TODAY).errors.date_of_birth).toMatch(/doesn.t match/i)
+  })
+  test('the same rule holds on a leap day', () => {
+    expect(validateRegistration({ ...VALID, id_number: SA_ID_LEAP_DAY, date_of_birth: '2000-02-29' }, TODAY).errors).toEqual({})
+    expect(validateRegistration({ ...VALID, id_number: SA_ID_LEAP_DAY, date_of_birth: '1900-02-28' }, TODAY).errors.date_of_birth).toMatch(/doesn.t match/i)
+  })
+  test('a passport number encodes nothing: any real past date entered by hand is accepted, a missing one is not', () => {
+    expect(validateRegistration({ ...VALID, id_number: 'A1234567', date_of_birth: '1999-12-31' }, TODAY).errors).toEqual({})
+    expect(validateRegistration({ ...VALID, id_number: 'A1234567', date_of_birth: '' }, TODAY).errors.date_of_birth).toMatch(/enter your date of birth/i)
+  })
+  test('a bad ID is reported on the ID, with no extra complaint about the date', () => {
+    const r = validateRegistration({ ...VALID, id_number: '8001015009088', date_of_birth: '1999-12-31' }, TODAY)
+    expect(r.errors.id_number).toMatch(/isn.t valid/i)
+    expect(r.errors.date_of_birth).toBeUndefined()
+  })
+})
+
+test.describe('validatePassword', () => {
+  test('empty and whitespace-only passwords are refused with their own messages', () => {
+    expect(validatePassword('')).toEqual({ ok: false, error: 'Enter a password.' })
+    for (const pw of [' ', '        ', '          ', '\t\t\t\t\t\t\t\t', ' \n \n \n \n']) {
+      expect(validatePassword(pw), JSON.stringify(pw)).toEqual({ ok: false, error: 'Password can’t be only spaces.' })
+    }
+  })
+  test('a short value padded with spaces does not pass as a longer password', () => {
+    for (const pw of ['abc       ', '       abc', '   abc    xyz   ', 'ab cd ef', 'a b c d e f g', '1234567 ', ' 1234567']) {
+      const r = validatePassword(pw)
+      expect(r.ok, JSON.stringify(pw)).toBe(false)
+      expect(r.ok ? '' : r.error, JSON.stringify(pw)).toMatch(/at least 8 characters that aren.t spaces/i)
+    }
+  })
+  test('too short is refused; exactly eight real characters is accepted', () => {
+    expect(validatePassword('1234567').ok).toBe(false)
+    expect(validatePassword('12345678').ok).toBe(true)
+  })
+  test('strong passwords and multiword passphrases are accepted', () => {
+    for (const pw of ['correct horse battery staple', 'my dog Rex 2020', 'Tr0ub4dor&3', 'pässwörd-ünïcode', 'a'.repeat(64), 'one two three four']) {
+      expect(validatePassword(pw).ok, pw).toBe(true)
+    }
+  })
+  test('leading and trailing spaces are not an error, and the value is judged exactly as typed', () => {
+    expect(validatePassword('  spaced passphrase  ').ok).toBe(true)
+    const r = validateRegistration({ ...VALID, password: '  spaced passphrase  ' }, TODAY)
+    expect(r.values?.password).toBe('  spaced passphrase  ') // never trimmed or altered
+  })
+  test('the label shows in the message, for the change-password forms', () => {
+    expect(validatePassword('short', { label: 'New password' })).toEqual({
+      ok: false,
+      error: 'New password must have at least 8 characters that aren’t spaces.',
+    })
+  })
+  test('registration surfaces it on the password field', () => {
+    expect(validateRegistration({ ...VALID, password: '        ' }, TODAY).errors.password).toMatch(/only spaces/i)
+    expect(validateRegistration({ ...VALID, password: 'abc       ' }, TODAY).errors.password).toMatch(/aren.t spaces/i)
+  })
+})
+
+test.describe('optional phone at registration', () => {
+  test('empty is allowed and stored as no phone', () => {
+    expect(parseOptionalPhone('')).toEqual({ value: null })
+    expect(validateRegistration({ ...VALID, phone: '   ' }, TODAY).values?.phone).toBeNull()
+  })
+  test('South African and foreign numbers are kept exactly as typed', () => {
+    for (const raw of ['082 123 4567', '+27 82 123 4567', '+44 20 7946 0958', '(035) 123-4567', '0821234567']) {
+      expect(parseOptionalPhone(raw), raw).toEqual({ value: raw })
+    }
+  })
+  test('letters, symbols, too few or too many digits and over-long text are refused', () => {
+    for (const raw of ['abc', '082 123 4567 ext 2', '12345', '1234567890123456', '<script>', '0'.repeat(31), '++27821234567']) {
+      expect(parseOptionalPhone(raw).error, raw).toBeTruthy()
+    }
+    expect(validateRegistration({ ...VALID, phone: 'abc' }, TODAY).errors.phone).toBeTruthy()
   })
 })
 
@@ -134,16 +272,24 @@ function triggerKeeps(dob: string, id: string, today: string): { dob: boolean; i
 
 test.describe('what the form sends is what handle_new_user() stores', () => {
   test('every date of birth and ID/passport number the form accepts passes the trigger’s own checks', () => {
-    const dobs = ['1900-01-01', '1980-01-01', '2000-02-29', TODAY]
-    const ids = [SA_ID, SA_ID_LEAP_DAY, 'A1234567', 'ab 12 34 56', '123456789', 'Z'.repeat(20), 'P12345']
-    for (const dob of dobs) {
-      for (const id of ids) {
-        const r = validateRegistration({ ...VALID, date_of_birth: dob, id_number: id }, TODAY)
-        expect(r.errors, `${dob} / ${id}`).toEqual({})
-        const kept = triggerKeeps(r.values!.dateOfBirth, r.values!.idNumber, TODAY)
-        expect(kept, `${dob} / ${id}`).toEqual({ dob: true, id: true })
-        expect(r.values!.dateOfBirth).toBe(dob) // sent unchanged
-      }
+    // [date of birth, ID/passport]: an SA ID must be paired with a date it can mean; a passport takes any real past date.
+    const pairs: [string, string][] = [
+      ['1980-01-01', SA_ID],
+      ['2000-02-29', SA_ID_LEAP_DAY],
+      ['1905-06-15', SA_ID_AMBIGUOUS],
+      ['2005-06-15', SA_ID_AMBIGUOUS],
+      ['1900-01-01', 'A1234567'],
+      ['1980-01-01', 'ab 12 34 56'],
+      ['2000-02-29', '123456789'],
+      [TODAY, 'Z'.repeat(20)],
+      ['1992-07-15', 'P12345'],
+    ]
+    for (const [dob, id] of pairs) {
+      const r = validateRegistration({ ...VALID, date_of_birth: dob, id_number: id }, TODAY)
+      expect(r.errors, `${dob} / ${id}`).toEqual({})
+      const kept = triggerKeeps(r.values!.dateOfBirth, r.values!.idNumber, TODAY)
+      expect(kept, `${dob} / ${id}`).toEqual({ dob: true, id: true })
+      expect(r.values!.dateOfBirth).toBe(dob) // sent unchanged
     }
   })
 
@@ -169,6 +315,48 @@ test.describe('what the form sends is what handle_new_user() stores', () => {
       const r = validateRegistration({ ...VALID, date_of_birth: dob, id_number: id }, TODAY)
       expect(r.values, `${dob} / ${id}`).toBeNull()
     }
+  })
+})
+
+test.describe('profile persistence and password-path contracts (source level)', () => {
+  const root = join(__dirname, '..')
+  const read = (rel: string) => readFileSync(join(root, rel), 'utf8')
+  const slice = (src: string, from: string, to: string) => src.slice(src.indexOf(from), src.indexOf(to, src.indexOf(from) + from.length))
+
+  test('register() sends exactly the four keys handle_new_user() reads, and the trigger reads those four', () => {
+    const auth = read('app/actions/auth.ts')
+    const data = slice(auth, 'data: {', 'emailRedirectTo') // the signUp metadata block
+    for (const key of ['full_name', 'phone', 'date_of_birth', 'id_number']) expect(data, key).toContain(`${key}`)
+    expect(data).not.toMatch(/\brole\b|clinic_id|is_active/) // nothing privileged can ride along
+    const sql = read('supabase/migrations/20261006151206_patient_profile_fields.sql')
+    for (const key of ['full_name', 'phone', 'date_of_birth', 'id_number']) expect(sql, key).toContain(`->> '${key}'`)
+  })
+
+  test('the patient Profile page reads the stored columns it renders (full_name, phone, date_of_birth, id_number)', () => {
+    const page = read('app/(patient)/profile/page.tsx')
+    expect(page).toContain(".select('full_name, phone, date_of_birth, id_number')")
+    expect(page).toContain(".eq('auth_user_id', user.id)")
+    expect(page).toContain('profile.date_of_birth')
+    expect(page).toContain('profile.id_number')
+  })
+
+  test('every action that sets a password applies the shared rule; none applies a private length check', () => {
+    const files = ['app/actions/auth.ts', 'app/actions/profile.ts', 'app/actions/receptionProfile.ts', 'app/actions/admin.ts', 'app/actions/reception.ts']
+    for (const f of files) {
+      const src = read(f)
+      expect(src, `${f} has its own password length check`).not.toMatch(/(password|next)\.length\s*<\s*\d/)
+      if (/updateUser\(\s*\{\s*password/.test(src)) expect(src, `${f} writes a password without validatePassword`).toContain('validatePassword(')
+    }
+    expect(read('app/actions/auth.ts')).toContain('validateRegistration(')
+    // Reception's change goes through the patient action, so it gets the same rule.
+    expect(read('app/actions/receptionProfile.ts')).toContain('await changePassword(')
+  })
+
+  test('sign-in does not apply the new rule: existing users keep logging in with the password they have', () => {
+    const login = slice(read('app/actions/auth.ts'), 'export async function login', 'export async function logout')
+    expect(login).not.toContain('validatePassword')
+    expect(login).toContain('signInWithPassword({ email, password })') // the password goes through exactly as typed
+    expect(login).toMatch(/if \(!email \|\| !password\)/)
   })
 })
 
@@ -222,7 +410,7 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await expect(page.getByText('Enter your email address.')).toBeVisible()
     await expect(page.getByText('Enter your date of birth.')).toBeVisible()
     await expect(page.getByText('Enter your South African ID or passport number.')).toBeVisible()
-    await expect(page.getByText('Password must be at least 8 characters.')).toBeVisible()
+    await expect(page.getByText('Enter a password.')).toBeVisible()
     await expect(page.getByLabel('Full name')).toBeFocused()
     await expect(page.getByLabel('ID or passport number')).toHaveAttribute('aria-invalid', 'true')
     await expect(page.getByLabel('ID or passport number')).toHaveAttribute('aria-describedby', /-error$/)
@@ -244,7 +432,7 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await expect(page.getByLabel('ID or passport number')).toBeFocused()
 
     await page.getByLabel('Date of birth').fill('')
-    await page.getByLabel('ID or passport number').fill(SA_ID)
+    await page.getByLabel('ID or passport number').fill('A1234567') // a passport suggests no date, so it stays empty
     await page.getByRole('button', { name: 'Create account' }).click()
     await expect(page.getByText('Enter your date of birth.')).toBeVisible()
     await expect(page.getByLabel('Date of birth')).toBeFocused()
@@ -324,6 +512,172 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     await expect(confirm).toHaveAttribute('autocomplete', 'new-password')
     await page.getByRole('button', { name: 'Show password' }).click() // the second one, still labelled "Show"
     await expect(confirm).toHaveAttribute('type', 'text')
+    expect(posts).toEqual([])
+  })
+})
+
+test.describe('date of birth from the ID number (real page, nothing submitted)', () => {
+  test.setTimeout(180_000)
+
+  const idField = (page: Page) => page.getByLabel('ID or passport number')
+  const dobField = (page: Page) => page.getByLabel('Date of birth')
+
+  test('an unambiguous SA ID fills the date and says so; clearing the ID removes a date it supplied', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await idField(page).fill(SA_ID)
+    await expect(dobField(page)).toHaveValue('1980-01-01')
+    await expect(page.getByRole('status')).toContainText('filled in from your ID number')
+    await expect(page.getByRole('status')).toContainText('1 January 1980')
+    await expect(page.getByRole('group')).toHaveCount(0) // no year question when there is only one possibility
+
+    await idField(page).fill('')
+    await expect(dobField(page)).toHaveValue('')
+    expect(posts).toEqual([])
+  })
+
+  test('a date the person typed is never overwritten by the ID number', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    await dobField(page).fill('1999-12-31')
+    await idField(page).fill(SA_ID)
+    await expect(dobField(page)).toHaveValue('1999-12-31')
+    await expect(page.getByRole('status')).toHaveCount(0) // nothing claims the date came from the ID
+  })
+
+  test('an ID that fits two birth years asks which, never guesses, and the choice fills the date (keyboard)', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await idField(page).fill(SA_ID_AMBIGUOUS)
+
+    const group = page.getByRole('group', { name: /fits two birth years/i })
+    await expect(group).toBeVisible()
+    await expect(dobField(page)).toHaveValue('') // not guessed
+    const older = group.getByRole('radio', { name: '15 June 1905' })
+    const newer = group.getByRole('radio', { name: '15 June 2005' })
+    await expect(older).not.toBeChecked()
+    await expect(newer).not.toBeChecked()
+
+    await older.focus()
+    await page.keyboard.press('Space')
+    await expect(dobField(page)).toHaveValue('1905-06-15')
+    await expect(older).toBeChecked()
+    await page.keyboard.press('ArrowDown')
+    await expect(newer).toBeChecked()
+    await expect(dobField(page)).toHaveValue('2005-06-15')
+
+    // typing the date by hand keeps the radios in step
+    await dobField(page).fill('1905-06-15')
+    await expect(older).toBeChecked()
+    expect(posts).toEqual([])
+  })
+
+  test('a passport number never produces a suggestion; the date is entered by hand and accepted', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await idField(page).fill('A1234567')
+    await expect(dobField(page)).toHaveValue('')
+    await expect(page.getByRole('status')).toHaveCount(0)
+    await expect(page.getByRole('group')).toHaveCount(0)
+
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email').fill('thabo@example.com')
+    await dobField(page).fill('1999-12-31')
+    await page.getByLabel('Password', { exact: true }).fill('   ') // stops short of a valid submit: see below
+    await page.getByRole('button', { name: 'Create account' }).click()
+    // the date and the passport are fine; only the password is reported
+    await expect(page.getByText('Password can’t be only spaces.')).toBeVisible()
+    await expect(page.getByText(/date of birth/i).filter({ hasText: /doesn.t match|enter your/i })).toHaveCount(0)
+    expect(posts).toEqual([])
+  })
+
+  test('a date that contradicts the SA ID is refused on the date field, and nothing is sent', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email').fill('thabo@example.com')
+    await idField(page).fill(SA_ID)
+    await dobField(page).fill('1999-12-31')
+    await page.getByLabel('Password', { exact: true }).fill('longenough')
+    await page.getByRole('button', { name: 'Create account' }).click()
+
+    await expect(page.getByText(/date of birth doesn.t match your south african id/i)).toBeVisible()
+    await expect(dobField(page)).toBeFocused()
+    await expect(dobField(page)).toHaveAttribute('aria-invalid', 'true')
+    expect(posts).toEqual([])
+  })
+
+  test('phone-width layout: the year question and both fields fit with no sideways scrolling', async ({ page, context }) => {
+    await sealed(context)
+    await page.setViewportSize({ width: 360, height: 740 })
+    await visit(page, '/register')
+    await idField(page).fill(SA_ID_AMBIGUOUS)
+    await expect(page.getByRole('group', { name: /fits two birth years/i })).toBeVisible()
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+    const box = await page.getByRole('radio', { name: '15 June 2005' }).boundingBox()
+    expect(box && box.width).toBeGreaterThanOrEqual(20)
+  })
+})
+
+test.describe('password rules on the registration form (real page, nothing submitted)', () => {
+  test.setTimeout(180_000)
+
+  async function fillValidExceptPassword(page: Page) {
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email').fill('thabo@example.com')
+    await page.getByLabel('ID or passport number').fill(SA_ID)
+    await page.getByLabel('Date of birth').fill('1980-01-01')
+  }
+
+  for (const [label, pw, message] of [
+    ['only spaces', '          ', /can.t be only spaces/i],
+    ['a short word padded with spaces', 'abc       ', /at least 8 characters that aren.t spaces/i],
+    ['too short', '1234567', /at least 8 characters that aren.t spaces/i],
+  ] as const) {
+    test(`${label} is refused with a clear message and nothing is sent`, async ({ page, context }) => {
+      const posts = await sealed(context)
+      await visit(page, '/register')
+      await fillValidExceptPassword(page)
+      await page.getByLabel('Password', { exact: true }).fill(pw)
+      await page.getByRole('button', { name: 'Create account' }).click()
+      await expect(page.getByText(message)).toBeVisible()
+      await expect(page.getByLabel('Password', { exact: true })).toBeFocused()
+      await expect(page.getByLabel('Password', { exact: true })).toHaveValue(pw) // never trimmed or cleared
+      expect(posts).toEqual([])
+    })
+  }
+
+  test('a multiword passphrase is not refused (the request is aborted by the test, so nothing is created)', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValidExceptPassword(page)
+    await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+    await page.getByRole('button', { name: 'Create account' }).click()
+    // Validation passed, so the form action was attempted — and the sealed context aborted that POST.
+    await expect.poll(() => posts.length, { timeout: 30_000 }).toBeGreaterThan(0)
+    await expect(page.getByText(/only spaces|aren.t spaces/i)).toHaveCount(0)
+  })
+})
+
+test.describe('email verification code entry (real page, nothing submitted)', () => {
+  test.setTimeout(180_000)
+
+  test('accepts digits only, six at most, and enables Verify only at six; resend is offered', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    const code = page.getByLabel('Verification code')
+    const verify = page.getByRole('button', { name: 'Verify' })
+    await expect(page.getByText('6-digit code')).toBeVisible()
+    await expect(verify).toBeDisabled()
+
+    await code.fill('12ab34')
+    await expect(code).toHaveValue('1234')
+    await expect(verify).toBeDisabled()
+    await code.fill('12345678') // an eight-digit code cannot be entered: only six are kept
+    await expect(code).toHaveValue('123456')
+    await expect(verify).toBeEnabled()
+    await expect(page.getByRole('button', { name: /send a new code/i })).toBeVisible()
     expect(posts).toEqual([])
   })
 })

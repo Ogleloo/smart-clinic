@@ -81,6 +81,54 @@ export function isValidSouthAfricanId(id: string): boolean {
 }
 
 /**
+ * The birth dates a structurally valid South African ID number can mean. The ID encodes
+ * only YYMMDD, never the century, so a date is returned for each century in which it is a
+ * real calendar day, is not in the future and is not before 1900 (29 February, for
+ * instance, exists in 2000 but not 1900; 04 means 1904 or 2004). Zero, one or two dates:
+ * with two, the person has to say which year is theirs — it is never guessed. Anything
+ * that is not a valid 13-digit SA ID returns [] — a passport number encodes nothing.
+ *
+ * A well-formed ID is not proof that the person entering it holds it.
+ */
+export function saIdBirthDateCandidates(id: string, today: string): string[] {
+  if (!isValidSouthAfricanId(id)) return []
+  const yy = id.slice(0, 2)
+  const mm = id.slice(2, 4)
+  const dd = id.slice(4, 6)
+  return [1900, 2000]
+    .map((century) => `${century + Number(yy)}-${mm}-${dd}`)
+    .filter((iso) => {
+      const d = new Date(`${iso}T12:00:00Z`)
+      return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === iso && iso <= today && iso >= '1900-01-01'
+    })
+    .sort()
+}
+
+/** True when `dob` (YYYY-MM-DD) is one of the dates the SA ID can mean. */
+export function dobMatchesSaId(dob: string, id: string, today: string): boolean {
+  return saIdBirthDateCandidates(id, today).includes(dob)
+}
+
+/**
+ * Optional phone number for self-registration. Deliberately NOT South-African-only: a
+ * patient may register with a passport and a foreign number. Checks only that it looks
+ * like a phone number (digits, spaces, dashes, brackets, a leading +; 7–15 digits, the
+ * E.164 maximum; 30 characters at most). The text is kept as typed — it is not reformatted.
+ */
+export function parseOptionalPhone(raw: string): FieldResult {
+  const value = raw.trim()
+  if (!value) return { value: null }
+  if (value.length > 30 || !/^\+?[0-9 ()\-]+$/.test(value)) {
+    return { value: null, error: 'Enter a phone number using digits, spaces, dashes and brackets, like 082 123 4567.' }
+  }
+  const digits = value.replace(/\D/g, '').length
+  if (digits < 7 || digits > 15) {
+    return { value: null, error: 'That phone number should have between 7 and 15 digits.' }
+  }
+  return { value }
+}
+
+/**
  * Required "South African ID or passport number". profiles has a single id_number
  * column — no document type and no issuing country — so the kind is inferred:
  *   13 digits           -> must be a well-formed South African ID

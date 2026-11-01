@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { parseDateOfBirth, parseIdNumber } from '@/lib/profileValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
+import { validatePassword } from '@/lib/passwordValidation'
 
 export type ActionState = { error?: string; success?: string }
 
@@ -67,7 +68,9 @@ export async function changePassword(_prev: ActionState, formData: FormData): Pr
   const confirm = String(formData.get('confirm_password') ?? '')
 
   if (!current) return { error: 'Enter your current password.' }
-  if (next.length < 8) return { error: 'New password must be at least 8 characters.' }
+  // Judged exactly as typed — never trimmed. See lib/passwordValidation.ts.
+  const strength = validatePassword(next, { label: 'New password' })
+  if (!strength.ok) return { error: strength.error }
   if (next !== confirm) return { error: 'Those passwords don’t match.' }
   if (next === current) return { error: 'Choose a password different from your current one.' }
 

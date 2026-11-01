@@ -12,14 +12,13 @@ import {
   type RegistrationErrors,
 } from '@/lib/registrationValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
+import { validatePassword } from '@/lib/passwordValidation'
 
 export type ActionState = { error?: string; success?: string }
 
 export type RegisterState = ActionState & { fieldErrors?: RegistrationErrors }
 
 export async function register(_prev: RegisterState, formData: FormData): Promise<RegisterState> {
-  const phone = String(formData.get('phone') ?? '').trim()
-
   // Full name, email, date of birth, ID/passport number and password are all
   // required. This is the same rule set the form runs in the browser; the
   // server's run is the one that counts. handle_new_user() re-validates date of
@@ -31,7 +30,7 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
     const first = REGISTRATION_FIELD_ORDER.find((f) => errors[f])
     return { error: first ? errors[first] : 'Check your details and try again.', fieldErrors: errors }
   }
-  const { fullName, email, password, dateOfBirth, idNumber } = values
+  const { fullName, email, phone, password, dateOfBirth, idNumber } = values
 
   const supabase = await createClient()
   const origin = (await headers()).get('origin') ?? ''
@@ -45,7 +44,8 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
     options: {
       data: {
         full_name: fullName,
-        phone,
+        // null (left empty) is stored as no phone, like the trigger does for ''.
+        phone: phone ?? '',
         date_of_birth: dateOfBirth,
         id_number: idNumber,
       },
@@ -164,7 +164,9 @@ export async function updatePassword(
   const password = String(formData.get('password') ?? '')
   const confirm = String(formData.get('confirm') ?? '')
 
-  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+  // Judged exactly as typed — never trimmed. See lib/passwordValidation.ts.
+  const strength = validatePassword(password)
+  if (!strength.ok) return { error: strength.error }
   if (password !== confirm) return { error: 'Those passwords don\u2019t match.' }
 
   const supabase = await createClient()
