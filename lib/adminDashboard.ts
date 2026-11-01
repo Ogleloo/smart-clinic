@@ -22,6 +22,8 @@ export interface ServicePerformanceRow {
   serviceId: string
   serviceName: string
   waitingCount: number
+  /** Patients in consultation for this service today (queue_entries.status = 'in_progress'). */
+  servingCount: number
   nursesOnDuty: number
   isBeingServed: boolean
   estimatedWaitMinutes: number | null
@@ -45,11 +47,93 @@ export interface PredictionQualityStats {
   maxPlausibleMinutes: number
 }
 
+/** Counts for today (clinic timezone). Every figure comes from one read of today's queue_entries (and appointments). */
+export interface TodayStats {
+  /** Queue entries created today: every patient who checked in, appointment or walk-in. */
+  checkIns: number
+  walkIns: number
+  fromAppointments: number
+  inConsultation: number
+  /** Appointments dated today that are not cancelled; null when that read failed. */
+  scheduled: number | null
+}
+
+export type AdminActivityKind = 'checked_in' | 'called' | 'completed' | 'skipped' | 'no_show'
+
+/** One real event derived from a timestamp on a queue entry. Tokens, not patient names: the admin view needs no identities. */
+export interface AdminActivityEvent {
+  id: string
+  kind: AdminActivityKind
+  token: string
+  serviceName: string
+  at: string
+}
+
+/** Which reads failed. A failed read shows "—" and says so; it is never rendered as a zero. */
+export interface AdminDashboardErrors {
+  queue: boolean
+  appointments: boolean
+  coverage: boolean
+}
+
 export interface AdminDashboardData {
   clinicState: ClinicStateStats
   attentionAlerts: AttentionAlert[]
   services: ServicePerformanceRow[]
   predictionQuality: PredictionQualityStats
+  today: TodayStats
+  activity: AdminActivityEvent[]
+  errors: AdminDashboardErrors
+}
+
+export interface TodayEntry {
+  id: string
+  token: string
+  service_id: string
+  status: string
+  checked_in_at: string
+  called_at: string | null
+  completed_at: string | null
+  appointment_id: string | null
+}
+
+export const ADMIN_ACTIVITY_LIMIT = 8
+
+/** Today's counts from today's queue entries (pure; shared by the loader and the tests). */
+export function summariseToday(entries: TodayEntry[], scheduled: number | null): TodayStats {
+  const walkIns = entries.filter((e) => e.appointment_id === null).length
+  return {
+    checkIns: entries.length,
+    walkIns,
+    fromAppointments: entries.length - walkIns,
+    inConsultation: entries.filter((e) => e.status === 'in_progress').length,
+    scheduled,
+  }
+}
+
+/**
+ * Recent activity, newest first, built only from timestamps that exist on today's queue entries: checked in,
+ * called into consultation, and the closing event for done / skipped / no-show entries. Nothing is inferred,
+ * smoothed or invented, and a patient's name never leaves the database.
+ */
+export function buildAdminActivity(
+  entries: TodayEntry[],
+  serviceNames: Record<string, string>,
+  limit = ADMIN_ACTIVITY_LIMIT
+): AdminActivityEvent[] {
+  const events: AdminActivityEvent[] = []
+  for (const e of entries) {
+    const serviceName = serviceNames[e.service_id] ?? 'Service'
+    const base = { token: e.token, serviceName }
+    events.push({ ...base, id: `${e.id}:in`, kind: 'checked_in', at: e.checked_in_at })
+    if (e.called_at) events.push({ ...base, id: `${e.id}:called`, kind: 'called', at: e.called_at })
+    if (e.completed_at) {
+      const kind: AdminActivityKind | null =
+        e.status === 'done' ? 'completed' : e.status === 'skipped' ? 'skipped' : e.status === 'no_show' ? 'no_show' : null
+      if (kind) events.push({ ...base, id: `${e.id}:end`, kind, at: e.completed_at })
+    }
+  }
+  return events.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, limit)
 }
 
 function sampleStddev(values: number[], mean: number): number {
@@ -78,20 +162,29 @@ export async function getAdminDashboardData(supabase: SupabaseClient<Database>):
   const [
     { data: services },
     { data: nurses },
-    { data: todayEntries },
-    { data: coverage },
+    { data: todayEntries, error: queueError },
+    { data: coverage, error: coverageError },
     { data: consultations },
     { data: settings },
+    { count: scheduledCount, error: appointmentsError },
   ] = await Promise.all([
     supabase.from('services').select('id, name').eq('is_active', true).order('name'),
     supabase.from('profiles').select('is_on_duty').eq('role', 'nurse').eq('is_active', true),
-    supabase.from('queue_entries').select('status, checked_in_at, called_at').eq('queue_date', today),
+    supabase
+      .from('queue_entries')
+      .select('id, token, service_id, status, checked_in_at, called_at, completed_at, appointment_id')
+      .eq('queue_date', today),
     supabase.rpc('get_public_queue_display'),
     supabase
       .from('consultations')
       .select('started_at, ended_at, exclude_from_prediction, exclusion_reason')
       .not('ended_at', 'is', null),
     supabase.from('clinic_settings').select('min_plausible_consultation_minutes, max_plausible_consultation_minutes').maybeSingle(),
+    supabase
+      .from('appointments')
+      .select('id', { count: 'exact', head: true })
+      .eq('scheduled_date', today)
+      .neq('status', 'cancelled'),
   ])
 
   const activeServices = services ?? []
@@ -135,6 +228,7 @@ export async function getAdminDashboardData(supabase: SupabaseClient<Database>):
       serviceId: svc.id,
       serviceName: svc.name,
       waitingCount: row?.waiting_count ?? 0,
+      servingCount: entries.filter((e) => e.service_id === svc.id && e.status === 'in_progress').length,
       nursesOnDuty: extra?.nurseCount ?? 0,
       isBeingServed: row?.is_being_served ?? false,
       estimatedWaitMinutes: row?.is_being_served ? (row.estimated_wait_minutes ?? null) : null,
@@ -187,6 +281,9 @@ export async function getAdminDashboardData(supabase: SupabaseClient<Database>):
     },
     attentionAlerts,
     services: servicePerformance,
+    today: summariseToday(entries, appointmentsError || scheduledCount === null ? null : scheduledCount),
+    activity: buildAdminActivity(entries, Object.fromEntries(activeServices.map((s) => [s.id, s.name]))),
+    errors: { queue: !!queueError, appointments: !!appointmentsError, coverage: !!coverageError },
     predictionQuality: {
       recordedCount: consultations?.length ?? 0,
       excludedCount: breakdown.staffBreak + breakdown.tooShort + breakdown.tooLong,

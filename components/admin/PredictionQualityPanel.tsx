@@ -23,7 +23,7 @@ export function PredictionQualityPanel({ stats }: { stats: PredictionQualityStat
   return (
     <section className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-4">
       <div className="flex items-center gap-2">
-        <BarChart3 size={18} className="text-primary-700" aria-hidden />
+        <BarChart3 size={18} className="text-[#037F74]" aria-hidden />
         <p className="text-xs font-semibold tracking-wide text-muted">PREDICTION QUALITY</p>
       </div>
 
@@ -54,7 +54,7 @@ export function PredictionQualityPanel({ stats }: { stats: PredictionQualityStat
             type="button"
             onClick={() => setOpen((o) => !o)}
             aria-expanded={open}
-            className="inline-flex w-fit items-center gap-1 text-sm font-semibold text-primary-700"
+            className="inline-flex min-h-11 w-fit items-center gap-1 text-sm font-semibold text-[#037F74]"
           >
             {open ? 'Hide reasons' : 'Show reasons'}
             {open ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}

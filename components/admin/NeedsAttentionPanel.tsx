@@ -1,5 +1,5 @@
 import { AlertTriangle } from 'lucide-react'
-import { LinkButton } from '@/components/ui/LinkButton'
+import Link from 'next/link'
 import type { AttentionAlert } from '@/lib/adminDashboard'
 
 /**
@@ -33,9 +33,13 @@ export function NeedsAttentionPanel({ alerts }: { alerts: AttentionAlert[] }) {
                   served&rdquo; &mdash; no wait estimate is given.
                 </p>
               </div>
-              <LinkButton href="/admin/staff" variant="secondary" className="shrink-0">
+              {/* Fixed #037F74 (4.89:1 on white): the dashboard's themed primary token is 3.76:1 for this small text. */}
+              <Link
+                href="/admin/staff"
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border-[1.5px] border-[#037F74] bg-surface px-5 text-sm font-semibold text-[#037F74] transition-colors hover:bg-primary-50"
+              >
                 Assign a nurse
-              </LinkButton>
+              </Link>
             </li>
           )
         })}
