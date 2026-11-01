@@ -75,11 +75,30 @@ export function serviceStatusText(row: Pick<PublicQueueDisplay, 'is_being_served
   if (variant === 'active') {
     return row.waiting_count > 0
       ? `${row.waiting_count} waiting · estimated wait about ${row.estimated_wait_minutes} min`
-      : 'No one is waiting right now'
+      : 'No one is waiting'
   }
   if (variant === 'warning') return `${row.waiting_count} waiting · no nurse on duty, so no estimate`
-  return 'No nurse on duty right now'
+  return 'No nurse on duty'
 }
+
+/**
+ * The three states of the services block, in plain words.
+ *  - empty: the read worked and there are no ACTIVE services. The booking page cannot book without one, so this must
+ *    not say or imply that booking is possible. (Signing up is still possible, and says only that.)
+ *  - unavailable: the read FAILED. This is a data problem, not a statement about the clinic.
+ */
+export const EMPTY_SERVICES_TEXT =
+  'No services are available at the moment, so appointments can’t be booked right now. Please check back soon — you can still create an account or log in in the meantime.'
+export const UNAVAILABLE_SERVICES_TEXT =
+  'We couldn’t load the current service information. This is a temporary problem with the request, not a sign that the clinic is closed — please refresh the page to try again. You can still create an account or log in, and walk-in patients are registered at reception.'
+
+/**
+ * This page is a server-rendered snapshot taken when it loads: there is no realtime subscription and no polling.
+ * Live updating belongs to the signed-in queue screens and the waiting-room display, not to this page.
+ */
+export const SNAPSHOT_NOTE =
+  'These figures are a snapshot from when this page loaded — refresh the page for the latest. Estimated waits are approximate and not guaranteed; they change as the queue moves. Where no nurse is on duty we show no estimate rather than a guess.'
+export const CHECK_IN_NOTE = 'Booking a slot does not skip check-in: please check in at reception when you arrive.'
 
 export const HOURS_UNAVAILABLE = 'Opening hours are unavailable right now.'
 export const HOURS_EMPTY = 'Opening hours have not been published yet.'

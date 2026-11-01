@@ -1,8 +1,9 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import {
-  ANCHORS, BTN_OUTLINE, BTN_PRIMARY, BTN_WHITE, BTN_WHITE_OUTLINE, CARD, CTA_SUBTITLE, FEATURES, FOOTER_BLURB,
-  HERO_SUBTITLE, HOURS_EMPTY, HOURS_UNAVAILABLE, ICON_BADGE, MICRO_FEATURES, NAV_LINKS, STEPS,
+  ANCHORS, BTN_OUTLINE, BTN_PRIMARY, BTN_WHITE, BTN_WHITE_OUTLINE, CARD, CHECK_IN_NOTE, CTA_SUBTITLE, EMPTY_SERVICES_TEXT,
+  FEATURES, FOOTER_BLURB, HERO_SUBTITLE, HOURS_EMPTY, HOURS_UNAVAILABLE, ICON_BADGE, MICRO_FEATURES, NAV_LINKS,
+  SNAPSHOT_NOTE, STEPS, UNAVAILABLE_SERVICES_TEXT,
   displayHref, serviceIconFor, serviceStatusText, type HoursState, type ServicesState,
 } from './content'
 
@@ -207,24 +208,22 @@ function Services({ services }: { services: ServicesState }) {
 
         {services.status === 'ok' ? (
           <>
-            <ul aria-label="Services and their queues right now" className="flex flex-col gap-4">
+            <ul aria-label="Services and their queue figures when this page loaded" className="flex flex-col gap-4">
               {services.rows.map((row) => (
                 <ServiceRow key={row.service_id} row={row} />
               ))}
             </ul>
             <p className="text-sm leading-5 text-muted">
-              Figures are live and estimates are not guaranteed — they move with the queue. Where no nurse is on duty we show no estimate
-              rather than a guess. Booking a slot does not skip check-in: please check in at reception when you arrive.
+              {SNAPSHOT_NOTE} {CHECK_IN_NOTE}
             </p>
           </>
         ) : services.status === 'empty' ? (
           <p role="status" className={`${CARD} p-6 text-base text-ink`}>
-            No services are open for queueing right now. You can still create an account and book an appointment.
+            {EMPTY_SERVICES_TEXT}
           </p>
         ) : (
           <p role="status" className={`${CARD} p-6 text-base text-ink`}>
-            Live service information is unavailable right now. You can still create an account, log in, or visit the clinic — walk-in
-            patients are registered at reception.
+            {UNAVAILABLE_SERVICES_TEXT}
           </p>
         )}
       </div>
@@ -342,7 +341,7 @@ function Footer({ services, hours }: { services: ServicesState; hours: HoursStat
               ))
             ) : (
               <a href={`#${ANCHORS.services}`} className={FOOT_LINK}>
-                {services.status === 'empty' ? 'No services open right now' : 'Service list unavailable'}
+                {services.status === 'empty' ? 'No services available right now' : 'Service list unavailable'}
               </a>
             )}
           </nav>

@@ -1,7 +1,9 @@
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
-import { NAV_LINKS, ANCHORS, serviceIconFor, serviceStatusText } from '../components/landing/content'
+import {
+  NAV_LINKS, ANCHORS, EMPTY_SERVICES_TEXT, SNAPSHOT_NOTE, UNAVAILABLE_SERVICES_TEXT, serviceIconFor, serviceStatusText,
+} from '../components/landing/content'
 
 /**
  * Public Landing V3 (Figma frame 16:6). Offline: no session, no network beyond the local dev server's own static
@@ -110,7 +112,7 @@ test.describe('accuracy: nothing invented, nothing guaranteed', () => {
   test('booking is not check-in bypass, and estimates are not guarantees — stated on the page', () => {
     const t = text(r.states.populated)
     expect(t).toContain('Booking a slot does not skip check-in')
-    expect(t).toMatch(/estimates are not guaranteed/)
+    expect(t).toContain('Estimated waits are approximate and not guaranteed')
     expect(t).toContain('check in at reception when you arrive')
   })
 
@@ -126,11 +128,11 @@ test.describe('accuracy: nothing invented, nothing guaranteed', () => {
   test('the status line uses only the public fields, and gives no estimate where nobody is on duty', () => {
     const base = { waiting_count: 0, estimated_wait_minutes: 0, is_being_served: true }
     expect(serviceStatusText({ ...base, waiting_count: 3, estimated_wait_minutes: 12 })).toBe('3 waiting · estimated wait about 12 min')
-    expect(serviceStatusText(base)).toBe('No one is waiting right now')
+    expect(serviceStatusText(base)).toBe('No one is waiting')
     const uncovered = serviceStatusText({ waiting_count: 2, estimated_wait_minutes: 99, is_being_served: false })
     expect(uncovered).toBe('2 waiting · no nurse on duty, so no estimate')
     expect(uncovered).not.toMatch(/\d+ min/)
-    expect(serviceStatusText({ waiting_count: 0, estimated_wait_minutes: 99, is_being_served: false })).toBe('No nurse on duty right now')
+    expect(serviceStatusText({ waiting_count: 0, estimated_wait_minutes: 99, is_being_served: false })).toBe('No nurse on duty')
   })
 
   test('service icons are chosen from the service name only and fall back to a neutral one', () => {
@@ -224,9 +226,9 @@ test.describe('public data boundary and empty / error states', () => {
   test('populated: one row per service with its live status, linking to the display', () => {
     const t = text(r.states.populated)
     expect(t).toContain('3 waiting · estimated wait about 12 min')
-    expect(t).toContain('No one is waiting right now')
+    expect(t).toContain('No one is waiting')
     expect(t).toContain('2 waiting · no nurse on duty, so no estimate')
-    expect(t).toContain('No nurse on duty right now')
+    expect(t).toContain('No nurse on duty')
     expect(t).toContain('Mon–Fri 07:30–16:30')
     expect(t).toContain('Closed Sunday')
   })
@@ -234,7 +236,7 @@ test.describe('public data boundary and empty / error states', () => {
   test('unavailable (read failed): an honest message, no invented services or hours, the rest of the page still works', () => {
     const h = r.states.unavailable
     const t = text(h)
-    expect(t).toContain('Live service information is unavailable right now')
+    expect(t).toContain('We couldn’t load the current service information')
     expect(t).toContain('Opening hours are unavailable right now.')
     expect(t).toContain('Service list unavailable')
     expect(h).toContain('role="status"')
@@ -245,9 +247,99 @@ test.describe('public data boundary and empty / error states', () => {
 
   test('empty (read succeeded, nothing there) is worded differently from unavailable', () => {
     const t = text(r.states.empty)
-    expect(t).toContain('No services are open for queueing right now')
+    expect(t).toContain('No services are available at the moment')
     expect(t).toContain('Opening hours have not been published yet.')
     expect(t).not.toContain('unavailable')
+  })
+})
+
+// ------------------------------------------------------------------------------------------- copy contracts
+
+test.describe('copy contract 1: empty services is not "failed", and does not offer booking', () => {
+  const statusOf = (html: string) => text(html.match(/<p role="status"[^>]*>([\s\S]*?)<\/p>/)![1]!).trim()
+
+  test('empty: says no services are available and that appointments cannot be booked right now', () => {
+    const msg = statusOf(r.states.empty)
+    expect(msg).toBe(EMPTY_SERVICES_TEXT)
+    expect(msg).toMatch(/No services are available/)
+    expect(msg).toMatch(/appointments can’t be booked right now/)
+    expect(msg).toMatch(/check back soon/)
+  })
+
+  test('empty: nothing in the message tells the visitor they can book — it only offers an account or a login', () => {
+    const msg = statusOf(r.states.empty)
+    expect(msg).not.toMatch(/\bbook an appointment\b|you can (still )?book|can book|to book/i)
+    expect(msg).not.toMatch(/open for queueing/i)
+    expect(msg).toMatch(/create an account or log in/)
+  })
+
+  test('empty is not worded as an error, and unavailable is not worded as "no services"', () => {
+    const empty = statusOf(r.states.empty)
+    const failed = statusOf(r.states.unavailable)
+    expect(empty).not.toMatch(/couldn’t|unavailable|problem|refresh/i)
+    expect(failed).toBe(UNAVAILABLE_SERVICES_TEXT)
+    expect(failed).toMatch(/couldn’t load/)
+    expect(failed).toMatch(/temporary problem with the request/)
+    expect(failed).toMatch(/not a sign that the clinic is closed/)
+    expect(failed).toMatch(/refresh the page/)
+    expect(failed).not.toMatch(/No services are available|can’t be booked/)
+    expect(empty).not.toBe(failed)
+  })
+
+  test('the footer list says the same thing: "No services available right now" vs "Service list unavailable"', () => {
+    expect(text(r.states.empty)).toContain('No services available right now')
+    expect(text(r.states.unavailable)).toContain('Service list unavailable')
+    expect(text(r.states.empty)).not.toContain('Service list unavailable')
+  })
+
+  test('a populated page shows neither message', () => {
+    expect(text(r.states.populated)).not.toContain('No services are available at the moment')
+    expect(text(r.states.populated)).not.toContain('We couldn’t load the current service information')
+  })
+})
+
+test.describe('copy contract 2: the landing figures are a snapshot, not a live feed', () => {
+  const servicesSection = (html: string) => text(html.match(/<section[^>]*id="services"[\s\S]*?<\/section>/)![0])
+
+  test('the services block says the figures are from when the page loaded and can be refreshed', () => {
+    const t = servicesSection(r.states.populated)
+    expect(t).toContain(SNAPSHOT_NOTE)
+    expect(t).toMatch(/snapshot from when this page loaded/)
+    expect(t).toMatch(/refresh the page for the latest/)
+  })
+
+  test('estimated waits are described as approximate and not guaranteed, and as changing with the queue', () => {
+    const t = servicesSection(r.states.populated)
+    expect(t).toMatch(/Estimated waits are approximate and not guaranteed/)
+    expect(t).toMatch(/they change as the queue moves/)
+    expect(t).toMatch(/no estimate rather than a guess/)
+  })
+
+  test('the services block no longer calls its figures live or implies they update by themselves', () => {
+    const t = servicesSection(r.states.populated).toLowerCase()
+    expect(t).not.toMatch(/figures are live|real-time|realtime|live update|auto-?(matically)? updat|continuous|moves with the queue|updates? (live|instantly)/)
+    expect(r.states.populated).not.toContain('aria-label="Services and their queues right now"')
+    expect(r.states.populated).toContain('aria-label="Services and their queue figures when this page loaded"')
+    expect(t).not.toContain('waiting right now')
+    expect(t).not.toContain('on duty right now')
+  })
+
+  test('the snapshot note is not shown with the empty / unavailable messages', () => {
+    for (const state of ['empty', 'unavailable'] as const) expect(servicesSection(r.states[state])).not.toContain('snapshot')
+  })
+
+  test('this page really is a snapshot: no client component, no polling, no realtime subscription, no revalidation timer', () => {
+    for (const f of ['app/page.tsx', 'components/landing/LandingPageView.tsx', 'components/landing/content.ts']) {
+      const s = read(f)
+      expect(s, f).not.toMatch(/^['"]use client['"]/m)
+      expect(s, f).not.toMatch(/setInterval|setTimeout|\.channel\(|\.subscribe\(|useEffect|router\.refresh|EventSource|WebSocket|export const revalidate/)
+    }
+  })
+
+  test('the product claims about live tracking stay about the signed-in app, not about this page', () => {
+    // Figma's feature cards describe the patient queue screen, which does update live.
+    expect(text(r.states.populated)).toContain('Live queue tracking')
+    expect(servicesSection(r.states.populated)).not.toContain('Live queue tracking')
   })
 })
 
@@ -481,7 +573,7 @@ test.describe('the real / route with an unreachable Supabase (the offline server
     expect(res!.status()).toBe(200)
     await expect(page).toHaveURL(/\/$/)
     await expect(page.getByRole('heading', { level: 1, name: 'Know where you stand' })).toBeVisible()
-    await expect(page.getByText('Live service information is unavailable right now')).toBeVisible()
+    await expect(page.getByText('We couldn’t load the current service information')).toBeVisible()
     await expect(page.getByText('Opening hours are unavailable right now.')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Book appointment' }).first()).toHaveAttribute('href', '/register')
     await expect(page.getByRole('link', { name: 'Log in' }).first()).toHaveAttribute('href', '/login')
