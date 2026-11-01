@@ -5,6 +5,8 @@ import { logout } from '@/app/actions/auth'
 import { buttonClasses } from '@/components/ui/button-styles'
 import { LinkButton } from '@/components/ui/LinkButton'
 import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
+import { ProfileCompletionNotice } from '@/components/profile/ProfileCompletionNotice'
+import { missingProfileFields } from '@/lib/profileCompleteness'
 import { formatCalendarDate } from '@/lib/clinicTime'
 import { initials } from '@/lib/initials'
 
@@ -17,6 +19,10 @@ import { initials } from '@/lib/initials'
  *
  * There's no profile photo in the schema, so the avatar is always the
  * patient's initials.
+ *
+ * While the date of birth or the ID/passport number is missing, a "Complete your
+ * profile" notice links to /profile/settings. It is told only which fields are
+ * missing, never their values.
  */
 export default async function ProfilePage() {
   const supabase = await createClient()
@@ -51,6 +57,8 @@ export default async function ProfilePage() {
   return (
     <main className={PAGE_CLASS}>
       <PageHeader title="Profile" />
+
+      <ProfileCompletionNotice missing={missingProfileFields(profile)} />
 
       <section className="mx-auto flex w-full max-w-xl flex-col items-center gap-6 rounded-lg border border-border bg-surface p-9">
         <div className="flex flex-col items-center gap-3 text-center">

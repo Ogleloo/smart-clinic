@@ -23,8 +23,11 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
   // required. This is the same rule set the form runs in the browser; the
   // server's run is the one that counts. handle_new_user() re-validates date of
   // birth and ID number and silently drops a malformed one rather than failing
-  // signup — so by the time they get here they have already passed rules at
-  // least as strict, and what is sent is what is stored.
+  // signup, so these values are checked here first, to rules at least as strict.
+  // That makes it intended that what is sent here is what is stored for a NEW
+  // account; it is not verified live (a repeat sign-up of an existing unconfirmed
+  // email is not expected to update stored details). The profile page prompts
+  // for any detail that is still missing.
   const { errors, values } = validateRegistration(registrationInputFrom(formData), todayInClinicTimezone())
   if (!values) {
     const first = REGISTRATION_FIELD_ORDER.find((f) => errors[f])
@@ -59,11 +62,11 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
 
   if (error) return { error: error.message }
 
-  // Never treat signUp() as having signed the user in — even if
-  // Supabase auto-confirms today (Confirm Email is currently off,
-  // pending being switched on) and hands back a live session, the
-  // account isn't verified as far as this app is concerned. Always
-  // route through the verify screen.
+  // Never treat signUp() as having signed the user in — even if the project's
+  // Confirm email setting were off and Supabase handed back a live session, the
+  // account isn't verified as far as this app is concerned. Always route
+  // through the verify screen (the project is expected to have Confirm email ON;
+  // that is a dashboard setting, not something this code can check).
   revalidatePath('/', 'layout')
   redirect(`/verify?email=${encodeURIComponent(email)}`)
 }
