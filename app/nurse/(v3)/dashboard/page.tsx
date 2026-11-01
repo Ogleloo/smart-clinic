@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { requireRole } from '@/lib/auth/requireRole'
 import { getNurseDashboardData, type NurseDashboardData } from '@/lib/nurseDashboard'
 import { NurseDashboardView } from '@/components/nurse/v3/NurseDashboardView'
-import { NURSE_WORKSPACE_HREF } from '@/components/nurse/v3/navItems'
+import { NURSE_QUEUE_HREF, NURSE_WORKSPACE_HREF } from '@/components/nurse/v3/navItems'
 
 export const metadata = { title: 'Nurse Dashboard · Smart Clinic' }
 
@@ -27,9 +27,13 @@ export default async function NurseDashboardPage() {
           We couldn’t load your dashboard. Reload the page to try again.
         </p>
         <p className="text-sm text-muted">
-          Your working screen is unaffected:{' '}
+          The classic nurse screen is still available:{' '}
           <Link href={NURSE_WORKSPACE_HREF} className="font-semibold text-[#037F74] underline underline-offset-2">
-            open My Queue
+            open the classic nurse screen
+          </Link>{' '}
+          or go to{' '}
+          <Link href={NURSE_QUEUE_HREF} className="font-semibold text-[#037F74] underline underline-offset-2">
+            My Queue
           </Link>
           .
         </p>

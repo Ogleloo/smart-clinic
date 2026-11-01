@@ -6,8 +6,10 @@ import { EndSessionControl } from '@/components/nurse/EndSessionControl'
 import { CoverageWarning } from '@/components/nurse/CoverageWarning'
 import { CurrentPatientPanel } from '@/components/nurse/CurrentPatientPanel'
 import { WaitingList } from '@/components/nurse/WaitingList'
+import Link from 'next/link'
 import { LogoutButton } from '@/components/ui/LogoutButton'
 import { IdleTimeoutMonitor } from '@/components/auth/IdleTimeoutMonitor'
+import { NURSE_DASHBOARD_HREF } from '@/components/nurse/v3/navItems'
 import type { Database } from '@/lib/types/database.types'
 
 type QueueRow = Database['public']['Functions']['get_service_queue']['Returns'][number]
@@ -78,7 +80,16 @@ export default async function NursePage() {
         <h1 className="font-display text-2xl font-bold text-ink">
           Nurse{profile?.full_name ? ` — ${profile.full_name}` : ''}
         </h1>
-        <LogoutButton />
+        <div className="flex items-center gap-3">
+          {/* The V3 dashboard is the nurse's home now; this screen is the classic fallback, so give it a way back. */}
+          <Link
+            href={NURSE_DASHBOARD_HREF}
+            className="inline-flex min-h-11 items-center rounded-md px-3 text-sm font-semibold text-primary-700 underline underline-offset-2 hover:bg-primary-50"
+          >
+            Open the new dashboard
+          </Link>
+          <LogoutButton />
+        </div>
       </div>
 
       <NurseHeader

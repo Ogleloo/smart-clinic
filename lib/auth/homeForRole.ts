@@ -13,7 +13,10 @@ export function homeForRole(role: UserRole): string {
     case 'admin':
       return '/admin'
     case 'nurse':
-      return '/nurse'
+      // Nurse V3 dashboard. The classic working screen stays reachable at /nurse (linked from every V3
+      // screen, and back again from it). Both are guarded by requireRole('nurse'), so a wrong-role user
+      // is sent to THEIR home, never back here: no redirect loop.
+      return '/nurse/dashboard'
     case 'receptionist':
       return '/reception'
     default:

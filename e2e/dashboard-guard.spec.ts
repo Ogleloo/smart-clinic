@@ -12,7 +12,7 @@ import { ACCOUNTS, loginAs, resetDemoState } from './helpers'
  * user", never the role); the query filter is defense in depth.
  */
 for (const [role, account, ownHome] of [
-  ['nurse', ACCOUNTS.nurse, '/nurse'],
+  ['nurse', ACCOUNTS.nurse, '/nurse/dashboard'],
   ['receptionist', ACCOUNTS.receptionist, '/reception'],
   ['admin', ACCOUNTS.admin, '/admin'],
 ] as const) {
