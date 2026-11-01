@@ -1,165 +1,76 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
-import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
-import { LinkButton } from '@/components/ui/LinkButton'
-import { ServiceCoverageCard } from '@/components/ui/ServiceCoverageCard'
 import { formatOpeningHours } from '@/lib/clinicHours'
-import type { PublicQueueDisplay, UserRole } from '@/lib/types/database.types'
+import type { UserRole } from '@/lib/types/database.types'
+import { LandingPageView } from '@/components/landing/LandingPageView'
+import type { HoursState, ServicesState } from '@/components/landing/content'
 
-const HOW_IT_WORKS = [
-  {
-    title: 'Book online or walk in',
-    body: 'Reserve a slot ahead of time, or arrive and register at reception.',
-  },
-  {
-    title: 'Check in at reception',
-    body: 'Arriving lets the queue know you’re here, whether you booked or walked in.',
-  },
-  {
-    title: 'Follow your position live',
-    body: 'Your token, position and estimated wait update as the queue moves.',
-  },
-] as const
+export const metadata: Metadata = {
+  title: 'Riverside Clinic — Know where you stand',
+  description: 'Book appointments, follow the queue, and see your estimated wait — all in one place.',
+}
 
 /**
- * get_public_queue_display(), called with no argument, returns one row
- * per active service directly (migration 0051) — no need to enumerate
- * services first, which anon couldn't do anyway (services_read is
- * authenticated-only). Anything that fails here degrades to an empty
- * strip rather than blocking the page: this section is the point of the
- * page, but it is not load-bearing for the rest of it.
+ * get_public_queue_display(), called with no argument, returns one row per active service directly (migration 0051)
+ * — no need to enumerate services first, which anon couldn't do anyway (services_read is authenticated-only). Its
+ * columns are service-level counts and estimates; it carries no patient names, identification or clinical detail.
+ *
+ * A failed read and a successful empty one are different states ('unavailable' vs 'empty'): the page says so honestly
+ * and never invents services or figures. Neither blocks the rest of the page.
  */
-async function getQueueStrip(): Promise<PublicQueueDisplay[]> {
+async function getServices(): Promise<ServicesState> {
   try {
     const supabase = await createClient()
     const { data, error } = await supabase.rpc('get_public_queue_display')
-    return error || !data ? [] : data
+    if (error || !data) return { status: 'unavailable' }
+    return data.length === 0 ? { status: 'empty' } : { status: 'ok', rows: data }
   } catch {
-    return []
+    return { status: 'unavailable' }
   }
 }
 
 /**
- * clinic_hours is public information (on the door of the clinic, on
- * this same page) and anon-readable by grant, not through a second
- * anon-callable function — ADR-028's "exactly one" assertion covers
- * functions, not table grants. Degrades to a plain "—" rather than a
- * stale hardcoded fallback: showing old hours as if they were current
+ * clinic_hours is public information (on the door of the clinic, on this same page) and anon-readable by grant, not
+ * through a second anon-callable function — ADR-028's "exactly one" assertion covers functions, not table grants.
+ * Degrades to a plain statement rather than a stale hardcoded fallback: showing old hours as if they were current
  * would be exactly the kind of guess this feature exists to remove.
  */
-async function getOpeningHoursLine(): Promise<string> {
+async function getHours(): Promise<HoursState> {
   try {
     const supabase = await createClient()
     const { data, error } = await supabase.from('clinic_hours').select('*').order('day_of_week')
-    if (error || !data || data.length === 0) return '—'
-    return formatOpeningHours(data)
+    if (error || !data) return { status: 'unavailable' }
+    const line = data.length === 0 ? '' : formatOpeningHours(data)
+    return line ? { status: 'ok', lines: line.split(' · ') } : { status: 'empty' }
   } catch {
-    return '—'
+    return { status: 'unavailable' }
   }
 }
 
-export default async function LandingPage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (user) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('auth_user_id', user.id)
-      .single()
-    redirect(homeForRole((profile?.role ?? 'patient') as UserRole))
+/** A failed session check means "treat as signed out" — the page is public. */
+async function getSignedInRole(): Promise<UserRole | null> {
+  let role: UserRole | null = null
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return null
+    const { data: profile } = await supabase.from('profiles').select('role').eq('auth_user_id', user.id).single()
+    role = (profile?.role ?? 'patient') as UserRole
+  } catch {
+    return null
   }
+  return role
+}
 
-  const [queueStrip, openingHoursLine] = await Promise.all([getQueueStrip(), getOpeningHoursLine()])
-  const displayServiceId = queueStrip[0]?.service_id ?? null
+export default async function LandingPage() {
+  // Signed-in users never see the landing page: they go to their own home. redirect() throws, so it stays outside any try.
+  const role = await getSignedInRole()
+  if (role) redirect(homeForRole(role))
 
-  return (
-    <main className="flex min-h-dvh flex-col">
-      <nav className="flex items-center px-6 py-4">
-        <span className="font-display text-base font-bold text-ink">Riverside Clinic</span>
-      </nav>
-
-      {/* 1. Hero */}
-      <section className="flex flex-col items-center gap-4 bg-primary-900 px-6 py-12 text-center">
-        <h1 className="font-display text-[34px] font-bold leading-tight text-white">
-          Know how long you&rsquo;ll wait.
-        </h1>
-        <p className="text-[15px] text-primary-100">
-          Book ahead, or walk in and join the queue.
-        </p>
-        <div className="mt-2 flex w-full max-w-md flex-col gap-2.5">
-          <LinkButton href="/register" variant="primary" fullWidth>
-            Book an appointment
-          </LinkButton>
-          <LinkButton href="/login" variant="secondary" fullWidth>
-            Sign in
-          </LinkButton>
-        </div>
-      </section>
-
-      {/* 2. Live queue strip — the point of the page */}
-      {queueStrip.length > 0 && (
-        <section className="mx-auto w-full max-w-md px-6 py-8">
-          <p className="mb-3 text-xs font-semibold tracking-wide text-muted">
-            RIGHT NOW AT THE CLINIC
-          </p>
-          <div className="flex flex-col gap-2">
-            {queueStrip.map((row) => (
-              <ServiceCoverageCard key={row.service_id} row={row} />
-            ))}
-          </div>
-          <p className="mt-3 text-xs text-muted">
-            Where no nurse is on duty we show no estimate rather than a guess.
-          </p>
-        </section>
-      )}
-
-      {/* 3. How it works */}
-      <section className="mx-auto w-full max-w-md px-6 pb-8">
-        <h2 className="mb-4 font-display text-xl font-bold text-ink">How it works</h2>
-        <ol className="flex flex-col gap-4">
-          {HOW_IT_WORKS.map((step, i) => (
-            <li key={step.title} className="flex gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 font-display font-bold text-primary-700">
-                {i + 1}
-              </span>
-              <div>
-                <p className="font-semibold text-ink">{step.title}</p>
-                <p className="text-sm text-muted">{step.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {/* 4. No smartphone? — prominent, not a footnote */}
-      <section className="mx-auto w-full max-w-md px-6 pb-8">
-        <div className="rounded-lg bg-primary-700 p-5 text-white">
-          <h2 className="mb-2 font-display text-lg font-bold">No smartphone? No problem.</h2>
-          <p className="text-sm text-primary-100">
-            Walk-in patients are registered at reception and can follow their position on the
-            waiting-room screen &mdash; no phone or app needed.
-          </p>
-          {displayServiceId && (
-            <Link
-              href={`/display/${displayServiceId}`}
-              className="mt-3 inline-block text-sm font-semibold text-white underline"
-            >
-              View the waiting-room display &rarr;
-            </Link>
-          )}
-        </div>
-      </section>
-
-      {/* 5. Footer */}
-      <footer className="mt-auto border-t border-border px-6 py-6 text-center text-xs text-muted">
-        <p className="font-semibold text-ink">Riverside Clinic</p>
-        <p>123 Main Road, Riverside &middot; {openingHoursLine}</p>
-      </footer>
-    </main>
-  )
+  const [services, hours] = await Promise.all([getServices(), getHours()])
+  return <LandingPageView services={services} hours={hours} />
 }
