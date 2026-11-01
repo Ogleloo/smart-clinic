@@ -1,0 +1,26 @@
+'use client'
+
+import { usePathname } from 'next/navigation'
+import { ADMIN_DASHBOARD_HREF, adminPageLabel } from './navItems'
+
+/**
+ * The one <main> of every admin screen.
+ *
+ *  - Dashboard (/admin): the V3 palette, full-width, mint page background; the page draws its own <h1>.
+ *  - Every other admin page (still the V2 screens): the V2 palette and the 820px column they were built for,
+ *    plus a visually hidden <h1> naming the page — the old layout's visible "Admin" heading went with the old
+ *    header, and these pages only draw an <h2>.
+ */
+export function AdminContentFrame({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() ?? ''
+
+  if (pathname === ADMIN_DASHBOARD_HREF) {
+    return <main className="theme-admin min-h-dvh bg-paper text-ink">{children}</main>
+  }
+  return (
+    <main className="mx-auto flex min-h-dvh w-full max-w-[820px] flex-col gap-5 px-4 py-6 sm:px-6">
+      <h1 className="sr-only">{adminPageLabel(pathname)}</h1>
+      {children}
+    </main>
+  )
+}

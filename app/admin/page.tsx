@@ -1,34 +1,31 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireRole } from '@/lib/auth/requireRole'
 import { getAdminDashboardData } from '@/lib/adminDashboard'
-import { ClinicStateStrip } from '@/components/admin/ClinicStateStrip'
-import { NeedsAttentionPanel } from '@/components/admin/NeedsAttentionPanel'
-import { ServicePerformanceTable } from '@/components/admin/ServicePerformanceTable'
-import { PredictionQualityPanel } from '@/components/admin/PredictionQualityPanel'
+import { AdminDashboardView } from '@/components/admin/v3/AdminDashboardView'
+
+export const metadata = { title: 'Admin Dashboard · Smart Clinic' }
 
 /**
- * V2 admin dashboard — control and observability, in the order a
- * question actually gets asked: what is happening now (the state
- * strip), where is the problem (needs-attention, then the per-service
- * table), can I trust the estimates (prediction quality). Staff,
- * services and settings stay behind their own nav links, unchanged —
- * this screen is read-only observability, not another place to edit
- * configuration.
+ * Admin V3 dashboard (Figma frame 168:3) — control and observability, in the order a question actually gets
+ * asked: what is happening now (the cards), where is the problem (needs-attention, then the queue overview),
+ * what just happened (activity), can I trust the estimates (prediction quality). Strictly read-only: staff,
+ * services and settings stay behind their own pages, unchanged.
+ *
+ * The role is re-checked here, not only in the layout. A failed load throws to app/admin/error.tsx.
  */
 export default async function AdminOverviewPage() {
-  const supabase = await createClient()
-  const data = await getAdminDashboardData(supabase)
+  const { supabase, user } = await requireRole('admin')
 
-  return (
-    <div className="flex flex-col gap-6">
-      <ClinicStateStrip stats={data.clinicState} />
-      <NeedsAttentionPanel alerts={data.attentionAlerts} />
+  const [data, { data: profile }] = await Promise.all([
+    getAdminDashboardData(supabase),
+    // Explicit auth_user_id filter: RLS lets an admin see many profile rows, so an unfiltered .single() would throw.
+    supabase.from('profiles').select('full_name, clinic_id').eq('auth_user_id', user.id).single(),
+  ])
 
-      <section className="flex flex-col gap-3">
-        <h2 className="font-display text-base font-semibold text-ink">Service performance</h2>
-        <ServicePerformanceTable rows={data.services} />
-      </section>
+  let clinicName: string | null = null
+  if (profile?.clinic_id) {
+    const { data: clinic } = await supabase.from('clinics').select('name').eq('id', profile.clinic_id).maybeSingle()
+    clinicName = clinic?.name ?? null
+  }
 
-      <PredictionQualityPanel stats={data.predictionQuality} />
-    </div>
-  )
+  return <AdminDashboardView data={data} identity={{ fullName: profile?.full_name ?? 'Administrator', clinicName }} />
 }

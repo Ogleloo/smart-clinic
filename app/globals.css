@@ -93,9 +93,15 @@
  * so .theme-nurse shares this block rather than copying it. Same scoping mechanism as .theme-patient: redefine
  * the tokens every ui/* component already reads, so reception picks up its
  * own palette while nurse/admin screens keep the V2 palette untouched.
+ *
+ * Admin V3 (page "06 · Admin V3") uses the same palette, but .theme-admin carries the TOKENS ONLY (the background
+ * and text colour are split into the next rule). It is applied to the admin sidebar, mobile nav and dashboard,
+ * not to the not-yet-redesigned V2 pages (Services, Staff, Settings, Patients, Reports), which keep the V2
+ * palette and its stronger button contrast until their own phases.
  */
 .theme-reception,
-.theme-nurse {
+.theme-nurse,
+.theme-admin {
   --color-primary-50:  #E6FBF7;
   --color-primary-100: #E6FBF7;
   --color-primary-500: #08B9A8;
@@ -114,7 +120,10 @@
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+}
 
+.theme-reception,
+.theme-nurse {
   background: var(--color-paper);
   color: var(--color-ink);
 }
