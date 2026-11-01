@@ -23,9 +23,9 @@ Latest development checkpoint. Read this when continuing previous work.
 
 **Last test evidence for this checkpoint:** `npm run test:e2e:offline` on `main` @ `37e4ee6` — **432 passed** (1.9 min). Nothing was run against the shared Supabase project.
 
-**Open observation (not a conclusion):** after a live registration with OTP verification, an *existing* test account had no date of birth or ID in its Auth metadata or profile. The leading, unconfirmed explanation is re-signup of an already-created unconfirmed account (Supabase keeps the old metadata). Whether a **fresh** account stores both fields has **not** been verified; the read-only diagnostic query proposed in the PR #38 thread was not run by this checkpoint.
+**Open observation (not a conclusion):** on 1 November 2026 the owner ran a read-only check of the affected test account: both Auth-metadata presence flags (DOB, ID) and both profile presence flags were **false**; the trigger was **enabled** and the relevant migrations **recorded**. This rules out a trigger, migration or profile-display fault for that account; the root cause of the empty metadata is **unconfirmed** (candidates: account created before the fields were sent, repeat sign-up of an unconfirmed email, or values not reaching Auth). Whether a **fresh** account stores both fields has **not** been verified — next step is one new-email registration and the same presence-only check. No application change was made.
 
-**Remaining (owner / process):** re-confirm *Confirm email* ON, *Email OTP Length* 6 and SMTP; verify fresh-account persistence; visual review of the password toggle and year-choice UI; decisions on the PR #36 stages (S0 sign-in review, S1 migrations); academic documents (SRS, SDD, SPMP, Test Plan) do not exist in the repository.
+**Remaining (owner / process):** re-confirm *Confirm email* ON, *Email OTP Length* 6 and SMTP; verify fresh-account persistence; visual review of the password toggle and year-choice UI; decisions on the PR #36 stages (S0 sign-in review, S1 migrations); academic documents: SRS, SDD, SPMP and Test Plan are not in the repository; the owner reports the original SRS, SDD and Test Plan are held privately (not reviewed, not to be committed); SPMP location unknown.
 
 ---
 

@@ -214,7 +214,7 @@ project (see the preview warning above).
 - **Passwords are never trimmed.** One rule (`lib/passwordValidation.ts`) governs
   every place a password is created or changed; sign-in deliberately does not
   use it, so existing accounts can still log in.
-- **Staff invitations depend on verified email.** `accept_staff_invitation()`
+- **Staff invitations (database only — no UI, not called by the app) depend on verified email.** `accept_staff_invitation()`
   requires `email_confirmed_at`; with Supabase *Confirm email* OFF anyone could
   register an invited address first and claim the role. Do not switch Confirm
   email off.

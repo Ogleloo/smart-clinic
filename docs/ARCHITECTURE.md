@@ -54,7 +54,7 @@ Key relationships:
 
 ## Auth
 
-- Supabase Auth with email/password; roles set only by the `handle_new_user()` trigger (always `patient`) or by `accept_staff_invitation()`
+- Supabase Auth with email/password; roles set only by the `handle_new_user()` trigger (always `patient`) or, in the database design, by `accept_staff_invitation()` (no application code calls it; staff accounts are created outside the app)
 - Sign-up confirms by a **6-digit email code** (`/verify`, `verifyOtp`), not a link. The Supabase dashboard *Email OTP Length* must be **6** (the UI hard-codes six digits); *Confirm email* must be **ON**
 - Sign-in with an unverified account redirects to `/verify`; failed sign-ins are deliberately vague (anti-enumeration)
 - Password recovery: `/forgot-password` → emailed link → `/auth/callback` → `/reset-password`
@@ -70,7 +70,7 @@ Key relationships:
 - Show/hide password control on login, registration and reset-password (`components/ui/PasswordInput.tsx`)
 - Already-registered emails: the application does **not** inspect `user.identities` (earlier revisions of this file claimed it did); behaviour follows whatever Supabase Auth returns for the configured *Confirm email* setting
 - **Not implemented:** passport issuing country, document type, database-level identity uniqueness for self-registered patients (see `docs/V3_REQUIREMENTS.md`)
-- **Open observation:** an existing test account verified by OTP had no date of birth or ID in its Auth metadata or profile. Persistence for a *freshly created* account is **unverified** (`docs/FINAL_RELEASE_STATUS.md` §5)
+- **Open observation:** a read-only check by the owner on 1 November 2026 found, for an affected OTP-verified test account, no date-of-birth or ID key in the Auth metadata and no value in the profile (all four presence flags false), with the `handle_new_user()` trigger enabled and the relevant migrations recorded. The root cause is **unconfirmed**, and persistence for a *freshly created* account is **unverified** (`docs/FINAL_RELEASE_STATUS.md` §5)
 - The comment in `app/actions/auth.ts` saying Confirm Email "is currently off" is stale; it is a comment only and was left untouched in this documentation change
 
 ---

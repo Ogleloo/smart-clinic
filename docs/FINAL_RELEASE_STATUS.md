@@ -49,13 +49,13 @@ Baseline checks run on the release commit for this document (2026-11-01, local, 
 | Nurse classic screen `/nurse` (call next, undo, current patient, waiting list, duty, end session, emergency toggle) | **Merged** (V2, PR #12) | Still the post-login home for nurses |
 | Nurse V3 dashboard `/nurse/dashboard`, My Queue `/nurse/queue` (shared Next/Undo state machine, Skip) | **Merged** | PRs #30, #31 |
 | Nurse V3 patient details, vitals, consultation, completion, history, profile settings | **Not started** | Blocked on the clinical-records access review (PR #36) |
-| Admin (V2): dashboard, staff + invitations, services, patients, reports, settings (opening hours, idle timeout) | **Merged** (V2, PR #13 and later) | Admin V3 **not started** |
+| Admin (V2): dashboard, staff list (role and active/inactive), services, patients, reports, settings (opening hours, idle timeout) | **Merged** (V2, PR #13 and later) | Admin V3 **not started**. The staff page has **no invitation or account-creation control** (see the next row) |
 | Public waiting-room display `/display/[serviceId]` | **Merged** (V2, PR #7) | The only `anon`-callable function: `get_public_queue_display()` (ADR-028). V3 display **not started** |
 | Landing page `/` | **Merged** (PR #4, #6) | |
 | Prediction engine (wait estimate, confidence label, no estimate without an on-duty nurse) | **Merged** — runs in the database | |
 | Automatic no-show job, appointment reminders (`pg_cron`) | **Merged** (migrations) | Job execution **not re-verified** for this release |
 | Staff idle-timeout sign-out (reception, nurse, admin; never patients) | **Merged** | |
-| Staff invitations (`admin_invite_staff`, `accept_staff_invitation`) | **Merged** | Safe only while *Confirm email* is ON (§7) |
+| Staff invitations — **database capability only** (`staff_invitations` table, `admin_invite_staff()`, `admin_revoke_staff_invitation()`, `accept_staff_invitation()`; migration `20260930233400`) | Database objects **merged**; **no UI, and no application code calls them** (searched `app/`, `components/`, `lib/`, `e2e/`); acceptance is never invoked after OTP verification | Not implemented as a user feature and never verified end-to-end. If used directly, safe only while *Confirm email* is ON (§7) |
 | Notifications (booking, queue, no-show, reminders) | **Merged** (migrations + patient page) | |
 | Clinical notes / vitals tables with RLS | **Merged** (database only) | No UI; patients cannot read their own notes (POPIA review pending) |
 
@@ -69,7 +69,9 @@ Each line is the path a user takes; the grade says how far it is known to work.
 
 **Nurse** — sign in → classic `/nurse` or V3 `/nurse/dashboard` → start duty for a service → `/nurse/queue` or `/nurse`: Next patient (atomic call + consultation open), Undo within its window, Skip a waiting patient, emergency priority, long-consultation decision → End session report → sign out.
 
-**Admin** — sign in → dashboard → staff (invite a nurse/receptionist; invitee registers, verifies email, role applied on acceptance) → services → clinic settings (opening hours, idle timeout) → patients (duplicate detection/merge) → reports.
+**Admin** — sign in → dashboard → staff (view staff; set each member's role and whether they can sign in; `app/admin/staff/page.tsx` states that staff accounts are created **outside the app**) → services → clinic settings (opening hours, idle timeout) → patients (duplicate detection/merge) → reports.
+
+*Database capability vs UI capability:* the database contains an invitation design (admin invites → invitee registers normally and verifies email → `accept_staff_invitation()` applies the role). Only the database half exists. There is no admin invitation screen and nothing in the application calls the acceptance function, so a staff account today is created and given its role outside the app. Do not describe invitation as a working workflow.
 
 **Public display** — a waiting-room screen opens `/display/<serviceId>` with nobody signed in and shows the current/next tokens and wait information through the single anon RPC.
 
@@ -89,7 +91,7 @@ Spec classes are defined in `e2e/support/e2e-safety.ts` and explained in `CLAUDE
 | Nurse V3 My Queue | `nurse-v3-queue.spec.ts` (90, offline — in today's run): state machine, Undo, Skip dialog, fail-closed states with mocked actions; `nurse-v3-skip.local.spec.ts` (7) and `nurse-classic-skip.local.spec.ts` (18 declarations; 59 results recorded in PR #31) **previously passed on a local Supabase stack** | A real call/undo/skip/emergency/duty change from `/nurse/queue` on a preview or production (**not verified live**) |
 | Nurse V3 dashboard | `nurse-v3-dashboard.spec.ts` (49): pure logic + components (no database) + read-only live group | Live group not re-run for this document |
 | Classic nurse flow | `nurse-v2.spec.ts`, `nurse-undo.spec.ts` (destructive; **disabled**); database function tests in `supabase/tests/` for `next_patient`, skip functions (local Postgres) | |
-| Admin (V2) | `admin-v2.spec.ts` (2), `clinic-hours.spec.ts` (4) read-only; `clinic-hours-edit.spec.ts` destructive | Staff invitation → acceptance end-to-end is **not covered by any committed test** |
+| Admin (V2) | `admin-v2.spec.ts` (2), `clinic-hours.spec.ts` (4) read-only; `clinic-hours-edit.spec.ts` destructive | Staff invitation is **not implemented in the UI** and has **no test of any kind**; the database functions were never exercised end-to-end |
 | Public display | None in `e2e/`. ADR-028 and the continuously asserted "exactly one anon function" health check | The display page itself has no automated test |
 | Prediction engine, no-show, reminders, RLS invariants | `system_health_check()` (13 PASS + 1 INFO) and `system_health_check_v2()` (10/10), last recorded 2026-10-10 after the October migrations | **Not re-run for this document.** The checks cover database invariants, not the UI |
 | Test-harness safety | `e2e-safety.spec.ts` (76, offline — in today's run): every spec classified, allowlist, shared project rejected, browser write guard | Nothing enforces it in CI — **no CI exists** |
@@ -99,7 +101,13 @@ Overall: today's 432-test run covers four specs (safety harness, Nurse V3 queue 
 ## 5. Confirmed limitations and untested behaviour
 
 Registration and identity
-1. **Fresh-account persistence of DOB and ID is unverified.** In a live test, OTP delivery and verification worked, but an existing test account had no date of birth or ID in its Auth metadata or its profile. The code path (form → Server Action → sign-up metadata → `handle_new_user()` → `profiles` → Profile page) is correct in the repository and covered by contract tests. The leading explanation — re-signing-up an email that already has an unconfirmed account re-sends the code but keeps the old metadata — comes from the Supabase Auth source and has **not been reproduced**. The proposed read-only diagnostic was not run. Until a brand-new account is registered and checked, state only that the code is correct and the live outcome is unknown.
+1. **Fresh-account persistence of DOB and ID is unverified; the root cause of the missing values is unconfirmed.** Diagnostic history:
+   - *Live test:* OTP delivery and verification worked, but the test account's profile showed no date of birth or ID.
+   - *Read-only check, run by the owner on 1 November 2026 against that affected test account:* the Auth metadata held neither a date-of-birth key nor an ID-number key (both presence flags **false**), and the profile held neither value (both presence flags **false**). The `handle_new_user()` trigger on `auth.users` was **enabled**, and the relevant migrations (`20261001193956`, `20261006151206`) were **recorded** as applied. No identifier, name or email is reproduced here. The documentation author did not run this query and has seen only the owner's summary.
+   - *What this rules out for that account:* a profile-column, read or display fault — the values are absent at the Auth-metadata level, upstream of the trigger and the Profile page — and a disabled trigger or unapplied migration.
+   - *What it does not establish:* why the metadata is empty. Candidates, none confirmed: the account was created before the registration fields were being sent (an earlier build or registration that stored nothing); a repeat sign-up of an existing unconfirmed email, which per the Supabase Auth source keeps the old metadata (not reproduced); or a path in which the values never reached Auth. The account's creation time relative to the PR #38 deployment (1 Nov 2026 03:05 UTC) was not part of the reported result.
+   - *Next step:* register a brand-new account (new email) on the deployed release, then re-run the same presence-only check on that one account. Until then state only that the code path is correct and covered by contract tests, and that the live outcome is unknown.
+   The application code was not changed in response to this check.
 2. Passport **issuing country** and **document type** are not stored; a purely numeric foreign passport of 10+ digits (and a 13-digit one that is not a valid SA ID) cannot register.
 3. The unique index on `(clinic_id, id_number)` does not stop two self-registered patients (NULL `clinic_id`) sharing an ID. Unverified against the live schema.
 4. Patient profile settings can still clear DOB and ID, and accept any phone text up to 30 characters.
@@ -120,20 +128,25 @@ Other
 
 ## 6. Outstanding security concerns (PR #36 — open, draft, **nothing applied**)
 
-PR #36 holds proposals, SQL drafts and local test harnesses only. Its branch is behind `main`. The production inventory it relies on was supplied by the reviewer and not re-run by the author. These concerns therefore **exist in the deployed system today**:
+PR #36 holds proposals, SQL drafts and local test harnesses only. Its branch is behind `main`. The production inventory it relies on was supplied by the reviewer and has **not been re-run** by the author or for this document; no read-only comparison of production against the committed migrations has been done here. The items below are therefore graded, and **none is asserted to exist in production unless its basis says so**.
 
-| Ref | Concern (as reported in PR #36) | Status |
-|---|---|---|
-| C0 | Demo-account credentials were committed in a public repository | Passwords removed from the tree and rotated (owner-confirmed, PR #37, merged). **Still open:** review of sign-ins to the shared project since the repository became public; the POPIA s.22 information-officer question; one occurrence remains in an old applied migration (history) |
-| F1, F2 | Clinical notes/vitals readable by broad staff roles within a clinic (not treatment-linked) | Open; M1a proposed |
-| F3–F7, F9–F11, F15 | Broad direct-write grants and legacy RPCs on clinical/queue tables | Open; M1a proposed |
-| F8, F16 | An admin can read every profile in every clinic, including ID numbers, and merge/edit profiles | Open; M2 proposed |
-| F12 | Emergency/priority setting rules (Reception should own routine priority; supervisor requirement) | Open; M3/M4 proposed, coordinated release |
-| F13 | `reset_demo_state()` callable by admins — destructive | Open; revoke proposed after test isolation |
-| F14 | `send_appointment_reminders` execute privilege | Open; revoke proposed |
-| R1, R4 | `anon`/`authenticated` hold TRUNCATE/REFERENCES/TRIGGER on all 14 tables; `anon` has DML with RLS as the only barrier | Open; M1b drafted, DML hygiene undecided. Rated defence-in-depth, not directly exploitable |
-| — | Mandatory patient identification (SA ID or passport + country) and DB-level uniqueness | Partly addressed in the UI by PR #38; database side (S7) not built |
-| — | Patients cannot see their own clinical notes (POPIA access) | Review pending |
+Basis grades:
+- **Confirmed historical** — a past fact verifiable in git/GitHub, whatever production looks like now.
+- **Code-supported risk** — the committed migrations/code (and the PR #36 local replay of the 63 committed migrations) contain the policy, grant or function that creates the risk. Whether production still matches the committed files is **awaiting read-only live verification** (PR #36 gate G1: compare production fingerprints with the committed definitions).
+- **Awaiting live verification** — cannot be judged from the repository.
+
+| Ref | Concern (as reported in PR #36) | Basis | Status |
+|---|---|---|---|
+| C0 | Demo-account credentials were committed in a public repository | **Confirmed historical** (present in the git history of a public repository). Whether the accounts accepted them in production is not established here | Passwords removed from the tree and rotated (owner-confirmed, PR #37, merged). **Awaiting owner action:** review of sign-ins to the shared project since the repository became public; the POPIA s.22 information-officer question. One occurrence remains in an old applied migration (history cannot be rewritten) |
+| F1, F2 | Clinical notes/vitals readable by broad staff roles within a clinic (not treatment-linked) | **Code-supported risk** (RLS policies in the committed notes/vitals migrations); production **awaiting live verification** | M1a proposed, not applied |
+| F3–F7, F9–F11, F15 | Broad direct-write grants and legacy RPCs on clinical/queue tables | **Code-supported risk** (grants and functions in the committed migrations); production **awaiting live verification** | M1a proposed |
+| F8, F16 | An admin can read every profile in every clinic, including ID numbers, and merge/edit profiles | **Code-supported risk** (`profiles` admin policies, merge RPC); production **awaiting live verification** | M2 proposed |
+| F12 | Emergency/priority setting (Reception should own routine priority) | **Supervisor requirement change** plus a code-supported gap (`set_emergency_priority` is nurse/admin only) | M3/M4 proposed, coordinated release |
+| F13 | `reset_demo_state()` is destructive; the PR #36 analysis says admins can call it | **Code-supported risk** (function in migration `20260809004301`); callability in production **awaiting live verification** | Revoke proposed after test isolation |
+| F14 | `send_appointment_reminders` execute privilege | **Code-supported risk**; production **awaiting live verification** | Revoke proposed |
+| R1, R4 | `anon`/`authenticated` hold TRUNCATE/REFERENCES/TRIGGER on all 14 tables; `anon` has DML with RLS as the only barrier | **Reported by the reviewer's production inventory and reproduced on a local replay**; not re-run against production here. PR #36 rates R1 defence-in-depth, not directly exploitable | M1b drafted; DML hygiene undecided |
+| — | Mandatory patient identification (SA ID or passport + country) and database-level uniqueness | **Supervisor requirement** plus a code-supported gap (no effective uniqueness for self-registered patients; live schema unverified) | UI side partly done in PR #38; database side (S7) not built |
+| — | Patients cannot see their own clinical notes (POPIA access) | **Code-supported** (policy); legal significance **awaiting review** | Review pending |
 
 The staged order in `docs/proposals/staged_migration_plan.md` (on the PR #36 branch) is S0 credentials → S1 migrations → S1-T test isolation → S5/S2/S3/S4. **None of it is approved for production.** Nurse V3 Phase 3 must not be built before M1a.
 
@@ -143,7 +156,7 @@ Held in the Supabase dashboard / Vercel, **not in this repository** — the owne
 
 | Setting | Required value / reason |
 |---|---|
-| Auth → *Confirm email* | **ON.** The app routes every sign-up to `/verify`; `accept_staff_invitation()` requires `email_confirmed_at`, so with it OFF anyone could register an invited address first and obtain the staff role |
+| Auth → *Confirm email* | **ON.** The app routes every sign-up to `/verify`; `accept_staff_invitation()` requires `email_confirmed_at`, so with it OFF anyone could register an invited address first and obtain the staff role *if an invitation were ever created and accepted*; keep it ON regardless |
 | Auth → *Email OTP Length* | **6** (the verify form accepts exactly six digits) |
 | Auth → SMTP | Custom SMTP (Gmail, app password held by the owner) with a sender address that delivers to arbitrary recipients |
 | Auth → email templates | *Confirm signup* template must include `{{ .Token }}`; recovery uses the link flow through `/auth/callback` |
@@ -171,4 +184,4 @@ Held in the Supabase dashboard / Vercel, **not in this repository** — the owne
 
 ## 9. Academic documents
 
-See `docs/ACADEMIC_DOCUMENT_INVENTORY.md`: no SRS, SDD, SPMP or Test Plan exists in the repository.
+See `docs/ACADEMIC_DOCUMENT_INVENTORY.md`: no SRS, SDD, SPMP or Test Plan is **in the repository**. The owner reports that the original SRS, SDD and Test Plan exist in a private document library; they are **unavailable to this analysis** and have not been reviewed. The SPMP's location is not stated. No personal or cover-page identifiers from them are recorded in this repository.
