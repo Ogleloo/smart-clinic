@@ -38,7 +38,7 @@ export function NeedsAttentionPanel({ alerts }: { alerts: AttentionAlert[] }) {
                 href="/admin/staff"
                 className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-md border-[1.5px] border-[#037F74] bg-surface px-5 text-sm font-semibold text-[#037F74] transition-colors hover:bg-primary-50"
               >
-                Assign a nurse
+                Review staff
               </Link>
             </li>
           )

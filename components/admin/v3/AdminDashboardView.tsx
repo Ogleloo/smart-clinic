@@ -29,44 +29,55 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
  * the captions say what the number is made of instead. A figure that could not be read shows "—" and says so.
  */
 export function buildAdminStatCards(data: AdminDashboardData): Card[] {
-  const { today, clinicState, errors } = data
-  const queueFailed = errors.queue
+  const { today, clinicState } = data
+  const num = (n: number | null) => (n === null ? '—' : String(n))
+  const { servicesCovered, servicesTotal, nursesOnDuty, nursesTotal } = clinicState
   return [
     {
       key: 'checkins',
       label: 'Today’s Check-ins',
       icon: UserPlus,
-      value: queueFailed ? '—' : String(today.checkIns),
-      caption: queueFailed ? 'Couldn’t load' : `${plural(today.walkIns, 'walk-in', 'walk-ins')} · ${today.fromAppointments} from appointments`,
+      value: num(today.checkIns),
+      caption:
+        today.checkIns === null || today.walkIns === null || today.fromAppointments === null
+          ? 'Couldn’t load'
+          : `${plural(today.walkIns, 'walk-in', 'walk-ins')} · ${today.fromAppointments} from appointments`,
     },
     {
       key: 'waiting',
       label: 'Currently Waiting',
       icon: Users,
-      value: queueFailed ? '—' : String(clinicState.waitingNow),
-      caption: queueFailed
-        ? 'Couldn’t load'
-        : clinicState.servicesTotal === 0
-          ? 'No active services'
-          : `${clinicState.servicesCovered} of ${clinicState.servicesTotal} services have a nurse on duty`,
+      value: num(clinicState.waitingNow),
+      // The waiting figure and the coverage caption come from different reads; each says for itself when it failed.
+      caption:
+        clinicState.waitingNow === null
+          ? 'Couldn’t load'
+          : servicesTotal === null || servicesCovered === null
+            ? 'Service coverage unavailable'
+            : servicesTotal === 0
+              ? 'No active services'
+              : `${servicesCovered} of ${servicesTotal} services have a nurse on duty`,
     },
     {
       key: 'consultation',
       label: 'In Consultation',
       icon: Stethoscope,
-      value: queueFailed ? '—' : String(today.inConsultation),
-      caption: queueFailed
-        ? 'Couldn’t load'
-        : clinicState.nursesTotal === 0
-          ? 'No nurse accounts'
-          : `${clinicState.nursesOnDuty} of ${clinicState.nursesTotal} nurses on duty`,
+      value: num(today.inConsultation),
+      caption:
+        today.inConsultation === null
+          ? 'Couldn’t load'
+          : nursesTotal === null || nursesOnDuty === null
+            ? 'Nurse counts unavailable'
+            : nursesTotal === 0
+              ? 'No nurse accounts'
+              : `${nursesOnDuty} of ${nursesTotal} nurses on duty`,
     },
     {
       key: 'scheduled',
       label: 'Scheduled Today',
       icon: CalendarDays,
-      value: today.scheduled === null ? '—' : String(today.scheduled),
-      caption: errors.appointments || today.scheduled === null ? 'Couldn’t load' : 'Appointments dated today, not cancelled',
+      value: num(today.scheduled),
+      caption: today.scheduled === null ? 'Couldn’t load' : 'Appointments dated today, not cancelled',
     },
   ]
 }
@@ -175,7 +186,14 @@ export function AdminDashboardView({ data, identity }: { data: AdminDashboardDat
         </div>
       </section>
 
-      <NeedsAttentionPanel alerts={data.attentionAlerts} />
+      {data.errors.services || data.errors.coverage ? (
+        <p role="status" className="rounded-md border border-warning bg-warning-bg p-4 text-sm font-semibold text-warning">
+          The needs-attention check is unavailable: {data.errors.services ? 'the list of services' : 'live queue coverage'} couldn’t be loaded.
+          No alert here does not mean every service is covered.
+        </p>
+      ) : (
+        <NeedsAttentionPanel alerts={data.attentionAlerts} />
+      )}
 
       <ul aria-label="Today at a glance" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map(({ key, label, icon: Icon, value, caption }) => (
@@ -205,7 +223,19 @@ export function AdminDashboardView({ data, identity }: { data: AdminDashboardDat
         </div>
       </div>
 
-      <PredictionQualityPanel stats={data.predictionQuality} />
+      {data.predictionQuality ? (
+        <PredictionQualityPanel stats={data.predictionQuality} />
+      ) : (
+        <section aria-labelledby="admin-prediction-unavailable" className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-4">
+          <h2 id="admin-prediction-unavailable" className="text-xs font-semibold tracking-wide text-muted">
+            PREDICTION QUALITY
+          </h2>
+          <p role="alert" className="rounded-md bg-danger-bg p-3 text-sm font-semibold text-[#B42318]">
+            We couldn’t load the consultation history{data.errors.settings ? ' or the plausibility settings' : ''}, so prediction quality
+            is unavailable. Reload to try again.
+          </p>
+        </section>
+      )}
     </div>
   )
 }

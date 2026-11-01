@@ -61,7 +61,7 @@ test('a service with patients waiting and no nurse triggers Needs Attention, lin
   const alert = page.getByText('NEEDS ATTENTION')
   if (await alert.isVisible().catch(() => false)) {
     await expect(page.getByText(/no nurse on duty/)).toBeVisible()
-    const assignBtn = page.getByRole('link', { name: 'Assign a nurse' }).first()
+    const assignBtn = page.getByRole('link', { name: 'Review staff' }).first()
     await expect(assignBtn).toBeVisible()
     await assignBtn.click()
     await expect(page).toHaveURL(/\/admin\/staff/)

@@ -1,7 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { buildAdminActivity, summariseToday, type TodayEntry } from '../lib/adminDashboard'
+import { assembleAdminDashboard, buildAdminActivity, summariseToday, NO_ADMIN_ERRORS, type TodayEntry } from '../lib/adminDashboard'
+import { baseReads, failed, ok } from './support/admin-fixtures'
 import { ADMIN_NAV_ITEMS, adminPageLabel, isAdminActivePath } from '../components/admin/v3/navItems'
 
 /**
@@ -36,7 +37,7 @@ test.describe('today counts', () => {
   test('check-ins, walk-ins vs appointments, in consultation, scheduled', () => {
     const t = summariseToday(ENTRIES, 9)
     expect(t).toEqual({ checkIns: 6, walkIns: 4, fromAppointments: 2, inConsultation: 1, scheduled: 9 })
-    expect(t.walkIns + t.fromAppointments).toBe(t.checkIns)
+    expect(t.walkIns! + t.fromAppointments!).toBe(t.checkIns)
   })
   test('nothing today is zero, and an unreadable appointment count stays null, never 0', () => {
     expect(summariseToday([], 0)).toEqual({ checkIns: 0, walkIns: 0, fromAppointments: 0, inConsultation: 0, scheduled: 0 })
@@ -132,7 +133,11 @@ test.describe('navigation and guards', () => {
 
 type Rendered = {
   css: string
-  states: Record<'populated' | 'attention' | 'empty' | 'queueError' | 'coverageError' | 'appointmentsError' | 'longName', string>
+  states: Record<
+    | 'populated' | 'attention' | 'empty' | 'queueError' | 'coverageError' | 'appointmentsError' | 'servicesError' | 'nursesError'
+    | 'consultationsError' | 'settingsError' | 'perServiceError' | 'allFailed' | 'longName',
+    string
+  >
   sidebar: string
   mobileNav: string
   loading: string
@@ -191,9 +196,9 @@ test.describe('dashboard states (real components)', () => {
     expect(h).toMatch(/<a [^>]*href="\/admin\/reports"[^>]*>View reports<\/a>/)
   })
 
-  test('needs attention is kept and still links to Staff', () => {
+  test('needs attention is kept and still links to Staff — as "Review staff", which promises no reassignment', () => {
     expect(r.states.attention).toContain('NEEDS ATTENTION')
-    expect(r.states.attention).toMatch(/<a [^>]*href="\/admin\/staff"[^>]*>Assign a nurse<\/a>/)
+    expect(r.states.attention).toMatch(/<a [^>]*href="\/admin\/staff"[^>]*>Review staff<\/a>/)
     expect(r.states.populated).not.toContain('NEEDS ATTENTION')
   })
 
@@ -271,6 +276,258 @@ test.describe('shell markup (real components)', () => {
   })
 })
 
+// ----------------------------------------------------------------------------- failed reads vs genuinely empty
+
+const asm = (over: Partial<ReturnType<typeof baseReads>> = {}) => assembleAdminDashboard({ ...baseReads(), ...over })
+const BOOM = { message: 'boom' }
+
+test.describe('assembly: a failed read is never a healthy zero (pure, through the real assembleAdminDashboard)', () => {
+  test('healthy reads: real figures and no error flag', () => {
+    const d = asm()
+    expect(d.errors).toEqual(NO_ADMIN_ERRORS)
+    expect(d.clinicState).toEqual({ waitingNow: 2, nursesOnDuty: 2, nursesTotal: 3, servicesCovered: 2, servicesTotal: 3, avgWaitTodayMinutes: 20 })
+    expect(d.today).toEqual({ checkIns: 6, walkIns: 4, fromAppointments: 2, inConsultation: 1, scheduled: 9 })
+    expect(d.predictionQuality).toMatchObject({ recordedCount: 4, excludedCount: 2, avgMinutes: 12 })
+    expect(d.services.map((s) => [s.serviceName, s.waitingCount, s.servingCount, s.nursesOnDuty, s.sampleCount])).toEqual([
+      ['General Consultation', 1, 1, 2, 14],
+      ['Immunisation', 1, 0, 1, 2],
+      ['Pharmacy', 0, 0, 0, 0],
+    ])
+  })
+
+  test('genuinely EMPTY successful reads are real zeros, not nulls, with no error flag', () => {
+    const d = assembleAdminDashboard({
+      ...baseReads(),
+      services: ok([]), nurses: ok([]), entries: ok([]), coverage: ok([]), consultations: ok([]), appointmentsCount: { count: 0, error: null }, perService: {},
+    })
+    expect(d.errors).toEqual(NO_ADMIN_ERRORS)
+    expect(d.clinicState).toEqual({ waitingNow: 0, nursesOnDuty: 0, nursesTotal: 0, servicesCovered: 0, servicesTotal: 0, avgWaitTodayMinutes: null })
+    expect(d.today).toEqual({ checkIns: 0, walkIns: 0, fromAppointments: 0, inConsultation: 0, scheduled: 0 })
+    expect(d.services).toEqual([])
+    expect(d.activity).toEqual([])
+    expect(d.attentionAlerts).toEqual([])
+    expect(d.predictionQuality).toMatchObject({ recordedCount: 0, excludedCount: 0, avgMinutes: null })
+  })
+
+  test('a successful service that simply has no nurse / no samples / nobody waiting shows zero and "not served", not "unknown"', () => {
+    const pharmacy = asm().services.find((s) => s.serviceName === 'Pharmacy')!
+    expect(pharmacy).toMatchObject({ nursesOnDuty: 0, sampleCount: 0, waitingCount: 0, isBeingServed: false })
+  })
+
+  test('no clinic_settings row (maybeSingle: null, no error) is NOT a failure — the defaults apply', () => {
+    const d = asm({ settings: { data: null, error: null } })
+    expect(d.errors.settings).toBe(false)
+    expect(d.predictionQuality).toMatchObject({ minPlausibleMinutes: 1, maxPlausibleMinutes: 90 })
+  })
+
+  test('services read failed: no total, no coverage, no rows, no alerts — everything independent is kept', () => {
+    const d = asm({ services: failed(), perService: {} })
+    expect(d.errors.services).toBe(true)
+    expect(d.clinicState.servicesTotal).toBeNull()
+    expect(d.clinicState.servicesCovered).toBeNull()
+    expect(d.services).toEqual([])
+    expect(d.attentionAlerts).toEqual([])
+    // kept:
+    expect(d.clinicState).toMatchObject({ waitingNow: 2, nursesOnDuty: 2, nursesTotal: 3 })
+    expect(d.today.checkIns).toBe(6)
+    expect(d.predictionQuality).not.toBeNull()
+    expect(d.activity.length).toBeGreaterThan(0)
+  })
+
+  test('nurse profiles read failed: nurse counts are null, not "0 of 0" — services and the queue are kept', () => {
+    const d = asm({ nurses: failed() })
+    expect(d.errors.nurses).toBe(true)
+    expect(d.clinicState.nursesOnDuty).toBeNull()
+    expect(d.clinicState.nursesTotal).toBeNull()
+    expect(d.clinicState).toMatchObject({ waitingNow: 2, servicesCovered: 2, servicesTotal: 3 })
+    expect(d.services).toHaveLength(3)
+    expect(d.services[0]!.nursesOnDuty).toBe(2) // the per-service RPC is a different read
+  })
+
+  test('today’s queue read failed: every queue figure is null (not 0), no activity — coverage, nurses and scheduled are kept', () => {
+    const d = asm({ entries: failed() })
+    expect(d.errors.queue).toBe(true)
+    expect(d.clinicState.waitingNow).toBeNull()
+    expect(d.clinicState.avgWaitTodayMinutes).toBeNull()
+    expect(d.today).toEqual({ checkIns: null, walkIns: null, fromAppointments: null, inConsultation: null, scheduled: 9 })
+    expect(d.services.every((s) => s.servingCount === null)).toBe(true)
+    expect(d.activity).toEqual([])
+    // kept:
+    expect(d.services.map((s) => s.waitingCount)).toEqual([1, 1, 0])
+    expect(d.clinicState).toMatchObject({ nursesOnDuty: 2, servicesCovered: 2 })
+  })
+
+  test('live coverage failed: services are "unknown" — not "no nurse on duty", not "0 waiting", no needs-attention verdict', () => {
+    const d = asm({ coverage: failed() })
+    expect(d.errors.coverage).toBe(true)
+    for (const s of d.services) {
+      expect(s.isBeingServed).toBeNull()
+      expect(s.waitingCount).toBeNull()
+      expect(s.estimatedWaitMinutes).toBeNull()
+    }
+    expect(d.clinicState.servicesCovered).toBeNull()
+    expect(d.attentionAlerts).toEqual([])
+    // kept:
+    expect(d.clinicState.waitingNow).toBe(2) // from today's entries, a different read
+    expect(d.services.map((s) => s.nursesOnDuty)).toEqual([2, 1, 0])
+    expect(d.services.map((s) => s.servingCount)).toEqual([1, 0, 0])
+    expect(d.predictionQuality).not.toBeNull()
+  })
+
+  test('consultations read failed: prediction quality is null (not "0 recorded") — the rest is kept', () => {
+    const d = asm({ consultations: failed() })
+    expect(d.errors.consultations).toBe(true)
+    expect(d.predictionQuality).toBeNull()
+    expect(d.clinicState.waitingNow).toBe(2)
+    expect(d.services).toHaveLength(3)
+  })
+
+  test('settings read failed: prediction quality is null, because the exclusion thresholds would be guesses', () => {
+    const d = asm({ settings: { data: null, error: BOOM } })
+    expect(d.errors.settings).toBe(true)
+    expect(d.predictionQuality).toBeNull()
+  })
+
+  test('appointment count failed (error, or a null count): scheduled is null, not 0', () => {
+    expect(asm({ appointmentsCount: { count: null, error: BOOM } }).today.scheduled).toBeNull()
+    expect(asm({ appointmentsCount: { count: null, error: null } }).today.scheduled).toBeNull()
+    expect(asm({ appointmentsCount: { count: null, error: BOOM } }).errors.appointments).toBe(true)
+    expect(asm({ appointmentsCount: { count: 0, error: null } }).today.scheduled).toBe(0) // a real zero stays zero
+  })
+
+  test('a per-service RPC failed: only that row is unknown (null), the others and the totals are untouched', () => {
+    const base = baseReads()
+    const d = assembleAdminDashboard({ ...base, perService: { ...base.perService, s1: { nurses: failed(), stats: ok({ sample_count: 14 }) }, s2: { nurses: ok(1), stats: failed() } } })
+    expect(d.errors.perService).toBe(true)
+    const [s1, s2, s3] = d.services
+    expect([s1!.nursesOnDuty, s1!.sampleCount]).toEqual([null, 14])
+    expect([s2!.nursesOnDuty, s2!.sampleCount]).toEqual([1, null])
+    expect([s3!.nursesOnDuty, s3!.sampleCount]).toEqual([0, 0])
+    expect(d.clinicState.servicesCovered).toBe(2)
+    expect(d.errors.services || d.errors.coverage || d.errors.queue).toBe(false)
+  })
+
+  test('a per-service call that never ran, or returned no value, counts as failed — never as 0', () => {
+    const base = baseReads()
+    const missing = assembleAdminDashboard({ ...base, perService: { s2: base.perService.s2!, s3: base.perService.s3! } })
+    expect(missing.services[0]!.nursesOnDuty).toBeNull()
+    expect(missing.errors.perService).toBe(true)
+    const nullValue = assembleAdminDashboard({ ...base, perService: { ...base.perService, s1: { nurses: { data: null, error: null }, stats: ok({ sample_count: 1 }) } } })
+    expect(nullValue.services[0]!.nursesOnDuty).toBeNull()
+  })
+
+  test('a stats call that succeeded with no row (maybeSingle null) means zero samples, not unknown', () => {
+    const base = baseReads()
+    const d = assembleAdminDashboard({ ...base, perService: { ...base.perService, s3: { nurses: ok(0), stats: { data: null, error: null } } } })
+    expect(d.services[2]!.sampleCount).toBe(0)
+    expect(d.errors.perService).toBe(false)
+  })
+
+  test('every read failing at once does not throw, reports every flag, and shows no figure as a number', () => {
+    const d = assembleAdminDashboard({
+      services: failed(), nurses: failed(), entries: failed(), coverage: failed(), consultations: failed(),
+      settings: { data: null, error: BOOM }, appointmentsCount: { count: null, error: BOOM }, perService: {},
+    })
+    expect(d.errors).toEqual({ queue: true, appointments: true, coverage: true, services: true, nurses: true, consultations: true, settings: true, perService: false })
+    expect(d.clinicState).toEqual({ waitingNow: null, nursesOnDuty: null, nursesTotal: null, servicesCovered: null, servicesTotal: null, avgWaitTodayMinutes: null })
+    expect(d.today).toEqual({ checkIns: null, walkIns: null, fromAppointments: null, inConsultation: null, scheduled: null })
+    expect(d.predictionQuality).toBeNull()
+    expect(d.services).toEqual([])
+    expect(d.activity).toEqual([])
+  })
+
+  test('the queue arithmetic is unchanged: same average wait, same coverage count, same exclusion split as the V2 loader', () => {
+    const d = asm()
+    // called_at − checked_in_at over entries that were called: e1 15, e2 25 → 20; e3/e4/e5/e6 never called.
+    expect(d.clinicState.avgWaitTodayMinutes).toBe(20)
+    expect(d.predictionQuality!.exclusionBreakdown).toEqual({ staffBreak: 1, tooShort: 1, tooLong: 0 })
+  })
+})
+
+test.describe('rendered states: failures are explicit, empties are zeros (real components)', () => {
+  const stat = (h: string) => ['checkins', 'waiting', 'consultation', 'scheduled'].map((k) => card(h, k))
+
+  test('services failed: an explicit alert instead of "no active services", coverage unavailable, the check says it is unavailable', () => {
+    const h = r.states.servicesError
+    const t = text(h)
+    expect(t).toContain('We couldn’t load the list of services')
+    expect(t).not.toContain('There are no active services yet')
+    expect(card(h, 'waiting').caption).toBe('Service coverage unavailable')
+    expect(t).toContain('The needs-attention check is unavailable')
+    expect(t).toContain('No alert here does not mean every service is covered')
+    expect(t).toContain('Service coverage unavailable')
+    expect(h).not.toContain('NEEDS ATTENTION')
+    // independent sections survive
+    expect(card(h, 'checkins').value).toBe('6')
+    expect(card(h, 'consultation').caption).toBe('2 of 3 nurses on duty')
+    expect(t).toContain('RECORDED')
+    expect(t).toContain('GC-002 called to consultation')
+  })
+
+  test('nurse profiles failed: the nurse counts say unavailable, never "0 of 0"; the service table is intact', () => {
+    const h = r.states.nursesError
+    expect(card(h, 'consultation')).toEqual({ value: '1', caption: 'Nurse counts unavailable' })
+    expect(text(h)).toContain('Nurse counts unavailable ·')
+    expect(text(h)).not.toContain('0 of 0 nurses')
+    expect(text(h)).toContain('General Consultation')
+    expect(text(h)).toContain('2 nurses on duty') // per-service RPC, a separate read
+  })
+
+  test('consultations or settings failed: prediction quality is replaced by an explicit message, the rest of the page stays', () => {
+    for (const state of ['consultationsError', 'settingsError'] as const) {
+      const h = r.states[state]
+      const t = text(h)
+      expect(t).toContain('prediction quality is unavailable')
+      expect(t).not.toMatch(/RECORDED|AVG DURATION/)
+      expect(t).toContain('PREDICTION QUALITY')
+      expect(card(h, 'checkins').value).toBe('6')
+      expect(t).toContain('Queue Overview')
+    }
+    expect(text(r.states.settingsError)).toContain('or the plausibility settings')
+    expect(text(r.states.consultationsError)).not.toContain('plausibility settings')
+  })
+
+  test('a per-service failure: that row says "Nurse count unavailable" / "Sample size unavailable"; a warning explains', () => {
+    const h = r.states.perServiceError
+    const t = text(h)
+    expect(t).toContain('Nurse count unavailable')
+    expect(t).toContain('Sample size unavailable')
+    expect(t).toContain('Nurse counts or sample sizes could not be loaded for some services')
+    expect(t).toContain('1 nurse on duty') // another service still shows its real count
+    expect(t).not.toContain('0 nurses on duty General Consultation')
+  })
+
+  test('everything failed: all four cards show "—" with a reason, every section says it is unavailable, nothing shows a healthy zero', () => {
+    const h = r.states.allFailed
+    const t = text(h)
+    for (const c of stat(h)) {
+      expect(c.value).toBe('—')
+      expect(c.caption).toMatch(/Couldn’t load|unavailable/)
+    }
+    expect(t).toContain('We couldn’t load the list of services')
+    expect(t).toContain('We couldn’t load today’s activity')
+    expect(t).toContain('prediction quality is unavailable')
+    expect(t).not.toContain('No queue activity yet today') // that is the empty message; this is a failure
+    expect(t).not.toContain('There are no active services yet')
+    expect(t).not.toContain('No nurse accounts')
+    expect(t).not.toContain('No active services')
+    expect(t).toMatch(/Total waiting\s*—\s*Total serving\s*—\s*Avg\. wait today\s*—/)
+  })
+
+  test('the same sections, genuinely empty and successful, show real zeros and the friendly empty states', () => {
+    const h = r.states.empty
+    expect(stat(h).map((c) => c.value)).toEqual(['0', '0', '0', '0'])
+    expect(text(h)).toContain('There are no active services yet')
+    expect(text(h)).toContain('No queue activity yet today')
+    expect(text(h)).toContain('RECORDED') // prediction quality with zero consultations is a real, loaded panel
+    expect(text(h)).not.toMatch(/couldn’t load|unavailable/i)
+  })
+
+  test('the healthy state contains no error or unavailable wording at all', () => {
+    expect(text(r.states.populated)).not.toMatch(/couldn’t load|unavailable|could not be loaded/i)
+  })
+})
+
 // ---------------------------------------------------------------------------------- layout with real CSS
 
 const doc = (content: string, themed = true) =>
@@ -281,7 +538,7 @@ const overflow = (page: Page) => page.evaluate(() => document.documentElement.sc
 const box = async (page: Page, sel: string) => (await page.locator(sel).first().boundingBox())!
 
 test.describe('dashboard layout at 1440 / 390 / 320 (real components + real compiled CSS)', () => {
-  for (const [name, state] of [['populated', 'populated'], ['empty', 'empty'], ['queue failed', 'queueError'], ['coverage failed', 'coverageError'], ['very long name', 'longName'], ['needs attention', 'attention']] as const) {
+  for (const [name, state] of [['populated', 'populated'], ['empty', 'empty'], ['queue failed', 'queueError'], ['coverage failed', 'coverageError'], ['services failed', 'servicesError'], ['everything failed', 'allFailed'], ['per-service failed', 'perServiceError'], ['prediction unavailable', 'consultationsError'], ['very long name', 'longName'], ['needs attention', 'attention']] as const) {
     for (const width of [1440, 390, 320]) {
       test(`${name} at ${width}px: no sideways scrolling`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 })
@@ -362,7 +619,7 @@ test.describe('dashboard layout at 1440 / 390 / 320 (real components + real comp
     await page.setViewportSize({ width: 1440, height: 1100 })
     await page.setContent(doc(r.states.attention))
     const targets = [
-      page.getByRole('link', { name: 'Assign a nurse' }),
+      page.getByRole('link', { name: 'Review staff' }),
       page.getByRole('link', { name: 'View reports' }),
       page.getByRole('button', { name: /Show reasons/ }),
     ]
@@ -387,7 +644,7 @@ test.describe('dashboard layout at 1440 / 390 / 320 (real components + real comp
         out[name] = ratio(cs.color, cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? 'rgb(255,255,255)' : cs.backgroundColor)
       }
       const link = (t: string) => [...document.querySelectorAll('a')].find((a) => a.textContent?.trim() === t)
-      pick('assign', link('Assign a nurse'))
+      pick('assign', link('Review staff'))
       pick('reports', link('View reports'))
       pick('reasons', [...document.querySelectorAll('button')].find((b) => /Show reasons/.test(b.textContent ?? '')))
       pick('caption', document.querySelector('[data-stat] p.mt-auto'))

@@ -9,19 +9,24 @@ const CONFIDENCE_PILL: Record<ConfidenceLevel, { label: string; className: strin
 }
 
 /** What the "Est. wait" column says for one service. Never a number the system cannot justify: an uncovered service has no estimate. */
-export function estimateText(row: ServicePerformanceRow, coverageFailed: boolean): { text: string; detail: string | null; tone: 'ok' | 'none' } {
-  if (coverageFailed) return { text: 'Unavailable', detail: null, tone: 'none' }
+export function estimateText(row: ServicePerformanceRow): { text: string; detail: string | null; tone: 'ok' | 'none' } {
+  // isBeingServed null = the live coverage read failed: whether anyone is on duty is unknown, so say nothing about it.
+  if (row.isBeingServed === null) return { text: 'Unavailable', detail: null, tone: 'none' }
   if (!row.isBeingServed) return { text: 'No estimate', detail: 'No nurse on duty', tone: 'none' }
   return {
     text: row.estimatedWaitMinutes === null ? 'No wait' : `~${row.estimatedWaitMinutes} min`,
-    detail: `${row.sampleCount} sample${row.sampleCount === 1 ? '' : 's'}`,
+    // sampleCount null = the stats call failed for this service: no sample count is better than a made-up 0.
+    detail: row.sampleCount === null ? 'Sample size unavailable' : `${row.sampleCount} sample${row.sampleCount === 1 ? '' : 's'}`,
     tone: 'ok',
   }
 }
 
-function Confidence({ row, hidden }: { row: ServicePerformanceRow; hidden: boolean }) {
+const nurseText = (n: number | null) => (n === null ? 'Nurse count unavailable' : `${n} ${n === 1 ? 'nurse' : 'nurses'} on duty`)
+const cell = (n: number | null) => (n === null ? '—' : String(n))
+
+function Confidence({ row }: { row: ServicePerformanceRow }) {
   // No confidence label without the estimate it describes.
-  if (hidden || !row.isBeingServed) return null
+  if (row.isBeingServed !== true) return null
   const pill = CONFIDENCE_PILL[row.confidence]
   return <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${pill.className}`}>{pill.label}</span>
 }
@@ -37,10 +42,6 @@ function Confidence({ row, hidden }: { row: ServicePerformanceRow; hidden: boole
  */
 export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
   const { services, clinicState, today, errors } = data
-  const coverageFailed = errors.coverage
-  const waitingTotal = errors.queue ? null : clinicState.waitingNow
-  const servingTotal = errors.queue ? null : today.inConsultation
-  const show = (n: number | null) => (n === null ? '—' : String(n))
 
   return (
     <section aria-labelledby="admin-queue-overview" className="flex h-full flex-col gap-4 rounded-lg border border-border bg-surface p-6 shadow-[0_12px_32px_rgba(5,48,46,0.08)]">
@@ -51,13 +52,24 @@ export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
         <p className="text-base text-muted">Current queue and estimated waiting time.</p>
       </div>
 
-      {coverageFailed && (
+      {errors.services && (
         <p role="alert" className="rounded-md bg-danger-bg p-3 text-sm font-semibold text-[#B42318]">
-          We couldn’t load live queue coverage. Per-service waiting counts and wait estimates are unavailable; reload to try again.
+          We couldn’t load the list of services, so the queue overview and service coverage are unavailable. Reload to try again.
+        </p>
+      )}
+      {errors.coverage && !errors.services && (
+        <p role="alert" className="rounded-md bg-danger-bg p-3 text-sm font-semibold text-[#B42318]">
+          We couldn’t load live queue coverage. Per-service waiting counts and wait estimates are unavailable, and so is the
+          needs-attention check; reload to try again.
+        </p>
+      )}
+      {errors.perService && !errors.services && (
+        <p role="status" className="rounded-md bg-warning-bg p-3 text-sm font-semibold text-warning">
+          Nurse counts or sample sizes could not be loaded for some services; those show as unavailable.
         </p>
       )}
 
-      {services.length === 0 ? (
+      {errors.services ? null : services.length === 0 ? (
         <p className="rounded-md bg-primary-50 p-4 text-sm text-ink">
           There are no active services yet.{' '}
           <Link href="/admin/services" className="font-semibold text-[#037F74] underline underline-offset-2">
@@ -79,21 +91,19 @@ export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
             </thead>
             <tbody>
               {services.map((row) => {
-                const est = estimateText(row, coverageFailed)
+                const est = estimateText(row)
                 return (
                   <tr key={row.serviceId} className="border-b border-border last:border-b-0">
                     <th scope="row" className="px-4 py-4 text-left font-normal">
                       <span className="block text-base text-ink">{row.serviceName}</span>
-                      <span className="block text-xs text-muted">
-                        {row.nursesOnDuty} {row.nursesOnDuty === 1 ? 'nurse' : 'nurses'} on duty
-                      </span>
+                      <span className="block text-xs text-muted">{nurseText(row.nursesOnDuty)}</span>
                     </th>
-                    <td className="px-3 py-4 text-right text-base tabular-nums text-ink">{coverageFailed ? '—' : row.waitingCount}</td>
-                    <td className="px-3 py-4 text-right text-base tabular-nums text-ink">{errors.queue ? '—' : row.servingCount}</td>
+                    <td className="px-3 py-4 text-right text-base tabular-nums text-ink">{cell(row.waitingCount)}</td>
+                    <td className="px-3 py-4 text-right text-base tabular-nums text-ink">{cell(row.servingCount)}</td>
                     <td className="px-4 py-4">
                       <span className={`block text-base ${est.tone === 'ok' ? 'text-ink' : 'font-semibold text-warning'}`}>{est.text}</span>
                       {est.detail && <span className="block text-xs text-muted">{est.detail}</span>}
-                      <Confidence row={row} hidden={coverageFailed} />
+                      <Confidence row={row} />
                     </td>
                   </tr>
                 )
@@ -103,33 +113,31 @@ export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
 
           <ul className="flex flex-col md:hidden" aria-label="Services">
             {services.map((row) => {
-              const est = estimateText(row, coverageFailed)
+              const est = estimateText(row)
               return (
                 <li key={row.serviceId} className="flex flex-col gap-3 border-b border-border py-4 first:pt-0 last:border-b-0">
                   <div>
                     <p className="text-base text-ink">{row.serviceName}</p>
-                    <p className="text-xs text-muted">
-                      {row.nursesOnDuty} {row.nursesOnDuty === 1 ? 'nurse' : 'nurses'} on duty
-                    </p>
+                    <p className="text-xs text-muted">{nurseText(row.nursesOnDuty)}</p>
                   </div>
                   <dl className="grid grid-cols-3 gap-2 text-sm">
                     <div>
                       <dt className="text-xs text-muted">Waiting</dt>
-                      <dd className="tabular-nums text-ink">{coverageFailed ? '—' : row.waitingCount}</dd>
+                      <dd className="tabular-nums text-ink">{cell(row.waitingCount)}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted">Serving</dt>
-                      <dd className="tabular-nums text-ink">{errors.queue ? '—' : row.servingCount}</dd>
+                      <dd className="tabular-nums text-ink">{cell(row.servingCount)}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted">Est. wait</dt>
                       <dd className={est.tone === 'ok' ? 'text-ink' : 'font-semibold text-warning'}>{est.text}</dd>
                     </div>
                   </dl>
-                  {(est.detail || (row.isBeingServed && !coverageFailed)) && (
+                  {(est.detail || row.isBeingServed === true) && (
                     <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
                       {est.detail}
-                      <Confidence row={row} hidden={coverageFailed} />
+                      <Confidence row={row} />
                     </p>
                   )}
                 </li>
@@ -143,16 +151,16 @@ export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
         <dl className="flex flex-wrap gap-x-8 gap-y-3">
           <div>
             <dt className="text-xs text-muted">Total waiting</dt>
-            <dd className="font-display text-2xl font-semibold tabular-nums text-ink">{show(waitingTotal)}</dd>
+            <dd className="font-display text-2xl font-semibold tabular-nums text-ink">{cell(clinicState.waitingNow)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted">Total serving</dt>
-            <dd className="font-display text-2xl font-semibold tabular-nums text-ink">{show(servingTotal)}</dd>
+            <dd className="font-display text-2xl font-semibold tabular-nums text-ink">{cell(today.inConsultation)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted">Avg. wait today</dt>
             <dd className="font-display text-2xl font-semibold tabular-nums text-[#037F74]">
-              {errors.queue || clinicState.avgWaitTodayMinutes === null ? '—' : `${clinicState.avgWaitTodayMinutes} min`}
+              {clinicState.avgWaitTodayMinutes === null ? '—' : `${clinicState.avgWaitTodayMinutes} min`}
             </dd>
           </div>
         </dl>
@@ -164,8 +172,13 @@ export function AdminQueueOverview({ data }: { data: AdminDashboardData }) {
         </Link>
       </div>
       <p className="text-xs text-muted">
-        {clinicState.nursesOnDuty} of {clinicState.nursesTotal} nurses on duty · {clinicState.servicesCovered} of{' '}
-        {clinicState.servicesTotal} services covered
+        {clinicState.nursesOnDuty === null || clinicState.nursesTotal === null
+          ? 'Nurse counts unavailable'
+          : `${clinicState.nursesOnDuty} of ${clinicState.nursesTotal} nurses on duty`}
+        {' · '}
+        {clinicState.servicesCovered === null || clinicState.servicesTotal === null
+          ? 'Service coverage unavailable'
+          : `${clinicState.servicesCovered} of ${clinicState.servicesTotal} services covered`}
         {errors.queue ? ' · Today’s queue figures couldn’t be loaded' : ''}
       </p>
     </section>
