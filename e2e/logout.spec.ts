@@ -28,9 +28,10 @@ test('logout double-submit does not error and still lands on /login', async ({ p
 
 test('staff logout redirects to /login and protected staff route is no longer reachable', async ({ page }) => {
   await loginAs(page, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
-  await expect(page).toHaveURL(/\/nurse/)
+  // A nurse now lands on the V3 dashboard, whose sidebar carries "Sign Out" (the classic /nurse screen has "Log out").
+  await expect(page).toHaveURL(/\/nurse\/dashboard$/)
 
-  await page.getByRole('button', { name: 'Log out' }).click()
+  await page.getByRole('button', { name: 'Sign Out' }).click()
   await waitSettled(page)
   await expect(page).toHaveURL(/\/login$/)
 

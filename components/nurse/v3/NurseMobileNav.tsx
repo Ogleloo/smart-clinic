@@ -19,7 +19,9 @@ export function NurseMobileNav() {
       aria-label="Main"
       className="sticky top-0 z-10 flex items-center gap-1 border-b border-border bg-surface px-3 py-2 md:hidden"
     >
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+      {/* p-1: the scroll container clips anything outside its box, and the focus ring is a 4px box-shadow — without
+          this padding the ring on a focused link was cut off at the top and bottom. */}
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1">
         {NURSE_NAV_ITEMS.map((item) => {
           const isActive = isNurseActivePath(pathname, item.href)
           return (
