@@ -1,4 +1,4 @@
-import { BarChart3, ClipboardList, LayoutDashboard, Settings, UserRound, Users, type LucideIcon } from 'lucide-react'
+import { BarChart3, BrainCircuit, ClipboardList, LayoutDashboard, Settings, UserRound, Users, type LucideIcon } from 'lucide-react'
 
 export type AdminNavItem = { href: string; label: string; icon: LucideIcon }
 
@@ -12,6 +12,7 @@ export const ADMIN_DASHBOARD_HREF = '/admin'
  */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { href: ADMIN_DASHBOARD_HREF, label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/allocation-advisor', label: 'Allocation Lab', icon: BrainCircuit },
   { href: '/admin/services', label: 'Services', icon: ClipboardList },
   { href: '/admin/patients', label: 'Patients', icon: UserRound },
   { href: '/admin/staff', label: 'Staff Management', icon: Users },

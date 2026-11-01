@@ -85,7 +85,7 @@ test.describe('activity feed', () => {
 test.describe('navigation and guards', () => {
   test('every existing admin area is still linked, to its existing route', () => {
     expect(ADMIN_NAV_ITEMS.map((i) => i.href).sort()).toEqual(
-      ['/admin', '/admin/patients', '/admin/reports', '/admin/services', '/admin/settings', '/admin/staff'].sort()
+      ['/admin', '/admin/allocation-advisor', '/admin/patients', '/admin/reports', '/admin/services', '/admin/settings', '/admin/staff'].sort()
     )
     for (const i of ADMIN_NAV_ITEMS) {
       const file = i.href === '/admin' ? 'app/admin/page.tsx' : `app/admin${i.href.replace('/admin', '')}/page.tsx`
@@ -94,7 +94,7 @@ test.describe('navigation and guards', () => {
   })
   test('Figma labels are used where an item maps; Figma items with no screen are not linked', () => {
     const labels = ADMIN_NAV_ITEMS.map((i) => i.label)
-    expect(labels).toEqual(['Dashboard', 'Services', 'Patients', 'Staff Management', 'Reports', 'System Settings'])
+    expect(labels).toEqual(['Dashboard', 'Allocation Lab', 'Services', 'Patients', 'Staff Management', 'Reports', 'System Settings'])
     expect(labels).not.toContain('Queue Overview')
     expect(labels).not.toContain('Appointments')
   })
