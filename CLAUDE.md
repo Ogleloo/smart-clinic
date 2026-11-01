@@ -12,16 +12,22 @@ Live: `smart-clinic-alpha.vercel.app` · Supabase project `bffhjvpkfivtbzqielve`
 V3 replaces the V2 screens role by role. Each role is a single body of
 work — do not mix roles in one session.
 
-| Role          | Status        | Branch / PR                |
-|---------------|---------------|----------------------------|
-| Patient V3    | ✅ Implemented | `feat/patient-v3-screens`  |
-| Reception V3  | 🔲 Pending    | —                          |
-| Nurse V3      | 🔲 Pending    | —                          |
-| Admin V3      | 🔲 Pending    | —                          |
-| Public Display| 🔲 Pending    | —                          |
+The authoritative, evidence-graded status is `docs/FINAL_RELEASE_STATUS.md`.
+Summary (merged to `main`; "implemented" is not "fully tested" — see that file):
 
-Do **not** add features outside the current task scope. Ideas for later
-go in `Future_Features_V2.md`.
+| Role           | Status                    | Merged PRs / notes |
+|----------------|---------------------------|--------------------|
+| Patient V3     | ✅ Implemented            | #15, #16, #17, #20; registration changes #38 |
+| Reception V3   | ✅ Implemented (Phases 1–4) | #19, #21, #25–#29; profile **photo** backend not applied |
+| Nurse V3       | 🔶 Partial                | Dashboard #30, My Queue #31; Phase 3 (patient details / vitals / notes / history) **not started** — blocked on the PR #36 security gate. Classic `/nurse` screen remains the working screen |
+| Admin V3       | 🔲 Not started            | Admin V2 (#13) is what is deployed |
+| Public Display | 🔲 V3 not started         | V2 display board (#7) is what is deployed |
+
+Open: **PR #36** (security proposals, docs/tests only, draft, nothing applied).
+
+Do **not** add features outside the current task scope. `Future_Features_V2.md`
+(named here in earlier revisions) does not exist in the repository; record
+future ideas in `docs/FINAL_RELEASE_STATUS.md` §8 instead.
 
 ---
 
@@ -75,13 +81,15 @@ chore/   tooling, config, dependencies
 ```
 
 **Vercel preview warning:** preview deployments isolate code but share
-the production database. Do not run destructive tests or
-`reset_demo_state()` from a preview without saying so first.
+the production database. Do not run destructive tests against it, and do not
+run `reset_demo_state()` against the shared project at all — PR #36 (unmerged)
+treats it as a destructive function that must not be callable by ordinary
+admins. Say so first if you believe an exception is needed.
 
 **Before pushing a branch**
 
-1. Run the relevant Playwright specs
-2. Run the full suite when the change touches a shared workflow
+1. Run the relevant Playwright specs **that are safe** (see "Safe testing" below)
+2. Run `npm run test:e2e:offline` whenever `lib/`, auth or validation changed
 3. `npx tsc --noEmit` and `eslint`
 4. Run the database assertions if security or database behaviour changed
 5. Review `git diff` in full
@@ -141,6 +149,23 @@ running anything destructive.
 
 ---
 
+## Safe testing — shared Supabase restrictions
+
+Every spec in `e2e/` is classified in `e2e/support/e2e-safety.ts`; an
+unclassified spec does not run.
+
+| Class          | May run against the shared project? | How |
+|----------------|--------------------------------------|-----|
+| offline        | n/a — no backend, nothing leaves the machine | `npm run test:e2e:offline` (dev server forced to a dead port) |
+| read-only      | Yes — signs in and looks; a browser guard aborts any write | `npx playwright test`, credentials from `E2E_*` env vars |
+| self-guarded `.local` | No — local Supabase stack only | `LOCAL_SUPABASE_*` set; refuses anything but `localhost` / `127.0.0.1` |
+| destructive    | **No.** Disabled by default; the shared project is rejected | `E2E_ENABLE_DESTRUCTIVE=1` against a verified local stack — no committed local seed exists yet, so today they run nowhere |
+
+Passing the offline suite proves validators, contracts and page behaviour with
+no backend. It does **not** prove a real registration, email delivery, a database
+write, RLS behaviour or realtime propagation. Do not report them as such.
+Details: `docs/proposals/credential_rotation_runbook.md` §7.
+
 ## Testing rule
 
 No change is committed without local verification. For every change:
@@ -165,10 +190,12 @@ belongs in `system_health_check_v2()`, not in a manual checklist. Manual effort
 is reserved for interface behaviour, realtime propagation, and hostile use.
 
 ```sql
-select * from public.system_health_check();      -- 14 assertions
-select * from public.system_health_check_v2();   -- 9 assertions
-select * from public.reset_demo_state();         -- known-good demo scenario
+select * from public.system_health_check();      -- 14 rows (13 PASS + 1 INFO at the last recorded run)
+select * from public.system_health_check_v2();   -- 10 assertions at the last recorded run
 ```
+
+`reset_demo_state()` exists but must **not** be run against the shared
+project (see the preview warning above).
 
 ---
 
@@ -184,6 +211,13 @@ select * from public.reset_demo_state();         -- known-good demo scenario
 - **Exactly one function is `anon`-callable** — `get_public_queue_display()`.
   Asserted continuously. Do not add a second without an explicit decision.
 - **`getUser()`, never `getSession()`.**
+- **Passwords are never trimmed.** One rule (`lib/passwordValidation.ts`) governs
+  every place a password is created or changed; sign-in deliberately does not
+  use it, so existing accounts can still log in.
+- **Staff invitations depend on verified email.** `accept_staff_invitation()`
+  requires `email_confirmed_at`; with Supabase *Confirm email* OFF anyone could
+  register an invited address first and claim the role. Do not switch Confirm
+  email off.
 - **All timestamps display in the clinic timezone** (`Africa/Johannesburg`),
   never the browser's or the server's (ADR-020).
 - **The prediction engine runs in the database**, never in React.

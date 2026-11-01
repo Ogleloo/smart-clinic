@@ -11,7 +11,7 @@ Concise verified technical overview. Read this when starting work on the project
 | Framework   | Next.js 16.3.6, TypeScript, Tailwind|
 | Database    | Supabase (Postgres, Auth, Realtime) |
 | Hosting     | Vercel                              |
-| Email       | Resend SMTP (migration to Gmail pending) |
+| Email       | Supabase Auth mail via custom SMTP — Gmail (owner-reported; the dashboard setting is not in this repo). Resend was the earlier provider and delivered only to its account owner |
 | Icons       | lucide-react                        |
 | Testing     | Playwright                          |
 | Design      | Figma                               |
@@ -22,7 +22,8 @@ Concise verified technical overview. Read this when starting work on the project
 
 - Project ID: `bffhjvpkfivtbzqielve`
 - **Single database** shared across production, preview, and local dev
-- Scheduled jobs: `pg_cron` (2 active jobs)
+- Migrations: 63 files in `supabase/migrations/`, all applied (append-only)
+- Scheduled jobs: `pg_cron` (2 jobs: automatic no-show, appointment reminders)
 - Realtime: enabled for queue_entries
 
 ---
@@ -53,10 +54,24 @@ Key relationships:
 
 ## Auth
 
-- Supabase Auth with email/password
-- Anti-enumeration: `data.user?.identities?.length === 0` detects existing accounts
-- Confirm email: **currently OFF** (SMTP not configured for delivery to non-owner emails)
+- Supabase Auth with email/password; roles set only by the `handle_new_user()` trigger (always `patient`) or by `accept_staff_invitation()`
+- Sign-up confirms by a **6-digit email code** (`/verify`, `verifyOtp`), not a link. The Supabase dashboard *Email OTP Length* must be **6** (the UI hard-codes six digits); *Confirm email* must be **ON**
+- Sign-in with an unverified account redirects to `/verify`; failed sign-ins are deliberately vague (anti-enumeration)
+- Password recovery: `/forgot-password` → emailed link → `/auth/callback` → `/reset-password`
+- Idle timeout for staff (`IdleTimeoutMonitor`, setting in `staff_idle_timeout_setting` migration)
 - `getUser()` only, never `getSession()`
+
+### Registration (patients)
+
+- Required: full name, email, **date of birth**, **ID or passport number**, password (≥ 8 non-space characters, never trimmed). Optional: phone (7–15 digits, kept as typed)
+- One validator (`lib/registrationValidation.ts`) runs in the browser and again in the `register` Server Action
+- A valid 13-digit South African ID (checksum, real date, citizenship digit) suggests the date of birth; when both 19YY and 20YY are possible the patient chooses; a contradicting date is refused. A passport number derives nothing
+- Values travel as sign-up metadata and are stored by `handle_new_user()`, which silently drops malformed values — so the application validates first
+- Show/hide password control on login, registration and reset-password (`components/ui/PasswordInput.tsx`)
+- Already-registered emails: the application does **not** inspect `user.identities` (earlier revisions of this file claimed it did); behaviour follows whatever Supabase Auth returns for the configured *Confirm email* setting
+- **Not implemented:** passport issuing country, document type, database-level identity uniqueness for self-registered patients (see `docs/V3_REQUIREMENTS.md`)
+- **Open observation:** an existing test account verified by OTP had no date of birth or ID in its Auth metadata or profile. Persistence for a *freshly created* account is **unverified** (`docs/FINAL_RELEASE_STATUS.md` §5)
+- The comment in `app/actions/auth.ts` saying Confirm Email "is currently off" is stale; it is a comment only and was left untouched in this documentation change
 
 ---
 
@@ -104,13 +119,15 @@ The config runs an **allowlist** of classified top-level specs, and it will not 
 names the shared project. `npm run test:e2e:offline` runs the offline specs with no backend and no credentials. Details:
 `docs/proposals/credential_rotation_runbook.md` §7.
 
-Reset demo state: `SELECT * FROM public.reset_demo_state();`
+`reset_demo_state()` exists in the database but is **not** to be run against the shared project (destructive; PR #36 proposes revoking it from ordinary admins).
 
 ---
 
 ## Health checks
 
 ```sql
-SELECT * FROM public.system_health_check();      -- 14 assertions
-SELECT * FROM public.system_health_check_v2();   -- 9 assertions
+SELECT * FROM public.system_health_check();      -- 14 rows (13 PASS + 1 INFO at the last recorded run, 2026-10-10)
+SELECT * FROM public.system_health_check_v2();   -- 10 assertions at the last recorded run, 2026-10-10
 ```
+
+These were last recorded after the October 2026 migrations; they were not re-run for this documentation change.

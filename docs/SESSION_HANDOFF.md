@@ -4,9 +4,34 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37)
+## Latest checkpoint — Final-release documentation (branch `docs/final-release-2026`)
 
-**Date:** 2026-10-20 · **Branch:** `chore/remove-demo-credentials` · **Draft PR #37** (do not merge until re-reviewed; PR #36 is separate and also unmerged). Touches no `app/`, `lib/`, `components/` or `supabase/` file.
+**Date:** 2026-11-01 · **Base:** `main` at `37e4ee6` (PR #38 merged; production deployment of that commit: success) · Documentation only — no application code, migration or data was changed.
+
+**Read first:** `docs/FINAL_RELEASE_STATUS.md` is the evidence-graded release baseline (status per workflow, what each test does and does not prove, limitations, PR #36 concerns, Supabase configuration, future work, academic-document mapping). The sections below are history; where they conflict with that file, it wins.
+
+**Merge state:** #1–#35, #37, #38 merged. **#36 is open and draft** (security proposals; nothing applied; its branch is behind `main`).
+
+**Superseded statements in the older checkpoints below:**
+- "Reception / Nurse / Admin V3 — pending" and the Phase task lists: Reception V3 Phases 1–4 are merged; Nurse V3 Phases 1–2 are merged; Admin V3 and the V3 public display are not started.
+- "Fix SMTP … Confirm email currently OFF", "Resend free tier only delivers to account owner": Gmail SMTP and 6-digit email OTP were reported working in a live test. The Supabase dashboard settings are not in the repository and must be re-confirmed by the owner.
+- "Input validation — email, SA phone, name, password strength" and "Fix error display": done for registration and password changes (PR #38); no `JSON.stringify` remains under `app/`.
+- "Registration updated with optional DOB and ID number": both are now **required** (PR #38).
+- "Add Sign Out button — not yet added" (in older requirement notes): added in PR #17.
+- Test accounts with passwords in the repository: removed and rotated (PR #37).
+- "Do not run `resetDemoState()` without approval": it must not be run against the shared project at all.
+
+**Last test evidence for this checkpoint:** `npm run test:e2e:offline` on `main` @ `37e4ee6` — **432 passed** (1.9 min). Nothing was run against the shared Supabase project.
+
+**Open observation (not a conclusion):** after a live registration with OTP verification, an *existing* test account had no date of birth or ID in its Auth metadata or profile. The leading, unconfirmed explanation is re-signup of an already-created unconfirmed account (Supabase keeps the old metadata). Whether a **fresh** account stores both fields has **not** been verified; the read-only diagnostic query proposed in the PR #38 thread was not run by this checkpoint.
+
+**Remaining (owner / process):** re-confirm *Confirm email* ON, *Email OTP Length* 6 and SMTP; verify fresh-account persistence; visual review of the password toggle and year-choice UI; decisions on the PR #36 stages (S0 sign-in review, S1 migrations); academic documents (SRS, SDD, SPMP, Test Plan) do not exist in the repository.
+
+---
+
+## Previous checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37, since merged)
+
+**Date:** 2026-10-20 · **Branch:** `chore/remove-demo-credentials` · **PR #37 — merged 2026-10-20** (PR #36 is separate and still open). Touches no `app/`, `lib/`, `components/` or `supabase/` file.
 
 **Done:** committed demo credentials removed and the six-account rotation recorded (owner-confirmed); rotation tooling; the Playwright suite fails closed. After the independent review (H1, H2, M1, M3) the hardening is: the config runs an **allowlist** of classified top-level specs (`specMatchPattern`; sub-folders and other extensions never match); the read-only static audit is **deny-by-default** and AST-based (`e2e/support/read-only-audit.ts`); the browser guard uses a **positive RPC allowlist**, blocks non-GET GraphQL, is **sealed at run time** against routes / `APIRequestContext`, and its teardown assertion is tested in a child run; the dev server is **only auto-started when it cannot reach the shared project** (`web-server-plan.ts`), and `npm run test:e2e:offline` runs the offline specs with no backend. Rules, run modes and the observed-vs-suspected HMR note: `docs/proposals/credential_rotation_runbook.md` §7.
 
@@ -18,7 +43,7 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ## Previous checkpoint — Nurse V3 Phase 2: My Queue (ready for final review; since merged as PR #31)
 
-**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-my-queue` · **Draft PR #31** (do not merge until the final Phase 2 review; Phase 3 not started). `main` already contains everything below it in the table; this branch was brought up to date by merging `main` (no conflicts beyond `app/actions/nurse.ts`, which auto-merged and was checked by hand).
+**Date:** 2026-10-12 · **Branch:** `feat/nurse-v3-my-queue` · **PR #31 — merged 2026-10-11**; Phase 3 not started. `main` already contains everything below it in the table; this branch was brought up to date by merging `main` (no conflicts beyond `app/actions/nurse.ts`, which auto-merged and was checked by hand).
 
 ### Where everything stands
 
