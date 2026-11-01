@@ -41,7 +41,7 @@ Screens built on `feat/patient-v3-screens`:
 - **Notifications** (`/notifications`) — filter tabs (All, Queue, Appointments, System)
 - **Profile** (`/profile`) — read-only with DOB, ID number
 - **Profile Settings** — editable form
-- **Registration** — optional DOB and ID number fields
+- **Registration** — date of birth and ID/passport number are required (client + server validated; SA ID checked for date and check digit; issuing country of a passport is not captured — no column)
 
 Additional requirements:
 - Sign out button in sidebar (above "Need help?" card) and mobile profile — **not yet added**

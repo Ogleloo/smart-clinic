@@ -34,6 +34,82 @@ export function parseIdNumber(raw: string): FieldResult {
 }
 
 /**
+ * Required variants for patient registration. They return exactly what the
+ * optional parsers return — so a value that passes here also passes
+ * handle_new_user() (same date shape and range; same ^[A-Z0-9]{6,20}$ after
+ * the same upper-casing and whitespace stripping) and is therefore stored
+ * rather than silently dropped.
+ */
+export function requireDateOfBirth(raw: string, today: string): FieldResult {
+  if (!raw.trim()) return { value: null, error: 'Enter your date of birth.' }
+  return parseDateOfBirth(raw, today)
+}
+
+/** Luhn check over all 13 digits (the last digit is the check digit). */
+function luhnValid(digits: string): boolean {
+  let sum = 0
+  for (let i = 0; i < digits.length; i++) {
+    let d = Number(digits[digits.length - 1 - i])
+    if (i % 2 === 1) {
+      d *= 2
+      if (d > 9) d -= 9
+    }
+    sum += d
+  }
+  return sum % 10 === 0
+}
+
+/**
+ * Structural check of a 13-digit South African ID number: YYMMDD must be a real
+ * calendar date (the century is not encoded, so either 19YY or 20YY may make it
+ * real — which also settles 29 February), the citizenship digit is 0 or 1, and the
+ * Luhn check digit must match. It proves the number is well formed, not that it
+ * belongs to this person.
+ */
+export function isValidSouthAfricanId(id: string): boolean {
+  if (!/^\d{13}$/.test(id)) return false
+  const yy = Number(id.slice(0, 2))
+  const mm = Number(id.slice(2, 4))
+  const dd = Number(id.slice(4, 6))
+  const realDate = [1900, 2000].some((century) => {
+    const d = new Date(Date.UTC(century + yy, mm - 1, dd))
+    return d.getUTCFullYear() === century + yy && d.getUTCMonth() === mm - 1 && d.getUTCDate() === dd
+  })
+  if (!realDate) return false
+  if (id[10] !== '0' && id[10] !== '1') return false
+  return luhnValid(id)
+}
+
+/**
+ * Required "South African ID or passport number". profiles has a single id_number
+ * column — no document type and no issuing country — so the kind is inferred:
+ *   13 digits           -> must be a well-formed South African ID
+ *   other digit-only 10+ -> refused: almost certainly a mistyped ID (passports are
+ *                          rarely numeric and longer than 9 digits)
+ *   anything else 6–20  -> accepted as a passport number
+ * A foreign passport that is purely 13 digits therefore cannot be registered here;
+ * capturing the country of issue needs a schema change that has not been approved.
+ */
+export function requireIdNumber(raw: string): FieldResult {
+  const value = raw.replace(/\s/g, '').toUpperCase()
+  if (!value) return { value: null, error: 'Enter your South African ID or passport number.' }
+  if (!/^[A-Z0-9]{6,20}$/.test(value)) {
+    return { value: null, error: 'ID or passport number must be 6–20 letters or digits, with no dashes or symbols.' }
+  }
+  if (/^\d+$/.test(value)) {
+    if (value.length === 13) {
+      return isValidSouthAfricanId(value)
+        ? { value }
+        : { value: null, error: 'That South African ID number isn’t valid. Check each digit.' }
+    }
+    if (value.length >= 10) {
+      return { value: null, error: 'A South African ID number has 13 digits. Check the number, or enter your passport number.' }
+    }
+  }
+  return { value }
+}
+
+/**
  * Staff display name. Trimmed and whitespace-collapsed; 2–120 characters;
  * no control characters (a newline in a name breaks every list it appears in).
  */

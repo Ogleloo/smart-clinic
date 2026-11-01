@@ -5,27 +5,33 @@ import { revalidatePath } from 'next/cache'
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
-import { parseDateOfBirth, parseIdNumber } from '@/lib/profileValidation'
+import {
+  REGISTRATION_FIELD_ORDER,
+  registrationInputFrom,
+  validateRegistration,
+  type RegistrationErrors,
+} from '@/lib/registrationValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
 
 export type ActionState = { error?: string; success?: string }
 
-export async function register(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const fullName = String(formData.get('full_name') ?? '').trim()
-  const email = String(formData.get('email') ?? '').trim()
-  const phone = String(formData.get('phone') ?? '').trim()
-  const password = String(formData.get('password') ?? '')
-  // Optional. handle_new_user() re-validates both and silently drops a
-  // malformed value rather than failing signup — checking here first is
-  // what tells the person, instead of the field quietly not saving.
-  const dob = parseDateOfBirth(String(formData.get('date_of_birth') ?? ''), todayInClinicTimezone())
-  const idNumber = parseIdNumber(String(formData.get('id_number') ?? ''))
+export type RegisterState = ActionState & { fieldErrors?: RegistrationErrors }
 
-  if (!fullName) return { error: 'Enter your full name.' }
-  if (!email) return { error: 'Enter your email address.' }
-  if (dob.error) return { error: dob.error }
-  if (idNumber.error) return { error: idNumber.error }
-  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+export async function register(_prev: RegisterState, formData: FormData): Promise<RegisterState> {
+  const phone = String(formData.get('phone') ?? '').trim()
+
+  // Full name, email, date of birth, ID/passport number and password are all
+  // required. This is the same rule set the form runs in the browser; the
+  // server's run is the one that counts. handle_new_user() re-validates date of
+  // birth and ID number and silently drops a malformed one rather than failing
+  // signup — so by the time they get here they have already passed rules at
+  // least as strict, and what is sent is what is stored.
+  const { errors, values } = validateRegistration(registrationInputFrom(formData), todayInClinicTimezone())
+  if (!values) {
+    const first = REGISTRATION_FIELD_ORDER.find((f) => errors[f])
+    return { error: first ? errors[first] : 'Check your details and try again.', fieldErrors: errors }
+  }
+  const { fullName, email, password, dateOfBirth, idNumber } = values
 
   const supabase = await createClient()
   const origin = (await headers()).get('origin') ?? ''
@@ -40,8 +46,8 @@ export async function register(_prev: ActionState, formData: FormData): Promise<
       data: {
         full_name: fullName,
         phone,
-        ...(dob.value ? { date_of_birth: dob.value } : {}),
-        ...(idNumber.value ? { id_number: idNumber.value } : {}),
+        date_of_birth: dateOfBirth,
+        id_number: idNumber,
       },
       // Without this, the confirmation link falls back to the Supabase
       // Site URL directly instead of routing through /auth/callback —

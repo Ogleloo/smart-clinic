@@ -5,6 +5,7 @@ import { useActionState } from 'react'
 import { login, type ActionState } from '@/app/actions/auth'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 interface LoginFormProps {
   /** Set when middleware/idleLogout/the auth callback sent someone here for a specific reason. */
@@ -41,7 +42,7 @@ export function LoginForm({ reason }: LoginFormProps) {
       <form action={formAction} className="flex w-full flex-col gap-4">
         <Input label="Email" name="email" type="email" autoComplete="email" required
                placeholder="you@email.com" />
-        <Input label="Password" name="password" type="password"
+        <PasswordInput label="Password" name="password"
                autoComplete="current-password" required placeholder="••••••••" />
 
         {state.error && (
