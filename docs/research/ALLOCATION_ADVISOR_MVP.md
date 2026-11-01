@@ -1,7 +1,28 @@
 # Smart Nurse Allocation Advisor — research MVP
 
-Status: **prototype source package only; NOT committed, reviewed, merged or deployed**.
+## Status (read this first)
+
+| | |
+|---|---|
+| Integration | Integrated on branch `feat/nurse-allocation-advisor-research-mvp` as **draft PR #43**. |
+| Preview | The Vercel preview of that branch **built successfully**. No authenticated preview acceptance has been done yet. |
+| Merged | **No.** The PR stays a draft until an authenticated, read-only preview review is accepted. |
+| Production | **Not deployed to production.** Nothing here has been released. |
+| Clinical validation | **Not clinically validated.** Its inputs are synthetic; it holds no real nurse eligibility, coverage or competency data. |
+| Testing | Offline only (pure model tests, source contracts, layout/accessibility tests). Never run against the shared Supabase project. |
+
+It is a research and demonstration page, not a staffing tool.
+
 Target baseline: `Ogleloo/smart-clinic` `main` at `c062a10e686c9795ed6a3d6a4d12b948f650ca83` (PR #42 merge).
+
+## What exists in the integrated code
+
+- **Route:** `/admin/allocation-advisor`, linked as **Allocation Lab** in the Admin V3 sidebar and mobile navigation. Admin-only (`requireRole('admin')`); read-only.
+- **Model:** `lib/research/nurseAllocationAdvisor.ts` — a small, pure, deterministic TypeScript snapshot model. Its formulas are exactly those of the handoff package; the integration changed none of them.
+- **Page body:** `components/admin/v3/AllocationAdvisorView.tsx` — a client-side scenario explorer, plus an *Observed service snapshot* of aggregate figures from the existing Admin loader.
+- **Mobile and tablet presentation:** below 1280 px each table is shown as a list of cards that carries every value of every row; from 1280 px it is a table. A table that is ever narrower than its minimum width sits in a keyboard-focusable, labelled scroll region and shows the visible hint "Swipe or scroll horizontally to view more columns".
+- **Tests:** `e2e/nurse-allocation-advisor.spec.ts` (model and source contracts) and `e2e/allocation-advisor-layout.spec.ts` (layout, accessibility, documentation status), both in the offline suite.
+- **Not present, by design:** any action that assigns, moves, approves or notifies a nurse; any write to the database; any server action; any migration or RLS change.
 
 ## Purpose
 
@@ -11,7 +32,15 @@ This is **not** an approved staffing plan. No transfer or approval action is imp
 
 ## Relation to the existing research
 
-The report `Smart_Clinic_Allocation_Research_Brief.md` (16 October 2026) documents eight completed synthetic simulation rounds, 107,300 policy-day evaluations, and no universally preferable policy. The next scientific milestone in that brief is clinical requirements/eligibility/coverage review and calibration, **not** the unapproved deployment of a real allocation engine.
+Two different things must not be confused:
+
+| | Eight-round WANR research | This page's TypeScript snapshot model |
+|---|---|---|
+| What it is | A standalone discrete-event simulation programme run outside this repository, documented in `Smart_Clinic_Allocation_Research_Brief.md` (16 October 2026) | A small deterministic calculation over patients already waiting at time zero, written for a demonstration |
+| Evidence | Eight completed synthetic rounds, 107,300 policy-day evaluations, no universally preferable policy | None of its own: it reproduces none of those results, estimates or intervals |
+| Standing | The research record | An illustration of the trade-off, with illustrative thresholds |
+
+The report documents eight completed synthetic simulation rounds, 107,300 policy-day evaluations, and no universally preferable policy. The next scientific milestone in that brief is clinical requirements/eligibility/coverage review and calibration, **not** the unapproved deployment of a real allocation engine.
 
 The included TypeScript model is **not a port of the standalone Python WANR discrete-event simulator** and none of the original round-by-round estimates, confidence intervals, or data sources are reproduced. In particular it does not support a claim that the tested WANR activation time is optimal or that an eligible nurse exists in the real clinic.
 
@@ -52,4 +81,20 @@ The new route `app/admin/allocation-advisor/page.tsx` invokes `requireRole('admi
 
 Run the new `e2e/nurse-allocation-advisor.spec.ts` with `npm run test:e2e:offline`. It must be added to `OFFLINE_SPECS` and never uses live helper accounts or network traffic. The new route must also be manually checked in a Vercel preview with an existing admin account, **navigation and read-only observations only**. Vercel previews share the production Supabase project; do not manipulate nurse duty, staff records, patients or queues from the preview.
 
-Local authoring environment verified only the pure TypeScript model with `tsc` and 14 Node test cases, including 400 seeded variations. The full Next.js build, Playwright suite, visual responsiveness and authenticated preview have **not** been run in that environment.
+## What has and has not been verified
+
+Verified (at the time of writing, on the PR #43 branch, offline):
+
+- the pure model with `tsc` and the package's 14 Node test cases, including 400 seeded variations;
+- TypeScript, ESLint and the production build, which lists the route;
+- the complete offline Playwright suite, including the model/contract spec and the layout/accessibility spec;
+- layouts at 1440, 390 and 320 px from the real component and the app's real compiled CSS;
+- a successful Vercel **preview build**.
+
+**Not** verified:
+
+- an authenticated admin opening the route on the preview (the preview uses the production Supabase project, so that check is read-only navigation only);
+- the interactive controls in a signed-in browser session;
+- any clinical meaning of the output — see "Critical missing evidence" above.
+
+Until the authenticated preview review is accepted, PR #43 remains a draft; after it is accepted the page is still a research prototype, not a validated staffing tool.

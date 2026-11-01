@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { ADMIN_NAV_ITEMS } from '../components/admin/v3/navItems'
 
@@ -64,20 +65,6 @@ test.describe('layout at 1440 / 390 / 320 (real component + real compiled CSS)',
       })
     }
   }
-
-  test('wide tables scroll inside their own container, never the page, on a phone', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 900 })
-    await page.setContent(doc(r.states.live))
-    const wrappers = page.locator('div.overflow-x-auto:has(table)')
-    expect(await wrappers.count()).toBeGreaterThanOrEqual(2)
-    for (let i = 0; i < (await wrappers.count()); i++) {
-      const w = wrappers.nth(i)
-      const [client, scroll] = await w.evaluate((el) => [el.clientWidth, el.scrollWidth])
-      expect(client).toBeLessThanOrEqual(320)
-      expect(scroll).toBeGreaterThanOrEqual(client)
-    }
-    expect(await overflow(page)).toBeLessThanOrEqual(0)
-  })
 
   test('1440px: sidebar beside a content column of at most 1176px', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
@@ -160,10 +147,267 @@ test.describe('layout at 1440 / 390 / 320 (real component + real compiled CSS)',
   test('failed live reads are explicit, never zero', async ({ page }) => {
     await page.setContent(doc(r.states.servicesError))
     await expect(page.getByRole('alert')).toContainText('Services could not be loaded')
+    await page.setViewportSize({ width: 1440, height: 900 })
     await page.setContent(doc(r.states.coverageError))
-    await expect(page.getByText('Unavailable', { exact: true })).toBeVisible()
+    await expect(page.getByRole('cell', { name: 'Unavailable' })).toBeVisible()
     await expect(page.getByText(/an unknown value is never treated as zero/)).toBeVisible()
     await page.setContent(doc(r.states.empty))
     await expect(page.getByText('There are no active services to display.')).toBeVisible()
+  })
+})
+
+// ------------------------------------------------------------------------- tables, cards and scroll regions
+
+const CARD_FIELDS = ['One hypothetical move', 'Overall mean start wait', 'General', 'Chronic', 'Unserved']
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+
+/** Policy rows as [title, move, mean, general, chronic, unserved], from whichever presentation is visible. */
+async function policyRows(page: Page): Promise<string[][]> {
+  const table = page.getByRole('table', { name: /Hypothetical staffing-policy comparisons/ })
+  if (await table.count()) {
+    return table.locator('tbody tr').evaluateAll((rows) =>
+      rows.map((tr) => [...tr.children].map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()))
+    )
+  }
+  return page.getByRole('list', { name: 'Policy comparison' }).getByRole('listitem').evaluateAll((items) =>
+    items.map((li) => {
+      const title = (li.querySelector('h3')?.textContent ?? '').trim()
+      const values = [...li.querySelectorAll('dd')].map((d) => (d.textContent ?? '').replace(/\s+/g, ' ').trim())
+      return [title, ...values]
+    })
+  )
+}
+
+test.describe('tables become cards below 1280px, with every value, and stay accessible', () => {
+  for (const width of [320, 390, 768, 1024, 1279]) {
+    test(`${width}px: no table, two labelled card lists, no sideways scrolling`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.setContent(doc(r.states.live))
+      await expect(page.getByRole('table')).toHaveCount(0)
+      await expect(page.getByRole('list', { name: 'Observed services' })).toBeVisible()
+      await expect(page.getByRole('list', { name: 'Policy comparison' })).toBeVisible()
+      await expect(page.locator('[role="region"][tabindex]:visible')).toHaveCount(0) // no scroll region is needed (or shown) for cards
+      expect(await overflow(page)).toBeLessThanOrEqual(0)
+    })
+  }
+
+  test('1280px and 1440px: the two real tables, each in a focusable, named scroll region; no cards', async ({ page }) => {
+    for (const width of [1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.setContent(doc(r.states.live))
+      await expect(page.getByRole('table')).toHaveCount(2)
+      await expect(page.getByRole('list', { name: 'Policy comparison' })).toHaveCount(0)
+      for (const name of ['Observed service snapshot table', 'Policy comparison table']) {
+        const region = page.getByRole('region', { name })
+        await expect(region).toBeVisible()
+        await expect(region).toHaveAttribute('tabindex', '0')
+        await expect(region).toHaveAttribute('aria-describedby', /-hint$/)
+      }
+      expect(await overflow(page)).toBeLessThanOrEqual(0)
+    }
+  })
+
+  test('no value is lost: the cards on a phone show exactly the values of the table on a desktop', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.setContent(doc(r.states.live))
+    const fromTable = await policyRows(page)
+    await page.setViewportSize({ width: 390, height: 900 })
+    const fromCards = await policyRows(page)
+    expect(fromTable).toHaveLength(4)
+    expect(fromCards).toEqual(fromTable)
+    for (const row of fromCards) expect(row).toHaveLength(6)
+    // the live snapshot too
+    const live = async () => {
+      const tbl = page.getByRole('table', { name: /per-service queue and staffing aggregates/ })
+      if (await tbl.count()) return tbl.locator('tbody tr').evaluateAll((rows) => rows.map((tr) => [...tr.children].map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim())))
+      return page.getByRole('list', { name: 'Observed services' }).getByRole('listitem').evaluateAll((items) =>
+        items.map((li) => [(li.querySelector('h3')?.textContent ?? '').trim(), ...[...li.querySelectorAll('dd')].map((d) => (d.textContent ?? '').replace(/\s+/g, ' ').trim())])
+      )
+    }
+    const liveCards = await live()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    expect(liveCards).toEqual(await live())
+    expect(liveCards).toHaveLength(2)
+  })
+
+  test('the cards and the table are fed by the same expressions (the default preset has no unserved patients, so this guards that column)', () => {
+    const src = read('components/admin/v3/AllocationAdvisorView.tsx')
+    for (const expr of ['moveDescription(p)', 'baselineMean(p)', 'generalMean(p)', 'chronicMean(p)', '{p.forecast.patientsUnserved}', 'liveEstimate(row, errors.coverage)']) {
+      expect(src.split(expr).length - 1, expr).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  test('each card labels every value (a term for each figure), so nothing relies on column position', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 })
+    await page.setContent(doc(r.states.live))
+    const cards = page.getByRole('list', { name: 'Policy comparison' }).getByRole('listitem')
+    expect(await cards.count()).toBe(4)
+    for (let i = 0; i < 4; i++) {
+      const terms = await cards.nth(i).locator('dt').allInnerTexts()
+      expect(terms.map(norm)).toEqual(CARD_FIELDS)
+      await expect(cards.nth(i).getByRole('heading', { level: 3 })).toBeVisible()
+    }
+  })
+
+  test('unknown values stay unknown on a card: a dash for an unserved forecast, never a number', async ({ page }) => {
+    // the coverage-error snapshot has an unavailable estimate; the model preset itself has none unserved, so use the card text of the live list
+    await page.setViewportSize({ width: 390, height: 900 })
+    await page.setContent(doc(r.states.coverageError))
+    const card = page.getByRole('list', { name: 'Observed services' }).getByRole('listitem').first()
+    await expect(card).toContainText('Unavailable')
+    expect(norm(await card.locator('dd').first().innerText())).toBe('—')
+  })
+
+  test('card text is large enough and has 4.5:1 contrast; cards are not scroll traps', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 900 })
+    await page.setContent(doc(r.states.live))
+    const min = await page.evaluate(() => {
+      const parse = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number)
+      const lum = ([r, g, b]: number[]) => {
+        const f = (v: number) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+        return 0.2126 * f(r!) + 0.7152 * f(g!) + 0.0722 * f(b!)
+      }
+      let worst = 99
+      let smallest = 99
+      for (const el of document.querySelectorAll('ul[aria-label] dt, ul[aria-label] dd, ul[aria-label] h3')) {
+        const cs = getComputedStyle(el)
+        const [a, b] = [lum(parse(cs.color)), lum([255, 255, 255])].sort((x, y) => y - x)
+        worst = Math.min(worst, (a! + 0.05) / (b! + 0.05))
+        smallest = Math.min(smallest, parseFloat(cs.fontSize))
+      }
+      return { worst, smallest }
+    })
+    expect(min.worst).toBeGreaterThanOrEqual(4.5)
+    expect(min.smallest).toBeGreaterThanOrEqual(12)
+    await expect(page.locator('ul[aria-label] [tabindex]')).toHaveCount(0)
+  })
+})
+
+test.describe('scroll hint and keyboard scrolling on a table that is narrower than it needs to be', () => {
+  /** Show the real comparison table at 1440px but inside a container of the given width. */
+  async function narrow(page: Page, px: number) {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.setContent(doc(r.states.live))
+    await page.evaluate((w) => {
+      const holder = document.querySelector<HTMLElement>('[aria-label="Policy comparison table"]')!.closest('.hidden')!
+      ;(holder as HTMLElement).style.width = `${w}px`
+    }, px)
+  }
+  const HINT = 'Swipe or scroll horizontally to view more columns'
+
+  test('visible hint exactly when the table overflows its container (and gone when it fits)', async ({ page }) => {
+    await narrow(page, 500)
+    const hint = page.locator('#allocation-comparison-table-hint')
+    await expect(hint).toBeVisible()
+    await expect(hint).toHaveText(HINT)
+    await expect(page.locator('#allocation-live-table-hint')).toBeHidden() // the other table fits, so no hint for it
+    const region = page.getByRole('region', { name: 'Policy comparison table' })
+    const [client, scroll] = await region.evaluate((el) => [el.clientWidth, el.scrollWidth])
+    expect(scroll).toBeGreaterThan(client)
+    await narrow(page, 900)
+    await expect(hint).toBeHidden()
+    const [c2, s2] = await region.evaluate((el) => [el.clientWidth, el.scrollWidth])
+    expect(s2).toBeLessThanOrEqual(c2)
+  })
+
+  test('the hint is the region’s accessible description, in the document order before the table', async ({ page }) => {
+    await narrow(page, 500)
+    const region = page.getByRole('region', { name: 'Policy comparison table' })
+    const id = await region.getAttribute('aria-describedby')
+    const text = await page.locator(`[id="${id}"]`).evaluate((el) => (el.textContent ?? '').trim())
+    expect(text).toBe(HINT)
+    const order = await page.evaluate((i) => {
+      const hint = document.getElementById(i)!
+      const reg = hint.nextElementSibling!
+      return { adjacent: reg.getAttribute('role') === 'region' }
+    }, id!)
+    expect(order.adjacent).toBe(true)
+    expect(await page.getByText(HINT).count()).toBeGreaterThanOrEqual(1)
+  })
+
+  test('keyboard only: Tab reaches the region, a visible focus ring appears, and the arrow keys scroll it to the far edge and back', async ({ page }) => {
+    await narrow(page, 500)
+    const region = page.getByRole('region', { name: 'Policy comparison table' })
+    for (let i = 0; i < 60 && !(await region.evaluate((el) => el === document.activeElement)); i++) await page.keyboard.press('Tab')
+    await expect(region).toBeFocused()
+    expect(await region.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe('none')
+    expect(await region.evaluate((el) => el.scrollLeft)).toBe(0)
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+    // keep pressing ArrowRight until the far edge is reached: every column becomes reachable without a mouse
+    for (let i = 0; i < 40 && !(await region.evaluate((el) => el.scrollLeft + el.clientWidth >= el.scrollWidth - 1)); i++) await page.keyboard.press('ArrowRight')
+    expect(await region.evaluate((el) => el.scrollLeft + el.clientWidth >= el.scrollWidth - 1)).toBe(true)
+    for (let i = 0; i < 40 && (await region.evaluate((el) => el.scrollLeft)) > 0; i++) await page.keyboard.press('ArrowLeft')
+    expect(await region.evaluate((el) => el.scrollLeft)).toBe(0)
+  })
+
+  test('the observed-snapshot table has the same hint and region', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.setContent(doc(r.states.live))
+    await page.evaluate(() => {
+      ;(document.querySelector<HTMLElement>('[aria-label="Observed service snapshot table"]')!.closest('.hidden') as HTMLElement).style.width = '400px'
+    })
+    await expect(page.getByText(HINT).first()).toBeVisible()
+    const region = page.getByRole('region', { name: 'Observed service snapshot table' })
+    await expect(page.locator('#allocation-live-table-hint')).toBeVisible()
+    await region.focus()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
+  })
+})
+
+test.describe('no assignment actions, and the formulas are the package’s', () => {
+  test('the only button on the page is "Evaluate Allocation"; there are no forms and no assignment wording', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.setContent(doc(r.states.live))
+    const buttons = await page.locator('main button').allInnerTexts()
+    expect(buttons.map(norm)).toEqual(['Evaluate Allocation'])
+    expect(await page.locator('main form').count()).toBe(0)
+    const body = (await page.locator('main').innerText()).toLowerCase()
+    expect(body).not.toMatch(/\b(assign now|approve|confirm transfer|apply this move|move this nurse|notify)\b/)
+  })
+
+  test('the simulation module is byte-for-byte the handoff package’s (formulas unchanged)', () => {
+    const digest = createHash('sha256').update(read('lib/research/nurseAllocationAdvisor.ts')).digest('hex')
+    expect(digest).toBe('aa30a0d4977cdc93bb5b501f4fd2b7e06671ba0964e2a06ed975aaeaa8ded930')
+  })
+})
+
+test.describe('research note states the real status', () => {
+  const doc$ = read('docs/research/ALLOCATION_ADVISOR_MVP.md')
+  const status = doc$.slice(0, doc$.indexOf('## What exists in the integrated code'))
+
+  test('status block: draft PR #43, preview built, not merged / deployed / validated', () => {
+    expect(status).toContain('draft PR #43')
+    expect(status).toMatch(/Vercel preview[^|]*\*\*built successfully\*\*/)
+    expect(status).toMatch(/\*\*No authenticated preview acceptance has been done yet|No authenticated preview acceptance/)
+    expect(status).toMatch(/Merged \| \*\*No\.\*\*/)
+    expect(status).toMatch(/Production \| \*\*Not deployed to production\.\*\*/)
+    expect(status).toMatch(/Clinical validation \| \*\*Not clinically validated\.\*\*/)
+  })
+
+  test('it no longer claims to be an uncommitted package, and it states what it is not', () => {
+    expect(doc$).not.toContain('NOT committed, reviewed, merged or deployed')
+    expect(status).toContain('not a staffing tool')
+    expect(doc$).toMatch(/not a validated staffing tool/)
+    expect(doc$).not.toMatch(/production-ready/i)
+  })
+
+  test('keeps the small TypeScript snapshot model distinct from the eight-round WANR research', () => {
+    expect(doc$).toMatch(/Eight-round WANR research/)
+    expect(doc$).toMatch(/not a port of the standalone Python WANR discrete-event simulator/)
+    expect(doc$).toContain('107,300 policy-day evaluations')
+    expect(doc$).toMatch(/reproduces none of those results/)
+  })
+
+  test('says what is and is not verified, and that the authenticated preview review is still pending', () => {
+    expect(doc$).toContain('## What has and has not been verified')
+    expect(doc$).toMatch(/an authenticated admin opening the route on the preview/)
+    expect(doc$).toMatch(/PR #43 remains a draft/)
+    expect(doc$).toMatch(/Swipe or scroll horizontally to view more columns/)
+  })
+
+  test('describes only what exists: no assignment, write, server action, migration or RLS change', () => {
+    expect(doc$).toMatch(/Not present, by design:[^\n]*assigns, moves, approves or notifies a nurse/)
   })
 })

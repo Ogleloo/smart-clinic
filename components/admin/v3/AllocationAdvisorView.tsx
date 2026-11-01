@@ -19,10 +19,49 @@ const bounded = (value: string, min: number, max: number, previous: number) => {
   const num = Number(value)
   return value.trim() !== '' && Number.isInteger(num) ? Math.min(max, Math.max(min, num)) : previous
 }
+/**
+ * A wide table in a keyboard-focusable, labelled scroll region. The hint is shown by a CSS container query, exactly
+ * when the region is narrower than the table's minimum width (so only when there really is something to scroll to,
+ * with no JavaScript and no flash); it is the region's accessible description either way. The region is focusable
+ * (tabIndex 0) so arrow keys / Home / End scroll it without a mouse or touch, and the global :focus-visible ring
+ * shows. Classes are written out in full so Tailwind can see them.
+ */
+const SCROLL_HINT = {
+  live: { table: 'min-w-[520px]', hint: '@max-[520px]:block' },
+  comparison: { table: 'min-w-[680px]', hint: '@max-[680px]:block' },
+} as const
+
+function ScrollableTable({ id, label, kind, children }: { id: string; label: string; kind: keyof typeof SCROLL_HINT; children: React.ReactNode }) {
+  return (
+    <div className="@container mt-4">
+      <p id={`${id}-hint`} className={`mb-2 hidden text-sm font-semibold text-ink ${SCROLL_HINT[kind].hint}`}>
+        Swipe or scroll horizontally to view more columns
+      </p>
+      <div
+        role="region"
+        tabIndex={0}
+        aria-label={label}
+        aria-describedby={`${id}-hint`}
+        className="overflow-x-auto rounded-md border border-border"
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
 const baselineMean = (p: PolicyResult) => oneDecimal(p.forecast.overallMeanStartWaitMinutes)
 const moveDescription = (p: PolicyResult) => p.forecast.move
   ? `${p.forecast.move.from === 'general' ? 'General' : 'Chronic'} → ${p.forecast.move.to === 'general' ? 'General' : 'Chronic'}`
   : 'No move'
+
+type LiveRow = Props['liveServices'][number]
+/** The engine-estimate wording, shared by the table and the cards. An unknown value is never shown as a number. */
+const liveEstimate = (row: LiveRow, coverageFailed: boolean) =>
+  coverageFailed || row.isBeingServed === null ? 'Unavailable'
+    : row.isBeingServed === false ? 'No estimate — uncovered'
+    : row.estimatedWaitMinutes === null ? 'No estimate'
+    : `~${row.estimatedWaitMinutes} min`
 
 function LivePanel({ liveServices, errors }: Props) {
   return (
@@ -37,7 +76,30 @@ function LivePanel({ liveServices, errors }: Props) {
       ) : liveServices.length === 0 ? (
         <p className="mt-4 rounded-md bg-primary-50 p-3 text-sm">There are no active services to display.</p>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-md border border-border">
+        <>
+        <ul aria-label="Observed services" className="mt-4 grid gap-3 sm:grid-cols-2 xl:hidden">
+          {liveServices.map((row) => (
+            <li key={row.serviceId} className="rounded-md border border-border p-4">
+              <h3 className="font-display text-base font-semibold text-ink">{row.serviceName}</h3>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                <div>
+                  <dt className="text-xs text-muted">Waiting</dt>
+                  <dd className="tabular-nums text-ink">{errors.coverage ? '—' : whole(row.waitingCount)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted">Nurses on duty</dt>
+                  <dd className="tabular-nums text-ink">{whole(row.nursesOnDuty)}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted">Engine estimate</dt>
+                  <dd className="text-ink">{liveEstimate(row, errors.coverage)}</dd>
+                </div>
+              </dl>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden xl:block">
+        <ScrollableTable id="allocation-live-table" label="Observed service snapshot table" kind="live">
           <table className="w-full min-w-[520px] border-collapse text-left text-sm">
             <caption className="sr-only">Current per-service queue and staffing aggregates; no patient names</caption>
             <thead className="bg-primary-50 text-muted">
@@ -49,17 +111,14 @@ function LivePanel({ liveServices, errors }: Props) {
                   <th scope="row" className="p-3 font-medium">{row.serviceName}</th>
                   <td className="p-3 text-right tabular-nums">{errors.coverage ? '—' : whole(row.waitingCount)}</td>
                   <td className="p-3 text-right tabular-nums">{whole(row.nursesOnDuty)}</td>
-                  <td className="p-3 text-right">
-                    {errors.coverage || row.isBeingServed === null ? 'Unavailable'
-                      : row.isBeingServed === false ? 'No estimate — uncovered'
-                      : row.estimatedWaitMinutes === null ? 'No estimate'
-                      : `~${row.estimatedWaitMinutes} min`}
-                  </td>
+                  <td className="p-3 text-right">{liveEstimate(row, errors.coverage)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </ScrollableTable>
         </div>
+        </>
       )}
       {(errors.coverage || errors.perService) && (
         <p role="status" className="mt-3 text-sm text-warning">
@@ -78,7 +137,37 @@ function ComparisonTable({ report }: { report: AdvisorReport }) {
     <section aria-labelledby="allocation-comparison" className="rounded-lg border border-border bg-surface p-4 sm:p-6">
       <h2 id="allocation-comparison" className="font-display text-xl font-semibold text-ink">Policy comparison — synthetic only</h2>
       <p className="mt-1 text-sm text-muted">Deterministic next-free start times for patients already waiting. Lower does not establish a clinically preferable allocation.</p>
-      <div className="mt-4 overflow-x-auto rounded-md border border-border">
+      <ul aria-label="Policy comparison" className="mt-4 grid gap-3 sm:grid-cols-2 xl:hidden">
+        {models.map((p) => (
+          <li key={p.key} className="rounded-md border border-border p-4">
+            <h3 className="font-display text-base font-semibold text-ink">{p.title}</h3>
+            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div className="col-span-2">
+                <dt className="text-xs text-muted">One hypothetical move</dt>
+                <dd className="text-ink">{moveDescription(p)}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs text-muted">Overall mean start wait</dt>
+                <dd className="tabular-nums text-ink">{baselineMean(p)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">General</dt>
+                <dd className="tabular-nums text-ink">{generalMean(p)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Chronic</dt>
+                <dd className="tabular-nums text-ink">{chronicMean(p)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Unserved</dt>
+                <dd className="tabular-nums text-ink">{p.forecast.patientsUnserved}</dd>
+              </div>
+            </dl>
+          </li>
+        ))}
+      </ul>
+      <div className="hidden xl:block">
+      <ScrollableTable id="allocation-comparison-table" label="Policy comparison table" kind="comparison">
         <table className="w-full min-w-[680px] border-collapse text-left text-sm">
           <caption className="sr-only">Hypothetical staffing-policy comparisons for the synthetic scenario</caption>
           <thead className="bg-primary-50 text-muted">
@@ -97,6 +186,7 @@ function ComparisonTable({ report }: { report: AdvisorReport }) {
             ))}
           </tbody>
         </table>
+      </ScrollableTable>
       </div>
       <p className="mt-3 text-sm text-muted">
         A dash means the model cannot calculate a finite wait because some queued patients have no assigned nurse. The count-only and workload policies are research comparators, not automatically safe choices.
