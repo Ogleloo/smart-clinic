@@ -41,12 +41,20 @@ Screens built on `feat/patient-v3-screens`:
 - **Notifications** (`/notifications`) — filter tabs (All, Queue, Appointments, System)
 - **Profile** (`/profile`) — read-only with DOB, ID number
 - **Profile Settings** — editable form
-- **Registration** — optional DOB and ID number fields
+- **Registration** — date of birth and ID/passport number are required (client + server validated). A valid SA ID suggests the date of birth (asking which year when the century is ambiguous) and a contradicting date is refused; a passport number derives nothing
 
 Additional requirements:
 - Sign out button in sidebar (above "Need help?" card) and mobile profile — **not yet added**
 - 9 e2e tests in `patient-v3.spec.ts`
 - `npm run build` passes
+
+### Registration — needs a future migration (not implemented, not approved)
+
+- **Passport issuing country** and **identity document type**: `profiles` has a single `id_number` column. Today the kind is inferred (13 digits = SA ID; other 6–20 letters/digits = passport; digit-only 10+ other than a valid SA ID is refused), so a purely numeric foreign passport of 10+ digits cannot register.
+- **Database-level identity uniqueness**: `profiles_id_number_clinic_unique` is a partial unique index on `(clinic_id, id_number)`, but self-registered patients have `clinic_id` NULL and NULLs never conflict, so two self-registered patients can share an ID number. Unverified against the live schema.
+- **Profile settings can still clear identity fields** (date of birth, ID number) because they are nullable; making them non-clearable needs a decision on existing patients with blanks.
+- **Existing account / unconfirmed account at signup**: re-registering an email that already has an unconfirmed account re-sends the code but does not save the newly entered details or password (per the Supabase Auth source; not reproduced), so the profile keeps the old (possibly blank) values. See the PR #38 investigation.
+- Phone at registration is checked for plausibility only (7–15 digits, kept as typed); patient profile settings still accept any text up to 30 characters.
 
 ---
 

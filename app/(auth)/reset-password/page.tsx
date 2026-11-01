@@ -3,7 +3,7 @@
 import { useActionState } from 'react'
 import { updatePassword, type ActionState } from '@/app/actions/auth'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
 export default function ResetPasswordPage() {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(updatePassword, {})
@@ -17,9 +17,9 @@ export default function ResetPasswordPage() {
       </p>
 
       <form action={formAction} className="flex w-full flex-col gap-4">
-        <Input label="New password" name="password" type="password"
+        <PasswordInput label="New password" name="password"
                autoComplete="new-password" required placeholder="••••••••" />
-        <Input label="Confirm password" name="confirm" type="password"
+        <PasswordInput label="Confirm password" name="confirm"
                autoComplete="new-password" required placeholder="••••••••" />
 
         {state.error && (
