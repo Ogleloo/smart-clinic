@@ -14,7 +14,8 @@ import { ADMIN_DASHBOARD_HREF, adminPageLabel } from './navItems'
 export function AdminContentFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? ''
 
-  if (pathname === ADMIN_DASHBOARD_HREF) {
+  // The allocation research page has its own h1 and uses the V3 full-width palette.
+  if (pathname === ADMIN_DASHBOARD_HREF || pathname === '/admin/allocation-advisor') {
     return <main className="theme-admin min-h-dvh bg-paper text-ink">{children}</main>
   }
   return (
