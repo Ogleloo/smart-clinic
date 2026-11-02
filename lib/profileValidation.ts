@@ -129,16 +129,21 @@ export function parseOptionalPhone(raw: string): FieldResult {
 }
 
 /**
- * Required South African ID number: exactly 13 digits (the field only ever accepts digits as they're typed),
- * well formed by the structural check above — the Luhn digit, a real encoded calendar date, and a 0/1
- * citizenship digit.
+ * Required South African ID number: the value itself must already be exactly 13 ASCII digits — nothing is
+ * stripped or cleaned here. Cleaning (removing spaces, dashes, anything the browser's own digit filter would
+ * never produce) is the registration field's job, done once as the person types or pastes
+ * (app/(auth)/register/page.tsx's handleSaIdChange); this is the check that runs on whatever actually arrives,
+ * including a request built by hand that skipped the browser entirely, and it must not quietly repeat that
+ * cleaning — a value that needed cleaning did not come from the field that already does it.
+ *
+ * Once the shape is confirmed, well-formedness is the structural check above — the Luhn digit, a real encoded
+ * calendar date, and a 0/1 citizenship digit.
  */
 export function requireSouthAfricanId(raw: string): FieldResult {
-  const digits = raw.replace(/\D/g, '')
-  if (!digits) return { value: null, error: 'Enter your South African ID number.' }
-  if (digits.length !== 13) return { value: null, error: 'A South African ID number has 13 digits.' }
-  if (!isValidSouthAfricanId(digits)) return { value: null, error: 'That South African ID number isn’t valid. Check each digit.' }
-  return { value: digits }
+  if (!raw.trim()) return { value: null, error: 'Enter your South African ID number.' }
+  if (!/^\d{13}$/.test(raw)) return { value: null, error: 'A South African ID number has 13 digits.' }
+  if (!isValidSouthAfricanId(raw)) return { value: null, error: 'That South African ID number isn’t valid. Check each digit.' }
+  return { value: raw }
 }
 
 /**

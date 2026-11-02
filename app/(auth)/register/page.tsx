@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useActionState, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { IdCard, Lock, Mail, Phone, User } from 'lucide-react'
 import { register, type RegisterState } from '@/app/actions/auth'
 import { Input } from '@/components/ui/Input'
@@ -17,6 +17,7 @@ import {
   validateRegistration,
   type DocumentType,
   type RegistrationErrors,
+  type RegistrationInput,
 } from '@/lib/registrationValidation'
 
 const ID_NUMBER_DIGITS = 13
@@ -31,6 +32,9 @@ const ID_NUMBER_DIGITS = 13
  */
 export default function RegisterPage() {
   const [state, formAction, pending] = useActionState<RegisterState, FormData>(register, {})
+  // null until a submit (client- or server-side) has actually been attempted — that is what keeps
+  // every field quiet on first load, and is also the signal recheck() uses to decide whether live
+  // corrections should run at all: no attempt yet means nothing to correct.
   const [clientErrors, setClientErrors] = useState<RegistrationErrors | null>(null)
   const [documentType, setDocumentType] = useState<DocumentType>('sa_id')
   const [idNumber, setIdNumber] = useState('')
@@ -38,9 +42,43 @@ export default function RegisterPage() {
   // True while the date in the field came from the ID number (not typed by the person), so a
   // changed ID number may replace it — and a date they typed themselves is never overwritten.
   const [dobFromId, setDobFromId] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
 
   // A passport never suggests a date — only a South African ID encodes one.
   const candidates = documentType === 'sa_id' ? saIdBirthDateCandidates(idNumber, todayInClinicTimezone()) : []
+
+  /**
+   * Re-runs the whole rule set against the form's current values and replaces clientErrors with the result —
+   * so a field whose value just became valid loses its error, and every other field's error (its value hasn't
+   * changed) reappears exactly as it was. Only runs once something has actually been submitted — a client-side
+   * failed attempt (clientErrors) or a server round-trip that came back with field errors (state.fieldErrors,
+   * read directly rather than copied into clientErrors by an effect, so there is no render where the two
+   * disagree); before either has happened, fields stay quiet while the form is being filled in for the first
+   * time.
+   *
+   * `partial` carries a value this render's closure can't see yet — the id_number or date_of_birth a specific
+   * handler just computed, before its own setState has committed. Every other field is read straight off the
+   * live DOM via FormData, which for those plain, uncontrolled inputs is always already up to date.
+   */
+  function recheck(partial: Partial<RegistrationInput> = {}) {
+    if ((clientErrors === null && !state.fieldErrors) || !formRef.current) return
+    const data = new FormData(formRef.current)
+    const input: RegistrationInput = {
+      ...registrationInputFrom(data),
+      document_type: documentType,
+      id_number: idNumber,
+      date_of_birth: dob,
+      ...partial,
+    }
+    const { errors } = validateRegistration(input, todayInClinicTimezone())
+    const match = passwordsMatch(String(data.get('password') ?? ''), String(data.get('confirm') ?? ''))
+    setClientErrors({ ...errors, ...(match.ok ? {} : { confirm: match.error }) })
+  }
+
+  /** Full name, email, phone, password and confirm: plain fields with no filtering of their own to race against. */
+  function handleFieldChange() {
+    recheck()
+  }
 
   function handleDocumentTypeChange(type: DocumentType) {
     setDocumentType(type)
@@ -52,6 +90,15 @@ export default function RegisterPage() {
       setDob('')
       setDobFromId(false)
     }
+    // The old document type's id_number error (a checksum complaint, a shape complaint) no longer applies to
+    // a field that is now empty in the other mode — cleared outright, not replaced with a fresh "required"
+    // error the person hasn't had a chance to address yet.
+    setClientErrors((prev) => {
+      if (!prev || !('id_number' in prev)) return prev
+      const rest = { ...prev }
+      delete rest.id_number
+      return rest
+    })
   }
 
   function handleSaIdChange(e: ChangeEvent<HTMLInputElement>) {
@@ -63,25 +110,33 @@ export default function RegisterPage() {
     if (found.length === 1 && (dob === '' || dobFromId)) {
       setDob(found[0])
       setDobFromId(true)
+      recheck({ id_number: digits, date_of_birth: found[0] })
+      return
     } else if (found.length !== 1 && dobFromId) {
       // The ID changed (or stopped being a valid SA ID): a date taken from it no longer stands.
       setDob('')
       setDobFromId(false)
+      recheck({ id_number: digits, date_of_birth: '' })
+      return
     }
+    recheck({ id_number: digits })
   }
 
   function handlePassportChange(e: ChangeEvent<HTMLInputElement>) {
     setIdNumber(e.target.value)
+    recheck({ id_number: e.target.value })
   }
 
   function handleDobChange(e: ChangeEvent<HTMLInputElement>) {
     setDob(e.target.value)
     setDobFromId(false)
+    recheck({ date_of_birth: e.target.value })
   }
 
   function chooseCandidate(iso: string) {
     setDob(iso)
     setDobFromId(true)
+    recheck({ date_of_birth: iso })
   }
 
   // noValidate: the browser's own bubbles would pre-empt these messages and
@@ -120,7 +175,7 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        <form action={formAction} onSubmit={handleSubmit} noValidate className="flex w-full flex-col gap-4">
+        <form ref={formRef} action={formAction} onSubmit={handleSubmit} noValidate className="flex w-full flex-col gap-4">
           <Input
             variant="auth"
             label="Full name"
@@ -129,6 +184,7 @@ export default function RegisterPage() {
             required
             placeholder="Enter your full name"
             leading={<User aria-hidden size={20} />}
+            onChange={handleFieldChange}
             error={errors.full_name}
           />
           <Input
@@ -140,6 +196,7 @@ export default function RegisterPage() {
             required
             placeholder="you@email.com"
             leading={<Mail aria-hidden size={20} />}
+            onChange={handleFieldChange}
             error={errors.email}
           />
           {/* Figma pairs this with a "+27" country selector. There is no country list behind it and the validator
@@ -153,6 +210,7 @@ export default function RegisterPage() {
             autoComplete="tel"
             placeholder="+27 82 555 0134"
             leading={<Phone aria-hidden size={20} />}
+            onChange={handleFieldChange}
             error={errors.phone}
           />
 
@@ -272,6 +330,7 @@ export default function RegisterPage() {
             required
             placeholder="Create a password"
             leading={<Lock aria-hidden size={20} />}
+            onChange={handleFieldChange}
             // Figma asks for "a mix of letters, numbers and a symbol"; the rule actually enforced is length
             // alone, and stating a rule the system does not apply would be false.
             helper="At least 8 characters, not counting spaces."
@@ -284,6 +343,7 @@ export default function RegisterPage() {
             autoComplete="new-password"
             required
             placeholder="Confirm your password"
+            onChange={handleFieldChange}
             leading={<Lock aria-hidden size={20} />}
             error={errors.confirm}
           />

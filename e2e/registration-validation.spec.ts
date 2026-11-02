@@ -47,11 +47,11 @@ test.describe('requireDateOfBirth', () => {
 })
 
 test.describe('isValidSouthAfricanId / requireSouthAfricanId', () => {
-  test('accepts well-formed SA ID numbers, including a leap day', () => {
+  test('accepts a value that already is exactly 13 ASCII digits, including a leap day', () => {
     expect(isValidSouthAfricanId(SA_ID)).toBe(true)
     expect(isValidSouthAfricanId(SA_ID_LEAP_DAY)).toBe(true)
     expect(requireSouthAfricanId(SA_ID)).toEqual({ value: SA_ID })
-    expect(requireSouthAfricanId('800101 5009 087')).toEqual({ value: SA_ID }) // non-digits (spaces) are stripped
+    expect(requireSouthAfricanId(SA_ID_LEAP_DAY)).toEqual({ value: SA_ID_LEAP_DAY })
   })
   test('the negative vectors are Luhn-valid, so each is rejected by the rule it is named after', () => {
     const luhn = (d: string) =>
@@ -77,9 +77,20 @@ test.describe('isValidSouthAfricanId / requireSouthAfricanId', () => {
     expect(requireSouthAfricanId('').error).toMatch(/enter your south african id/i)
     expect(requireSouthAfricanId('   ').error).toMatch(/enter your south african id/i)
   })
-  test('non-digit characters (the UI never produces any, but a forged request might) are stripped, not refused', () => {
-    expect(requireSouthAfricanId(`${SA_ID.slice(0, 6)}-${SA_ID.slice(6)}`)).toEqual({ value: SA_ID })
-    expect(requireSouthAfricanId('a1234567').error).toMatch(/13 digits/i) // 7 digits once the letters are stripped
+  test('a value that needs cleaning is refused outright, not cleaned and then validated — a forged request cannot get the browser’s normalisation for free', () => {
+    for (const bad of [
+      '800101 5009 087', // spaces
+      `${SA_ID.slice(0, 6)}-${SA_ID.slice(6)}`, // a dash
+      `a${SA_ID.slice(1)}`, // a letter in place of a digit
+      ` ${SA_ID}`, // leading space
+      `${SA_ID} `, // trailing space
+      `${SA_ID}\n`, // trailing newline
+      '＋8001015009087', // a non-ASCII character prepended
+    ]) {
+      const r = requireSouthAfricanId(bad)
+      expect(r.value, bad).toBeNull()
+      expect(r.error, bad).toMatch(/13 digits/i)
+    }
   })
   test('leading zeros are preserved, not parsed away as a number', () => {
     expect(SA_ID_LEAP_DAY.startsWith('00')).toBe(true)
@@ -128,7 +139,7 @@ const VALID: RegistrationInput = {
 
 test.describe('validateRegistration', () => {
   test('a complete form yields normalised values and no errors', () => {
-    const r = validateRegistration({ ...VALID, full_name: '  Thabo   Mokoena ', id_number: '800101 5009 087' }, TODAY)
+    const r = validateRegistration({ ...VALID, full_name: '  Thabo   Mokoena ', id_number: SA_ID }, TODAY)
     expect(r.errors).toEqual({})
     expect(r.values).toEqual({
       fullName: 'Thabo Mokoena',
@@ -155,6 +166,14 @@ test.describe('validateRegistration', () => {
     }
     // the one exact value that opens the passport rule
     expect(validateRegistration({ ...VALID, document_type: 'passport', id_number: 'A1234567' }, TODAY).errors).toEqual({})
+  })
+  test('a clean 13-digit South African ID passes through validateRegistration; a forged request with the same digits dressed up in extra characters does not', () => {
+    expect(validateRegistration({ ...VALID, id_number: SA_ID }, TODAY).errors).toEqual({})
+    for (const forged of [`${SA_ID} `, `${SA_ID.slice(0, 6)} ${SA_ID.slice(6)}`, `${SA_ID}\t`]) {
+      const r = validateRegistration({ ...VALID, id_number: forged }, TODAY)
+      expect(r.values, JSON.stringify(forged)).toBeNull()
+      expect(r.errors.id_number, JSON.stringify(forged)).toMatch(/13 digits/i)
+    }
   })
   test('date of birth and ID number are each individually required', () => {
     expect(validateRegistration({ ...VALID, date_of_birth: '' }, TODAY).errors).toEqual({ date_of_birth: 'Enter your date of birth.' })
@@ -578,6 +597,106 @@ test.describe('registration form (real page, nothing submitted)', () => {
     const lib = readFileSync('lib/registrationValidation.ts', 'utf8')
     expect(lib).toContain("document_type: get('document_type')")
     expect(lib).toMatch(/input\.document_type === 'passport' \? 'passport' : 'sa_id'/)
+  })
+})
+
+test.describe('registration form: live correction of errors (real page, nothing submitted)', () => {
+  test.setTimeout(180_000)
+
+  async function fillValid(page: Page) {
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email address').fill('thabo@example.com')
+    await page.getByLabel('South African ID number').fill(SA_ID)
+    await page.getByLabel('Date of birth').fill('1980-01-01')
+    await page.getByLabel('Password', { exact: true }).fill('longenough')
+    await page.getByLabel('Confirm password').fill('longenough')
+  }
+
+  test('no error is shown before any interaction or submission', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    for (const msg of [
+      'Enter your full name.',
+      'Enter your email address.',
+      'Enter your South African ID number.',
+      'Enter your date of birth.',
+      'Enter a password.',
+    ]) {
+      await expect(page.getByText(msg)).toHaveCount(0)
+    }
+  })
+
+  test('correcting a field clears only that field’s error; the other stays until it too is corrected', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('Email address').fill('not-an-email') // break exactly one field
+    await page.getByLabel('Mobile number (optional)').fill('12345') // and a second, differently
+    await page.getByRole('button', { name: 'Create account' }).click()
+
+    await expect(page.getByText('Enter a valid email address.')).toBeVisible()
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible()
+
+    await page.getByLabel('Email address').fill('thabo@example.com')
+    await expect(page.getByText('Enter a valid email address.')).toHaveCount(0)
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible() // untouched, still shown
+
+    await page.getByLabel('Mobile number (optional)').fill('')
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toHaveCount(0)
+    expect(posts).toEqual([])
+  })
+
+  test('correcting a wrong South African ID checksum clears its error without another submission', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('South African ID number').fill('8001015009088') // wrong check digit
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toBeVisible()
+
+    await page.getByLabel('South African ID number').fill(SA_ID) // the correct check digit, nothing else changed
+    await expect(page.getByText(/south african id number isn.t valid/i)).toHaveCount(0)
+    expect(posts).toEqual([]) // the error disappeared without a second submit attempt
+  })
+
+  test('switching document type clears a stale South African ID error without flagging the now-empty Passport field', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('South African ID number').fill('8001015009088') // wrong check digit
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toBeVisible()
+
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toHaveCount(0)
+    await expect(page.getByText('Enter your passport number.')).toHaveCount(0) // not replaced with a fresh error either
+    expect(posts).toEqual([])
+  })
+
+  test('after some fields are corrected live, a second submit still focuses the first field still invalid', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('Full name').fill('')
+    await page.getByLabel('Email address').fill('not-an-email')
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByLabel('Full name')).toBeFocused()
+
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await expect(page.getByText('Enter your full name.')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Create account' }).click() // only email is still wrong now
+    await expect(page.getByLabel('Email address')).toBeFocused()
+    expect(posts).toEqual([])
+  })
+
+  test('server-returned field errors feed the same live-correction path as a client-side failed attempt (source level)', () => {
+    // The offline harness cannot exercise a real Server Action round-trip (every POST is sealed off), so this
+    // pins the mechanism at the source instead of behaviourally: recheck()'s gate and the rendered `errors`
+    // both read state.fieldErrors directly, so a server-returned error lives in the same place a client-side
+    // one does and clears the same way once the field is corrected.
+    const src = readFileSync('app/(auth)/register/page.tsx', 'utf8')
+    expect(src).toMatch(/if \(\(clientErrors === null && !state\.fieldErrors\) \|\| !formRef\.current\) return/)
+    expect(src).toContain('const errors = clientErrors ?? state.fieldErrors ?? {}')
   })
 })
 
