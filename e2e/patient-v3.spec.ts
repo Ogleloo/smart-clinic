@@ -304,36 +304,45 @@ test('profile is read-only; settings saves normalised values, rejects bad ones, 
     await page.getByRole('link', { name: 'Edit profile' }).click()
     await page.waitForURL('**/profile/settings')
 
-    await expect(page.getByLabel('Email')).toBeDisabled()
+    await expect(page.getByLabel('Email address')).toBeDisabled()
+    // Which radio starts checked depends on the shape of whatever is already on file (13 digits -> South
+    // African ID, anything else -> Passport — a display choice only, never a validation one; see
+    // ProfileSettingsForm.tsx). Selected explicitly here so this step is deterministic either way.
+    await page.getByRole('radio', { name: 'South African ID' }).check()
 
-    // Failure: malformed ID number — rejected, nothing written.
-    await page.getByLabel('ID or passport number').fill('12')
-    await page.getByRole('button', { name: 'Save changes' }).click()
+    // Failure: malformed South African ID number — rejected, nothing written. Thabo's existing value (whatever
+    // shape it already has) is untouched, since this changes the field to something new and invalid.
+    await page.getByLabel('South African ID number').fill('12')
+    await page.getByRole('button', { name: 'Save Changes' }).click()
     await waitSettled(page)
-    await expect(page.getByText('ID or passport number must be 6–20 letters or digits.')).toBeVisible()
+    await expect(page.getByText('A South African ID number has 13 digits.')).toBeVisible()
     const { data: afterBad } = await client.from('profiles').select('id_number').not('auth_user_id', 'is', null).single()
     expect(afterBad!.id_number).toBe(before!.id_number)
 
-    // Failure: future date of birth. The input's max stops the browser
-    // submitting it at all...
-    await page.getByLabel('ID or passport number').fill('')
+    // Failure: future date of birth. Reload first so the ID field goes back to its real, unchanged value
+    // (not the '12' just typed above) — an existing identity field is never cleared or re-validated just
+    // because something else on the form is being tested.
+    await page.goto('/profile/settings')
     const dobInput = page.getByLabel('Date of birth')
     await dobInput.fill('2999-01-01')
+    // The input's max stops the browser submitting it at all...
     expect(await dobInput.evaluate((el: HTMLInputElement) => el.validity.rangeOverflow)).toBe(true)
     // ...and the server rejects it on its own when that guard is bypassed.
     await dobInput.evaluate((el: HTMLInputElement) => el.removeAttribute('max'))
-    await page.getByRole('button', { name: 'Save changes' }).click()
+    await page.getByRole('button', { name: 'Save Changes' }).click()
     await waitSettled(page)
     await expect(page.getByText('Date of birth can’t be in the future.')).toBeVisible()
 
-    // Happy path: ID normalised (spaces stripped, upper-cased).
+    // Happy path: switch to Passport, ID normalised (spaces stripped, upper-cased).
+    await page.goto('/profile/settings')
+    await page.getByRole('radio', { name: 'Passport' }).check()
     await page.getByLabel('Date of birth').fill('1990-03-12')
-    await page.getByLabel('ID or passport number').fill(' ab 123 456 ')
-    const save = page.getByRole('button', { name: 'Save changes' })
+    await page.getByLabel('Passport number').fill(' ab 123 456 ')
+    const save = page.getByRole('button', { name: 'Save Changes' })
     await Promise.all([save.click(), save.click({ force: true }).catch(() => {})])
     await waitSettled(page)
     await expect(page.getByText('Your details have been saved.')).toBeVisible()
-    await expect(page.getByLabel('ID or passport number')).toHaveValue('AB123456')
+    await expect(page.getByLabel('Passport number')).toHaveValue('AB123456')
 
     const { data: saved } = await client
       .from('profiles')
@@ -346,19 +355,22 @@ test('profile is read-only; settings saves normalised values, rejects bad ones, 
     await expect(page.locator('main')).toContainText('12 March 1990')
     await expect(page.locator('main')).toContainText('AB123456')
 
-    // Change password: failure paths only — this is a shared test account.
+    // Change password: failure paths only — this is a shared test account. Change Password is now an
+    // expandable panel; its own submit is "Update password" so it never shares an accessible name with the
+    // toggle that opens it.
     await page.goto('/profile/settings')
+    await page.getByRole('button', { name: 'Change Password' }).click()
     await page.getByLabel('Current password').fill('definitely-wrong')
     await page.getByLabel('New password', { exact: true }).fill('another-pw-123')
     await page.getByLabel('Confirm new password').fill('another-pw-123')
-    await page.getByRole('button', { name: 'Change password' }).click()
+    await page.getByRole('button', { name: 'Update password' }).click()
     await waitSettled(page)
     await expect(page.getByText('Your current password is incorrect.')).toBeVisible()
 
     await page.getByLabel('Current password').fill(ACCOUNTS.patient.password)
     await page.getByLabel('New password', { exact: true }).fill('another-pw-123')
     await page.getByLabel('Confirm new password').fill('different-pw-123')
-    await page.getByRole('button', { name: 'Change password' }).click()
+    await page.getByRole('button', { name: 'Update password' }).click()
     await waitSettled(page)
     await expect(page.getByText('Those passwords don’t match.')).toBeVisible()
   } finally {

@@ -46,6 +46,7 @@ export const CLICK_ALLOW_BY_SPEC: Readonly<Record<string, { buttons?: readonly R
   'admin-v2': { buttons: [/^show reasons$/i] },
   // Cancel discards unsaved edits in the form; Change Password only expands/collapses the (validation-only) panel.
   'reception-profile': { buttons: [/^cancel$/i, /^change password$/i] },
+  'patient-profile-settings': { buttons: [/^cancel$/i, /^change password$/i] },
   // Client-side service filters on the queue table; they are the only aria-pressed buttons on that page.
   'reception-queue': { buttons: [/^all services$/i], selectors: ['button[aria-pressed]'] },
 }
