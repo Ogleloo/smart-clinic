@@ -53,27 +53,27 @@ export function BookingCalendar({ value, min, onChange, isClosed }: BookingCalen
   }
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-5">
-      <div className="mb-3 flex items-center justify-between">
+    <div>
+      <div className="mb-3 flex items-center justify-between py-2">
         <button
           type="button"
           onClick={() => shiftMonth(-1)}
           disabled={atEarliestMonth}
           aria-label="Previous month"
-          className="flex h-11 w-11 items-center justify-center rounded-sm text-ink hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-ink hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
         >
-          <ChevronLeft size={18} aria-hidden />
+          <ChevronLeft size={16} aria-hidden />
         </button>
-        <p className="text-base font-semibold text-ink" aria-live="polite">
+        <p className="text-base text-ink" aria-live="polite">
           {monthLabel}
         </p>
         <button
           type="button"
           onClick={() => shiftMonth(1)}
           aria-label="Next month"
-          className="flex h-11 w-11 items-center justify-center rounded-sm text-ink hover:bg-subtle"
+          className="flex h-8 w-8 items-center justify-center rounded-md text-ink hover:bg-subtle"
         >
-          <ChevronRight size={18} aria-hidden />
+          <ChevronRight size={16} aria-hidden />
         </button>
       </div>
 
@@ -102,7 +102,7 @@ export function BookingCalendar({ value, min, onChange, isClosed }: BookingCalen
               aria-pressed={isSelected}
               aria-label={`${formatCalendarDate(dateStr, { weekday: 'long' })}${closed ? ', clinic closed' : ''}`}
               onClick={() => onChange(dateStr)}
-              className={`flex h-11 items-center justify-center rounded-sm text-sm font-semibold tabular transition-colors ${
+              className={`flex h-10 items-center justify-center rounded-md text-sm font-semibold tabular transition-colors ${
                 isSelected
                   ? 'bg-primary-700 text-white'
                   : isPast
