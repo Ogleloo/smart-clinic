@@ -54,6 +54,10 @@ export function VerifyForm({ email }: VerifyFormProps) {
   // reasoning as the nurse workflow: don't let two async actions
   // interleave on the one thing that matters (the code just typed).
   const submittingRef = useRef(false)
+  // The same reasoning applies to resend on its own: `resendState` is read from the closure, so two same-tick
+  // clicks on "Resend code" (synthetic, or a very fast double-tap) both see it still 'idle' before either
+  // setResendState('sending') has rendered. A ref is synchronous across both calls, same as submittingRef above.
+  const resendingRef = useRef(false)
 
   /** Writes `value` (already digits only) from box `start` onward, and parks focus on the last box it filled. */
   function fill(start: number, value: string) {
@@ -110,45 +114,63 @@ export function VerifyForm({ email }: VerifyFormProps) {
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
-    if (submittingRef.current || code.length !== DIGITS) return
+    // Also refuses while a resend is in flight: a resend in progress can invalidate the very code about to be
+    // submitted, so the two actions are mutually exclusive, not just each individually non-reentrant.
+    if (submittingRef.current || resendState === 'sending' || code.length !== DIGITS) return
     submittingRef.current = true
     setVerifying(true)
     setVerifyError(null)
 
-    const { error } = await supabase.auth.verifyOtp({ email, token: code, type: 'signup' })
-
-    submittingRef.current = false
-    if (error) {
+    try {
+      const { error } = await supabase.auth.verifyOtp({ email, token: code, type: 'signup' })
+      if (error) {
+        setVerifyError('That code is not correct or has expired.')
+        return
+      }
+      router.push('/dashboard')
+    } catch {
+      // A thrown error (offline, DNS failure, the request never reaching Supabase at all) is not a
+      // {error} response and would otherwise leave `verifying` true and the button disabled forever.
+      setVerifyError("Couldn't verify right now. Check your connection and try again.")
+    } finally {
+      submittingRef.current = false
       setVerifying(false)
-      setVerifyError('That code is not correct or has expired.')
-      return
     }
-
-    router.push('/dashboard')
   }
 
   async function handleResend() {
-    if (cooldown > 0 || resendState === 'sending') return
+    // The ref guards the same-tick case (resendState hasn't re-rendered yet); the state checks guard the normal
+    // case (cooldown, an earlier resend still sending) and, together with `verifying`, refuse while a verify is
+    // in flight — a resend firing mid-verify would issue a new code while the one just typed is still checked.
+    if (resendingRef.current || cooldown > 0 || resendState === 'sending' || verifying) return
+    resendingRef.current = true
     setResendState('sending')
     setResendMessage(null)
 
-    const { error } = await supabase.auth.resend({ type: 'signup', email })
-
-    if (error) {
+    try {
+      const { error } = await supabase.auth.resend({ type: 'signup', email })
+      if (error) {
+        setResendState('error')
+        // The hourly cap gets its own message — anything else risks
+        // implying an email went out when it didn't.
+        setResendMessage(
+          error.code === 'over_email_send_rate_limit'
+            ? 'Too many requests, please wait a few minutes.'
+            : "Couldn't send a new code. Try again."
+        )
+        return
+      }
+      setResendState('sent')
+      setResendMessage('A new code is on its way.')
+      setCooldown(RESEND_COOLDOWN_SECONDS)
+    } catch {
+      // Same as verify: a thrown error must not leave resendState stuck at 'sending' (which would permanently
+      // disable the resend control, since cooldown never started).
       setResendState('error')
-      // The hourly cap gets its own message — anything else risks
-      // implying an email went out when it didn't.
-      setResendMessage(
-        error.code === 'over_email_send_rate_limit'
-          ? 'Too many requests, please wait a few minutes.'
-          : "Couldn't send a new code. Try again."
-      )
-      return
+      setResendMessage("Couldn't send a new code. Try again.")
+    } finally {
+      resendingRef.current = false
     }
-
-    setResendState('sent')
-    setResendMessage('A new code is on its way.')
-    setCooldown(RESEND_COOLDOWN_SECONDS)
   }
 
   return (
@@ -209,7 +231,11 @@ export function VerifyForm({ email }: VerifyFormProps) {
             </p>
           )}
 
-          <button type="submit" className={BTN_PRIMARY} disabled={verifying || code.length !== DIGITS}>
+          <button
+            type="submit"
+            className={BTN_PRIMARY}
+            disabled={verifying || resendState === 'sending' || code.length !== DIGITS}
+          >
             {verifying ? 'Verifying…' : 'Verify account →'}
           </button>
         </form>
@@ -220,7 +246,7 @@ export function VerifyForm({ email }: VerifyFormProps) {
             <button
               type="button"
               onClick={handleResend}
-              disabled={cooldown > 0 || resendState === 'sending'}
+              disabled={cooldown > 0 || resendState === 'sending' || verifying}
               className={`${LINK} min-h-11 disabled:cursor-not-allowed disabled:text-muted disabled:no-underline`}
             >
               {resendState === 'sending' ? 'Sending…' : cooldown > 0 ? `Resend code (${cooldown}s)` : 'Resend code'}

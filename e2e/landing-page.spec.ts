@@ -167,23 +167,41 @@ test.describe('navigation: every link goes somewhere real', () => {
     expect(r.states.populated).toContain('id="main"')
   })
 
-  test('every other link is an app route that exists: /, /login, /register or /display/<service id>', () => {
+  test('every other link is an app route that exists: /, /login, /register, /welcome or /display/<service id>', () => {
     for (const html of Object.values(r.states)) {
       for (const [, href] of html.matchAll(/href="([^"#][^"]*)"/g)) {
-        expect(href, href).toMatch(/^(\/|\/login|\/register|\/display\/[0-9a-f-]{36})$/)
+        expect(href, href).toMatch(/^(\/|\/login|\/register|\/welcome|\/display\/[0-9a-f-]{36})$/)
       }
     }
     expect(existsSync('app/login/page.tsx') || existsSync('app/(auth)/login/page.tsx')).toBe(true)
     expect(existsSync('app/(auth)/register/page.tsx')).toBe(true)
+    expect(existsSync('app/(auth)/welcome/page.tsx')).toBe(true)
     expect(existsSync('app/display/[serviceId]/page.tsx')).toBe(true)
   })
 
-  test('Book appointment and Get started lead to registration; Log in leads to login — in the header, hero and CTA panel', () => {
+  test('the hero "Get started" opens the V3 welcome entry (PR #45); the header, CTA panel and footer still go straight to registration', () => {
     const h = r.states.populated
-    expect((h.match(/href="\/register"/g) ?? []).length).toBeGreaterThanOrEqual(4) // header, hero, CTA, footer
-    expect((h.match(/href="\/login"/g) ?? []).length).toBeGreaterThanOrEqual(4)
+    const header = h.match(/<header[\s\S]*?<\/header>/)![0]
+    const hero = h.match(/<section[^>]*id="top"[\s\S]*?<\/section>/)![0]
     const cta = h.match(/<section[^>]*aria-labelledby="cta-title"[\s\S]*?<\/section>/)![0]
+    const footer = h.match(/<footer[\s\S]*?<\/footer>/)![0]
+
+    // Exactly one /welcome link on the page, and it is the hero's own "Get started".
+    expect([...h.matchAll(/href="\/welcome"/g)]).toHaveLength(1)
+    expect(hero).toMatch(/href="\/welcome"[^>]*>\s*Get started/)
+    expect(hero).not.toMatch(/href="\/register"/)
+
+    // Every other "register" action is untouched: header, CTA panel, footer.
+    const headerBook = header.match(/<a [^>]*href="\/register"[^>]*>/)?.[0] ?? ''
+    expect(headerBook).toContain('aria-label="Book appointment"') // attribute order varies; both must be on the same <a>
+    expect(headerBook).toContain('href="/register"')
     expect(cta).toMatch(/href="\/register"[^>]*>Book appointment →/)
+    expect(footer).toMatch(/href="\/register"[^>]*>Create an account/)
+    expect((h.match(/href="\/register"/g) ?? []).length).toBe(3) // header, CTA, footer — not the hero anymore
+
+    // Log in is unaffected everywhere, including the hero's own "Log in" button.
+    expect(hero).toMatch(/href="\/login"[^>]*>\s*Log in/)
+    expect((h.match(/href="\/login"/g) ?? []).length).toBeGreaterThanOrEqual(4) // header, hero, CTA, footer
     expect(cta).toMatch(/href="\/login"[^>]*>Log in/)
   })
 
@@ -607,6 +625,7 @@ test.describe('the real / route with an unreachable Supabase (the offline server
     await expect(page.getByText('Opening hours are unavailable right now.')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Book appointment' }).first()).toHaveAttribute('href', '/register')
     await expect(page.getByRole('link', { name: 'Log in' }).first()).toHaveAttribute('href', '/login')
+    await expect(page.getByRole('link', { name: 'Get started →' })).toHaveAttribute('href', '/welcome')
     const fonts = await page.evaluate(() => ({
       h1: getComputedStyle(document.querySelector('h1')!).fontFamily,
       body: getComputedStyle(document.querySelector('#about p.text-muted')!).fontFamily,

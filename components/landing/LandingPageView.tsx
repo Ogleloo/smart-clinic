@@ -90,7 +90,11 @@ function Hero() {
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            <Link href="/register" className={BTN_PRIMARY}>
+            {/* The only landing link that goes to /welcome (PR #45): every other "register" action on this page
+                — the header, this section's own "Book appointment" elsewhere, the CTA panel, the footer — still
+                goes straight to /register. This one alone opens the V3 welcome entry, which itself offers
+                "Get started" (→ /register) and "Log in" (→ /login), plus a link back to this page. */}
+            <Link href="/welcome" className={BTN_PRIMARY}>
               Get started →
             </Link>
             <Link href="/login" className={BTN_OUTLINE}>

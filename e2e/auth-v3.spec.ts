@@ -398,6 +398,147 @@ test.describe('Verify account (Figma 45:68)', () => {
   })
 })
 
+// --------------------------------------------------------------------------- OTP concurrency safety (PR #45)
+
+/**
+ * These tests exercise the real verifyOtp()/resend() calls against the offline server's own dead Supabase URL
+ * (http://127.0.0.1:9 — nothing listens there, so nothing ever leaves this machine; see web-server-plan.ts).
+ * No OTP is ever correct and no email account exists, so neither call could succeed even if it reached a real
+ * project — these tests only ever exercise the failure and in-flight paths, never a real verification or send.
+ *
+ * `page.route()` is used (not the file's usual `sealed(context)`) because these tests need to see and control
+ * the verify/resend request itself — holding it open to get a deterministic in-flight window, or letting it run
+ * to its natural (fast, since the port is dead) failure. Every test still tracks every non-GET request itself
+ * and asserts only the expected auth call was ever attempted — the same guarantee `sealed()` gives, just not
+ * blind to the one request each test needs to observe.
+ */
+test.describe('Verify account: OTP concurrency safety', () => {
+  test.setTimeout(180_000)
+
+  /** Every non-GET request the page attempts, method + URL, collected for the life of the test. */
+  function trackNonGet(page: Page): string[] {
+    const requests: string[] = []
+    page.on('request', (req) => {
+      if (req.method() !== 'GET' && req.method() !== 'HEAD') requests.push(`${req.method()} ${req.url()}`)
+    })
+    return requests
+  }
+
+  const fillCode = (page: Page, code = '123456') =>
+    page.getByRole('group', { name: 'Verification code' }).getByRole('textbox').nth(0).fill(code)
+
+  /**
+   * Holds the first request matching `pattern` open until the test calls `release()`, then fails it — the same
+   * shape a dropped connection takes. `entered` resolves once the request has actually started, so a test can
+   * assert the in-flight UI state deterministically instead of racing a timer against a fast local failure.
+   */
+  function holdRequest(page: Page, pattern: string) {
+    let resolveEntered!: () => void
+    const entered = new Promise<void>((resolve) => {
+      resolveEntered = resolve
+    })
+    let resolveReleased!: () => void
+    const released = new Promise<void>((resolve) => {
+      resolveReleased = resolve
+    })
+    let count = 0
+    page.route(pattern, async (route) => {
+      count += 1
+      resolveEntered()
+      await released
+      await route.abort('failed')
+    })
+    return { entered, release: () => resolveReleased(), count: () => count }
+  }
+
+  test('source: both calls are wrapped so a thrown (not just a {error}-returning) failure cannot leave the form stuck', () => {
+    const src = read('components/auth/VerifyForm.tsx')
+    const verify = slice(src, 'async function handleVerify', 'async function handleResend')
+    const resend = src.slice(src.indexOf('async function handleResend'))
+    expect(verify).toMatch(/try \{[\s\S]*verifyOtp[\s\S]*\} catch \{[\s\S]*\} finally \{[\s\S]*submittingRef\.current = false[\s\S]*setVerifying\(false\)/)
+    expect(resend).toMatch(/try \{[\s\S]*resend\(\{[\s\S]*\} catch \{[\s\S]*\} finally \{[\s\S]*resendingRef\.current = false/)
+  })
+
+  test('verification in progress disables resend; releasing it (a network failure) leaves both controls usable again', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+    const held = holdRequest(page, '**/auth/v1/verify*')
+
+    await fillCode(page)
+    await page.getByRole('button', { name: 'Verify account' }).click()
+    await held.entered
+
+    await expect(page.getByRole('button', { name: 'Verifying…' })).toBeVisible()
+    const resend = page.getByRole('button', { name: /resend code/i })
+    await expect(resend, 'resend must not be startable while verifyOtp is in flight').toBeDisabled()
+
+    held.release()
+    await expect(page.getByText('That code is not correct or has expired.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Verify account →' }), 'recoverable, not stuck disabled').toBeEnabled()
+    await expect(resend, 'resend is usable again once verify has settled').toBeEnabled()
+
+    expect(held.count()).toBe(1)
+    expect(requests.filter((r) => !r.includes('/auth/v1/verify'))).toEqual([])
+  })
+
+  test('a resend in progress disables Verify even with a complete code; releasing it leaves both controls usable again', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+    await fillCode(page)
+    const held = holdRequest(page, '**/auth/v1/resend*')
+
+    await page.getByRole('button', { name: /resend code/i }).click()
+    await held.entered
+
+    await expect(page.getByRole('button', { name: 'Sending…' })).toBeVisible()
+    const verify = page.getByRole('button', { name: 'Verify account →' })
+    await expect(verify, 'verification must not be startable while a resend is in flight').toBeDisabled()
+
+    held.release()
+    await expect(page.getByText("Couldn't send a new code. Try again.")).toBeVisible()
+    await expect(verify, 'the code is still complete, so Verify is usable again once resend has settled').toBeEnabled()
+    await expect(page.getByRole('button', { name: /resend code/i }), 'recoverable, not stuck disabled (no cooldown on a failure)').toBeEnabled()
+
+    expect(held.count()).toBe(1)
+    expect(requests.filter((r) => !r.includes('/auth/v1/resend'))).toEqual([])
+  })
+
+  test('same-tick duplicate clicks on Verify send exactly one request, and the form recovers afterward', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+    await fillCode(page)
+
+    await page.getByRole('button', { name: 'Verify account →' }).evaluate((el) => {
+      const b = el as HTMLButtonElement
+      b.click()
+      b.click()
+      b.click()
+    })
+
+    await expect(page.getByText('That code is not correct or has expired.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Verify account →' })).toBeEnabled()
+    expect(requests.filter((r) => r.includes('/auth/v1/verify'))).toHaveLength(1)
+    expect(requests.filter((r) => !r.includes('/auth/v1/verify'))).toEqual([])
+  })
+
+  test('same-tick duplicate clicks on Resend send exactly one request, and the form recovers afterward', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+
+    await page.getByRole('button', { name: /resend code/i }).evaluate((el) => {
+      const b = el as HTMLButtonElement
+      b.click()
+      b.click()
+      b.click()
+    })
+
+    await expect(page.getByText("Couldn't send a new code. Try again.")).toBeVisible()
+    await expect(page.getByRole('button', { name: /resend code/i })).toBeEnabled()
+    expect(requests.filter((r) => r.includes('/auth/v1/resend'))).toHaveLength(1)
+    expect(requests.filter((r) => !r.includes('/auth/v1/resend'))).toEqual([])
+  })
+})
+
 // ------------------------------------------------------------------- security contracts that must not move
 
 test.describe('authentication security contracts', () => {
