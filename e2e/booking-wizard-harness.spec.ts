@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { openBookingHarness, calls, queueResponse, setDefault, release } from './support/booking-harness/harness'
 import type { BookableService } from '../components/booking/BookingWizard'
 import type { PatientClinic } from '../lib/patientClinic'
+import { todayInClinicTimezone } from '../lib/clinicTime'
 
 /**
  * Patient Booking Wizard (Figma 48:77 / 52:348 / 57:101) — the real BookingWizard, mounted in a browser with
@@ -273,5 +274,74 @@ test.describe('Booking Wizard: layout and keyboard', () => {
     await page.getByRole('button', { name: 'Continue' }).click()
     await expect(page.getByRole('button', { name: 'Confirm booking' })).toBeVisible()
     expect(escapes).toEqual([])
+  })
+})
+
+test.describe('Booking Wizard: BookingCalendar accessible touch targets', () => {
+  for (const width of [1440, 768, 390, 320]) {
+    test(`${width}px: month navigation and date buttons clear 44×44px, and the page itself never scrolls sideways`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const { escapes } = await openWizard(page)
+      await toDateTimeStep(page)
+      await expect(page.getByRole('button', { name: 'Next month' })).toBeVisible()
+
+      for (const name of ['Previous month', 'Next month']) {
+        const box = (await page.getByRole('button', { name }).boundingBox())!
+        expect(box.width, name).toBeGreaterThanOrEqual(44)
+        expect(box.height, name).toBeGreaterThanOrEqual(44)
+      }
+
+      const today = todayInClinicTimezone()
+      const todayBox = (await page.locator(`button[data-date="${today}"]`).boundingBox())!
+      expect(todayBox.width, 'today’s date cell').toBeGreaterThanOrEqual(44)
+      expect(todayBox.height, 'today’s date cell').toBeGreaterThanOrEqual(44)
+
+      // The page itself never gains horizontal scroll — any overflow the fixed-size 7-column grid causes
+      // at narrow widths is absorbed entirely inside the calendar's own scroll region (checked below).
+      const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(pageOverflow).toBeLessThanOrEqual(0)
+      expect(escapes).toEqual([])
+    })
+  }
+
+  test('320px: the calendar region itself is what scrolls (seven 44px columns don’t fit the step’s own padding)', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 1200 })
+    await openWizard(page)
+    await toDateTimeStep(page)
+    const scrollRegion = page.locator('.overflow-x-auto').first()
+    const { scrollWidth, clientWidth } = await scrollRegion.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+    expect(scrollWidth).toBeGreaterThan(clientWidth)
+  })
+
+  test('1440px: the calendar region does not need to scroll — plenty of room, so it isn’t needlessly scrollable', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 })
+    await openWizard(page)
+    await toDateTimeStep(page)
+    const scrollRegion = page.locator('.overflow-x-auto').first()
+    const { scrollWidth, clientWidth } = await scrollRegion.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
+  })
+
+  test('the weekday header row stays aligned with the date grid while the calendar region is scrolled', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 1200 })
+    await openWizard(page)
+    await toDateTimeStep(page)
+    const scrollRegion = page.locator('.overflow-x-auto').first()
+    await scrollRegion.evaluate((el) => {
+      el.scrollLeft = el.scrollWidth
+    })
+    // Both grids share one scroll container, so they move together — the header and the date grid below it
+    // report the same scrollLeft, meaning neither has drifted out of alignment with the other.
+    const weekdayRow = scrollRegion.locator('div').first()
+    const dateGrid = scrollRegion.locator('div').nth(1)
+    const weekdayBox = (await weekdayRow.boundingBox())!
+    const dateGridBox = (await dateGrid.boundingBox())!
+    expect(Math.round(weekdayBox.x)).toBe(Math.round(dateGridBox.x))
   })
 })

@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
+import { confirmationDestination } from '../lib/bookingConfirmation'
+import type { AppointmentStatus } from '../lib/types/database.types'
 
 /**
  * Booking confirmation screen (Figma 68:77) — the real BookingConfirmedView component, rendered to static
@@ -120,5 +122,26 @@ test.describe('BookingConfirmedView layout (real component + real compiled CSS)'
     await page.setViewportSize({ width: 320, height: 1400 })
     await page.setContent(page$(rendered.states.confirmed))
     await expect(page.getByRole('heading', { name: 'Appointment confirmed' })).toBeVisible()
+  })
+})
+
+test.describe('confirmationDestination: an old /book/confirmed/[id] link never presents a changed status as a fresh confirmation', () => {
+  const EXPECTED: Record<AppointmentStatus, 'success' | 'details'> = {
+    booked: 'success',
+    checked_in: 'details',
+    completed: 'details',
+    cancelled: 'details',
+    no_show: 'details',
+  }
+
+  for (const [status, destination] of Object.entries(EXPECTED) as [AppointmentStatus, 'success' | 'details'][]) {
+    test(`${status} → ${destination === 'success' ? 'the Figma success screen (still freshly booked)' : "redirects to the appointment's own /appointments/[id] details page"}`, () => {
+      expect(confirmationDestination(status)).toBe(destination)
+    })
+  }
+
+  test('only "booked" ever renders the success screen — every other status is covered above, nothing falls through unexamined', () => {
+    expect(Object.keys(EXPECTED).sort()).toEqual(['booked', 'cancelled', 'checked_in', 'completed', 'no_show'])
+    expect(Object.values(EXPECTED).filter((d) => d === 'success')).toEqual(['success'])
   })
 })

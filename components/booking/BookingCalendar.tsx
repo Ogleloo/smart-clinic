@@ -54,68 +54,80 @@ export function BookingCalendar({ value, min, onChange, isClosed }: BookingCalen
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between py-2">
+      <div className="mb-3 flex items-center justify-between gap-2 py-2">
         <button
           type="button"
           onClick={() => shiftMonth(-1)}
           disabled={atEarliestMonth}
           aria-label="Previous month"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-ink hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-ink hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
         >
           <ChevronLeft size={16} aria-hidden />
         </button>
-        <p className="text-base text-ink" aria-live="polite">
+        <p className="text-sm text-ink sm:text-base" aria-live="polite">
           {monthLabel}
         </p>
         <button
           type="button"
           onClick={() => shiftMonth(1)}
           aria-label="Next month"
-          className="flex h-8 w-8 items-center justify-center rounded-md text-ink hover:bg-subtle"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-ink hover:bg-subtle"
         >
           <ChevronRight size={16} aria-hidden />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center">
-        {WEEKDAYS.map((d) => (
-          <span key={d} className="pb-1 text-xs text-muted" aria-hidden>
-            {d}
-          </span>
-        ))}
-        {Array.from({ length: leadingBlanks }, (_, i) => (
-          <span key={`blank-${i}`} aria-hidden />
-        ))}
-        {Array.from({ length: daysInMonth }, (_, i) => {
-          const day = i + 1
-          const dateStr = toDateStr(view.year, view.month, day)
-          const isPast = dateStr < min
-          const closed = !isPast && isClosed(dateStr)
-          const isSelected = dateStr === value
-          const isToday = dateStr === min
-          return (
-            <button
-              key={dateStr}
-              type="button"
-              data-date={dateStr}
-              disabled={isPast}
-              aria-pressed={isSelected}
-              aria-label={`${formatCalendarDate(dateStr, { weekday: 'long' })}${closed ? ', clinic closed' : ''}`}
-              onClick={() => onChange(dateStr)}
-              className={`flex h-10 items-center justify-center rounded-md text-sm font-semibold tabular transition-colors ${
-                isSelected
-                  ? 'bg-primary-700 text-white'
-                  : isPast
-                    ? 'cursor-not-allowed text-muted/40'
-                    : closed
-                      ? 'text-muted/60 line-through hover:bg-subtle'
-                      : 'text-ink hover:bg-card-mint'
-              } ${isToday && !isSelected ? 'ring-1 ring-primary-700' : ''}`}
-            >
-              {day}
-            </button>
-          )
-        })}
+      {/*
+        Each day cell is a fixed 44px square — the WCAG touch-target minimum, and (not coincidentally) what
+        Figma's own cells already are (size-[40px], fixed — never a fluid stretched column). Seven of those
+        plus gaps (332px) don't fit a 320px viewport once the step's own padding is subtracted, so this
+        region — and only this region — scrolls horizontally; the page itself never gains an overflow. The
+        weekday header row shares the exact same fixed column template and lives in the same scrollable
+        element, so it scrolls in lockstep with the date grid and never drifts out of alignment with it.
+      */}
+      <div className="overflow-x-auto">
+        <div className="grid w-fit grid-cols-[repeat(7,44px)] gap-1 text-center" aria-hidden>
+          {WEEKDAYS.map((d) => (
+            <span key={d} className="pb-1 text-xs text-muted">
+              {d}
+            </span>
+          ))}
+        </div>
+        <div className="grid w-fit grid-cols-[repeat(7,44px)] gap-1 text-center">
+          {Array.from({ length: leadingBlanks }, (_, i) => (
+            <span key={`blank-${i}`} aria-hidden />
+          ))}
+          {Array.from({ length: daysInMonth }, (_, i) => {
+            const day = i + 1
+            const dateStr = toDateStr(view.year, view.month, day)
+            const isPast = dateStr < min
+            const closed = !isPast && isClosed(dateStr)
+            const isSelected = dateStr === value
+            const isToday = dateStr === min
+            return (
+              <button
+                key={dateStr}
+                type="button"
+                data-date={dateStr}
+                disabled={isPast}
+                aria-pressed={isSelected}
+                aria-label={`${formatCalendarDate(dateStr, { weekday: 'long' })}${closed ? ', clinic closed' : ''}`}
+                onClick={() => onChange(dateStr)}
+                className={`flex h-11 w-11 items-center justify-center rounded-md text-sm font-semibold tabular transition-colors ${
+                  isSelected
+                    ? 'bg-primary-700 text-white'
+                    : isPast
+                      ? 'cursor-not-allowed text-muted/40'
+                      : closed
+                        ? 'text-muted/60 line-through hover:bg-subtle'
+                        : 'text-ink hover:bg-card-mint'
+                } ${isToday && !isSelected ? 'ring-1 ring-primary-700' : ''}`}
+              >
+                {day}
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
