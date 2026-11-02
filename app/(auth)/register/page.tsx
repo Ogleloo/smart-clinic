@@ -15,11 +15,11 @@ import {
   REGISTRATION_FIELD_ORDER,
   registrationInputFrom,
   validateRegistration,
+  type DocumentType,
   type RegistrationErrors,
 } from '@/lib/registrationValidation'
 
-/** The same normalisation the server and handle_new_user() apply before the number is stored. */
-const normaliseId = (raw: string) => raw.replace(/\s/g, '').toUpperCase()
+const ID_NUMBER_DIGITS = 13
 
 /**
  * Patient V3 registration (Figma 33:49).
@@ -32,18 +32,34 @@ const normaliseId = (raw: string) => raw.replace(/\s/g, '').toUpperCase()
 export default function RegisterPage() {
   const [state, formAction, pending] = useActionState<RegisterState, FormData>(register, {})
   const [clientErrors, setClientErrors] = useState<RegistrationErrors | null>(null)
+  const [documentType, setDocumentType] = useState<DocumentType>('sa_id')
   const [idNumber, setIdNumber] = useState('')
   const [dob, setDob] = useState('')
   // True while the date in the field came from the ID number (not typed by the person), so a
   // changed ID number may replace it — and a date they typed themselves is never overwritten.
   const [dobFromId, setDobFromId] = useState(false)
 
-  const candidates = saIdBirthDateCandidates(normaliseId(idNumber), todayInClinicTimezone())
+  // A passport never suggests a date — only a South African ID encodes one.
+  const candidates = documentType === 'sa_id' ? saIdBirthDateCandidates(idNumber, todayInClinicTimezone()) : []
 
-  function handleIdChange(e: ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value
-    setIdNumber(value)
-    const found = saIdBirthDateCandidates(normaliseId(value), todayInClinicTimezone())
+  function handleDocumentTypeChange(type: DocumentType) {
+    setDocumentType(type)
+    // The two fields keep different value shapes (digits only vs. letters and digits); carrying one
+    // into the other is never meaningful, and is exactly the kind of leftover value that could let a
+    // malformed South African ID ride through under "Passport" by accident rather than by choice.
+    setIdNumber('')
+    if (dobFromId) {
+      setDob('')
+      setDobFromId(false)
+    }
+  }
+
+  function handleSaIdChange(e: ChangeEvent<HTMLInputElement>) {
+    // Only digits are ever stored, however they arrived — typed, pasted, or autofilled — so a leading
+    // zero is never at risk of being parsed away, and the field can never hold a non-digit character.
+    const digits = e.target.value.replace(/\D/g, '').slice(0, ID_NUMBER_DIGITS)
+    setIdNumber(digits)
+    const found = saIdBirthDateCandidates(digits, todayInClinicTimezone())
     if (found.length === 1 && (dob === '' || dobFromId)) {
       setDob(found[0])
       setDobFromId(true)
@@ -52,6 +68,10 @@ export default function RegisterPage() {
       setDob('')
       setDobFromId(false)
     }
+  }
+
+  function handlePassportChange(e: ChangeEvent<HTMLInputElement>) {
+    setIdNumber(e.target.value)
   }
 
   function handleDobChange(e: ChangeEvent<HTMLInputElement>) {
@@ -136,20 +156,69 @@ export default function RegisterPage() {
             error={errors.phone}
           />
 
+          {/* An explicit choice, not inferred from what was typed — the Server Action enforces whichever
+              is selected, so this is never the only thing standing between a malformed ID and the database. */}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-base leading-6 text-ink">Identification</legend>
+            <div className="flex flex-wrap gap-4">
+              {(
+                [
+                  ['sa_id', 'South African ID'],
+                  ['passport', 'Passport'],
+                ] as const
+              ).map(([type, label]) => (
+                <label key={type} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink">
+                  <input
+                    type="radio"
+                    name="document_type"
+                    value={type}
+                    checked={documentType === type}
+                    onChange={() => handleDocumentTypeChange(type)}
+                    className="h-5 w-5 accent-[#037F74]"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
           <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              variant="auth"
-              label="ID or passport number"
-              name="id_number"
-              autoComplete="off"
-              required
-              value={idNumber}
-              onChange={handleIdChange}
-              placeholder="SA ID or passport"
-              leading={<IdCard aria-hidden size={20} />}
-              helper="SA ID (13 digits) or passport number."
-              error={errors.id_number}
-            />
+            {documentType === 'sa_id' ? (
+              <Input
+                variant="auth"
+                label="South African ID number"
+                name="id_number"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                required
+                value={idNumber}
+                onChange={handleSaIdChange}
+                // No maxLength here: capping the RAW characters (before non-digits are stripped) would truncate
+                // a messy paste — e.g. 16 characters of "800-101-5009-087" — losing real digits past position 13
+                // before handleSaIdChange ever sees them. The 13-digit cap is enforced on the filtered result instead.
+                placeholder="13-digit ID number"
+                leading={<IdCard aria-hidden size={20} />}
+                helper={`${idNumber.length}/${ID_NUMBER_DIGITS} digits`}
+                error={errors.id_number}
+              />
+            ) : (
+              <Input
+                variant="auth"
+                label="Passport number"
+                name="id_number"
+                type="text"
+                autoComplete="off"
+                required
+                value={idNumber}
+                onChange={handlePassportChange}
+                maxLength={20}
+                placeholder="Passport number"
+                leading={<IdCard aria-hidden size={20} />}
+                helper="Letters and numbers, 6–20 characters."
+                error={errors.id_number}
+              />
+            )}
             <Input
               variant="auth"
               label="Date of birth"

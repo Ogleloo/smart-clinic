@@ -280,7 +280,7 @@ test.describe('Registration (Figma 33:49)', () => {
       ['Full name', true],
       ['Email address', true],
       ['Mobile number (optional)', false],
-      ['ID or passport number', true],
+      ['South African ID number', true],
       ['Date of birth', true],
       ['Confirm password', true],
     ] as const) {
@@ -313,7 +313,7 @@ test.describe('Registration (Figma 33:49)', () => {
     await visit(page, '/register')
     await page.getByLabel('Full name').fill('Thabo Mokoena')
     await page.getByLabel('Email address').fill('thabo@example.com')
-    await page.getByLabel('ID or passport number').fill('8001015009087')
+    await page.getByLabel('South African ID number').fill('8001015009087')
     await page.getByLabel('Date of birth').fill('1980-01-01')
     await page.getByLabel('Password', { exact: true }).fill('longenough')
     await page.getByLabel('Confirm password').fill('longenoughX')
@@ -336,13 +336,28 @@ test.describe('Registration (Figma 33:49)', () => {
   test('the SA ID date suggestion still works inside the V3 card', async ({ page, context }) => {
     const posts = await sealed(context)
     await visit(page, '/register')
-    await page.getByLabel('ID or passport number').fill('8001015009087')
+    await page.getByLabel('South African ID number').fill('8001015009087')
     await expect(page.getByLabel('Date of birth')).toHaveValue('1980-01-01')
     await expect(page.getByRole('status')).toContainText('filled in from your ID number')
 
-    await page.getByLabel('ID or passport number').fill('0506155012087') // fits two centuries
+    await page.getByLabel('South African ID number').fill('0506155012087') // fits two centuries
     await expect(page.getByRole('group', { name: /fits two birth years/i })).toBeVisible()
     await expect(page.getByLabel('Date of birth')).toHaveValue('')
+    expect(posts).toEqual([])
+  })
+
+  test('South African ID is the default document type; Passport is the explicit alternative, each enforced on the server too', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await expect(page.getByRole('radio', { name: 'South African ID' })).toBeChecked()
+    await expect(page.getByLabel('South African ID number')).toHaveAttribute('inputmode', 'numeric')
+
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await expect(page.getByLabel('Passport number')).toBeVisible()
+    await expect(page.getByLabel('South African ID number')).toHaveCount(0)
+
+    const lib = read('lib/registrationValidation.ts')
+    expect(lib).toMatch(/requirePassportNumber\(input\.id_number\) : requireSouthAfricanId\(input\.id_number\)/)
     expect(posts).toEqual([])
   })
 
@@ -459,6 +474,17 @@ test.describe('Verify account: OTP concurrency safety', () => {
     expect(resend).toMatch(/try \{[\s\S]*resend\(\{[\s\S]*\} catch \{[\s\S]*\} finally \{[\s\S]*resendingRef\.current = false/)
   })
 
+  test('source: starting either action checks the other’s ref synchronously, not only React state that is stale in the same tick', () => {
+    const src = read('components/auth/VerifyForm.tsx')
+    const verify = slice(src, 'async function handleVerify', 'async function handleResend')
+    const resend = src.slice(src.indexOf('async function handleResend'))
+    // resendState/verifying are state: a same-tick click on the other control reads them before React has
+    // rendered the update, so the synchronous ref is what actually closes the race — the state checks alone
+    // would not.
+    expect(verify).toMatch(/if \([^)]*resendingRef\.current[^)]*\) return/)
+    expect(resend).toMatch(/if \([^)]*submittingRef\.current[^)]*\) return/)
+  })
+
   test('verification in progress disables resend; releasing it (a network failure) leaves both controls usable again', async ({ page }) => {
     const requests = trackNonGet(page)
     await visit(page, '/verify?email=someone%40example.com')
@@ -536,6 +562,49 @@ test.describe('Verify account: OTP concurrency safety', () => {
     await expect(page.getByRole('button', { name: /resend code/i })).toBeEnabled()
     expect(requests.filter((r) => r.includes('/auth/v1/resend'))).toHaveLength(1)
     expect(requests.filter((r) => !r.includes('/auth/v1/resend'))).toEqual([])
+  })
+
+  /**
+   * The pairs above (and the "in progress disables the other" pair before them) prove the guard across a
+   * sustained in-flight window. These two prove it closes even with no window at all: Verify and Resend
+   * clicked back to back in the very same synchronous tick, with neither request artificially held open. If
+   * the cross-guard read only `resendState`/`verifying` (state, not yet re-rendered this tick), the second
+   * click here would slip through — this is exactly the race the refs close.
+   */
+  test('same tick: Verify then Resend — only the Verify request is sent; Resend never starts', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+    await fillCode(page)
+
+    await page.evaluate(() => {
+      const byText = (t: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(t)) as HTMLButtonElement
+      byText('Verify account').click()
+      byText('Resend code').click()
+    })
+
+    await expect(page.getByText('That code is not correct or has expired.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Verify account →' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: /resend code/i })).toBeEnabled()
+    expect(requests.filter((r) => r.includes('/auth/v1/verify'))).toHaveLength(1)
+    expect(requests.filter((r) => r.includes('/auth/v1/resend'))).toEqual([])
+  })
+
+  test('same tick: Resend then Verify — only the Resend request is sent; Verify never starts', async ({ page }) => {
+    const requests = trackNonGet(page)
+    await visit(page, '/verify?email=someone%40example.com')
+    await fillCode(page)
+
+    await page.evaluate(() => {
+      const byText = (t: string) => [...document.querySelectorAll('button')].find((b) => b.textContent?.includes(t)) as HTMLButtonElement
+      byText('Resend code').click()
+      byText('Verify account').click()
+    })
+
+    await expect(page.getByText("Couldn't send a new code. Try again.")).toBeVisible()
+    await expect(page.getByRole('button', { name: /resend code/i })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Verify account →' })).toBeEnabled()
+    expect(requests.filter((r) => r.includes('/auth/v1/resend'))).toHaveLength(1)
+    expect(requests.filter((r) => r.includes('/auth/v1/verify'))).toEqual([])
   })
 })
 

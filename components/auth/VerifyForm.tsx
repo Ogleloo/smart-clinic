@@ -114,9 +114,11 @@ export function VerifyForm({ email }: VerifyFormProps) {
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault()
-    // Also refuses while a resend is in flight: a resend in progress can invalidate the very code about to be
-    // submitted, so the two actions are mutually exclusive, not just each individually non-reentrant.
-    if (submittingRef.current || resendState === 'sending' || code.length !== DIGITS) return
+    // resendingRef (not just resendState) guards the same-tick case: a resend's ref flips synchronously the
+    // instant its click handler runs, before React has rendered the state update, so a Verify click landing in
+    // the same tick right after a Resend click must still see it. A resend in flight can also invalidate the
+    // very code about to be submitted, so the two actions are mutually exclusive, not just each non-reentrant.
+    if (submittingRef.current || resendingRef.current || resendState === 'sending' || code.length !== DIGITS) return
     submittingRef.current = true
     setVerifying(true)
     setVerifyError(null)
@@ -139,10 +141,12 @@ export function VerifyForm({ email }: VerifyFormProps) {
   }
 
   async function handleResend() {
-    // The ref guards the same-tick case (resendState hasn't re-rendered yet); the state checks guard the normal
-    // case (cooldown, an earlier resend still sending) and, together with `verifying`, refuse while a verify is
-    // in flight — a resend firing mid-verify would issue a new code while the one just typed is still checked.
-    if (resendingRef.current || cooldown > 0 || resendState === 'sending' || verifying) return
+    // submittingRef guards the same-tick case the same way resendingRef does above: a Verify click's ref flips
+    // synchronously before React renders `verifying`, so a Resend click landing in the same tick right after a
+    // Verify click must still see it — `verifying` alone (a same-tick-stale state read) would not catch it.
+    // resendingRef guards resend's own same-tick re-entrancy; the remaining checks guard the normal case
+    // (cooldown, an earlier resend still sending, or a verify already confirmed in flight).
+    if (resendingRef.current || submittingRef.current || cooldown > 0 || resendState === 'sending' || verifying) return
     resendingRef.current = true
     setResendState('sending')
     setResendMessage(null)

@@ -5,9 +5,11 @@ import {
   parseOptionalPhone,
   parseStaffName,
   requireDateOfBirth,
-  requireIdNumber,
+  requirePassportNumber,
+  requireSouthAfricanId,
 } from './profileValidation'
 
+export type DocumentType = 'sa_id' | 'passport'
 export type RegistrationField = 'full_name' | 'email' | 'phone' | 'date_of_birth' | 'id_number' | 'password' | 'confirm'
 export type RegistrationErrors = Partial<Record<RegistrationField, string>>
 
@@ -16,6 +18,12 @@ export type RegistrationInput = {
   email: string
   phone: string
   date_of_birth: string
+  /**
+   * Raw, like every other field here — read straight off the form/FormData and normalised below, never trusted
+   * as already being 'sa_id' | 'passport'. Anything other than exactly 'passport' is treated as 'sa_id', the
+   * stricter of the two rules: a forged or missing value can never relax validation, only tighten it.
+   */
+  document_type: string
   id_number: string
   password: string
 }
@@ -50,6 +58,7 @@ export function registrationInputFrom(form: FormData): RegistrationInput {
     email: get('email'),
     phone: get('phone'),
     date_of_birth: get('date_of_birth'),
+    document_type: get('document_type'),
     id_number: get('id_number'),
     password: get('password'),
   }
@@ -60,10 +69,12 @@ export function registrationInputFrom(form: FormData): RegistrationInput {
  * sees every problem before anything is sent) and again in the Server Action (which
  * is the one that counts).
  *
- * Date of birth and ID/passport number are required. When the number is a South African
- * ID, the date of birth must be one of the dates that ID can mean — a contradiction is
- * refused, never silently corrected. A passport number encodes nothing, so the date of
- * birth is whatever the person entered. The password is checked exactly as typed.
+ * Date of birth and ID/passport number are required. The document type (South African ID or passport) is an
+ * explicit choice, not inferred from what was typed, and is enforced here — the one place both the browser and
+ * the Server Action run — so selecting "Passport" can never be used to dodge the ID's own checksum. When the
+ * number is a South African ID, the date of birth must be one of the dates that ID can mean — a contradiction is
+ * refused, never silently corrected. A passport number encodes nothing, so the date of birth is whatever the
+ * person entered. The password is checked exactly as typed.
  */
 export function validateRegistration(
   input: RegistrationInput,
@@ -84,7 +95,8 @@ export function validateRegistration(
   const dob = requireDateOfBirth(input.date_of_birth, today)
   if (dob.error) errors.date_of_birth = dob.error
 
-  const idNumber = requireIdNumber(input.id_number)
+  const documentType: DocumentType = input.document_type === 'passport' ? 'passport' : 'sa_id'
+  const idNumber = documentType === 'passport' ? requirePassportNumber(input.id_number) : requireSouthAfricanId(input.id_number)
   if (idNumber.error) errors.id_number = idNumber.error
 
   if (dob.value && idNumber.value && isValidSouthAfricanId(idNumber.value) && !dobMatchesSaId(dob.value, idNumber.value, today)) {
