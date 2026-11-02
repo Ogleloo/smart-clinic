@@ -354,9 +354,18 @@ function ProfileSettingsFormInner({
  * full-page section — the password rules are unchanged, see app/actions/profile.ts's changePassword()), plus
  * Sign Out. The password fields are "Update password" rather than "Change password" so the toggle and the
  * submit button inside it never share an accessible name.
+ *
+ * initialOpenPassword lets a caller (the dashboard's "Change password" shortcut, via ?panel=password on
+ * /profile/settings — see app/(patient)/profile/settings/page.tsx) land with the panel already expanded
+ * instead of merely on the settings page. ChangePasswordForm's own "Current password" field is autoFocus, so
+ * opening this way also carries the browser's focus — and its native scroll-into-view — straight to it.
  */
-export function QuickActions() {
-  const [open, setOpen] = useState(false)
+export interface QuickActionsProps {
+  initialOpenPassword?: boolean
+}
+
+export function QuickActions({ initialOpenPassword = false }: QuickActionsProps = {}) {
+  const [open, setOpen] = useState(initialOpenPassword)
   const panelId = useId()
   const row = 'flex h-11 w-full items-center gap-2.5 rounded-sm border border-border bg-surface px-3 text-left text-base text-ink hover:bg-paper'
 

@@ -20,8 +20,19 @@ const PANEL_CARD = 'flex flex-col gap-4 rounded-lg border border-border bg-surfa
  * only, not approved or applied — there's no photo column or storage
  * bucket behind it, so the preview is the initials the rest of the
  * app shows, same as /profile.
+ *
+ * ?panel=password opens straight into the Change Password panel (the dashboard's "Change password" shortcut
+ * links here with it) — nothing sensitive travels in the query string, only which panel starts expanded.
+ * Opened without it, the page behaves exactly as before.
  */
-export default async function ProfileSettingsPage() {
+export default async function ProfileSettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ panel?: string | string[] }>
+}) {
+  const { panel } = await searchParams
+  const openPasswordPanel = panel === 'password'
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -116,7 +127,7 @@ export default async function ProfileSettingsPage() {
               Quick Actions
             </h2>
             <div className="h-px bg-border" />
-            <QuickActions />
+            <QuickActions initialOpenPassword={openPasswordPanel} />
           </section>
         </aside>
       </div>

@@ -33,7 +33,7 @@ export function Sidebar({ unreadCount, clinicName, clinicPhone }: SidebarProps) 
               key={item.href}
               href={item.href}
               aria-current={isActive ? 'page' : undefined}
-              className={`flex min-h-12 items-center gap-3 rounded-sm border-l-4 px-3 text-base transition-colors ${
+              className={`flex min-h-12 items-center gap-3 rounded-md border-l-4 px-3 text-base transition-colors ${
                 isActive
                   ? 'border-primary-700 bg-card-mint text-primary-700'
                   : 'border-transparent text-muted hover:bg-paper hover:text-ink'
@@ -56,7 +56,7 @@ export function Sidebar({ unreadCount, clinicName, clinicPhone }: SidebarProps) 
       <form action={logout} className="px-4">
         <button
           type="submit"
-          className="flex min-h-12 w-full items-center gap-3 rounded-sm border-l-4 border-transparent px-3 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
+          className="flex min-h-12 w-full items-center gap-3 rounded-md border-l-4 border-transparent px-3 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
         >
           <LogOut size={20} aria-hidden />
           Sign Out

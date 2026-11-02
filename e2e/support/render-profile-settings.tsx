@@ -10,7 +10,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import postcss from 'postcss'
 import tailwind from '@tailwindcss/postcss'
-import { ProfileSettingsForm, QuickActions } from '../../components/profile/ProfileSettingsForm'
+import { ProfileSettingsForm, QuickActions, type QuickActionsProps } from '../../components/profile/ProfileSettingsForm'
 
 const BASE = {
   fullName: 'Thabo Mokoena',
@@ -35,6 +35,8 @@ async function main() {
     // mangling it down to "12" on the very first render.
     legacyPassportShaped: renderToStaticMarkup(createElement(ProfileSettingsForm, { ...BASE, idNumber: 'AB-12' })),
     quickActions: renderToStaticMarkup(createElement(QuickActions)),
+    // What /profile/settings?panel=password renders — the dashboard's "Change password" shortcut.
+    quickActionsPasswordOpen: renderToStaticMarkup(createElement<QuickActionsProps>(QuickActions, { initialOpenPassword: true })),
   }
   const cssPath = 'app/globals.css'
   const result = await postcss([tailwind()]).process(readFileSync(cssPath, 'utf8'), { from: cssPath })
