@@ -1,33 +1,7 @@
-import type { ReactNode } from 'react'
 import { redirect, notFound } from 'next/navigation'
-import Link from 'next/link'
-import {
-  ArrowLeft,
-  Calendar,
-  Check,
-  CircleCheck,
-  Clock,
-  Hash,
-  ListOrdered,
-  MapPin,
-  Stethoscope,
-  Timer,
-  type LucideIcon,
-} from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { PatientStatusChip } from '@/components/patient/PatientStatusChip'
-import { ConfidenceChip } from '@/components/ui/ConfidenceChip'
-import { CancelAppointmentButton } from '@/components/booking/CancelAppointmentButton'
-import { LinkButton } from '@/components/ui/LinkButton'
-import { PAGE_CLASS, PageHeader, TYPE } from '@/components/patient/PageHeader'
-import { toConfidenceLevel } from '@/lib/confidence'
-import { formatClinicDate, formatClinicTime } from '@/lib/clinicTime'
-import { BEFORE_VISIT_CHECKLIST } from '@/lib/beforeVisitChecklist'
-
-type TypicalTime =
-  | { kind: 'known'; minutes: number; sampleCount: number; confidence: string }
-  | { kind: 'no_data' }
-  | { kind: 'unavailable' }
+import { PAGE_CLASS } from '@/components/patient/PageHeader'
+import { AppointmentDetailsView, type TypicalTime } from '@/components/patient/AppointmentDetailsView'
 
 /**
  * service_consultation_stats() is the same history the wait estimate is
@@ -62,11 +36,16 @@ async function getTypicalTime(
 }
 
 /**
- * Appointment details — V3.
+ * Appointment details — V3 (Figma 88:470).
  *
  * RLS scopes appointments to the caller (ADR-010): if this id belongs to
  * someone else, the query returns 0 rows — not an authorization error —
  * so it's handled the same as "doesn't exist" via notFound().
+ *
+ * All presentation lives in AppointmentDetailsView, a pure component
+ * that takes the appointment, the patient's name and the typical-time
+ * result as props — this page's only job is to fetch and hand them
+ * over.
  */
 export default async function AppointmentDetailsPage({
   params,
@@ -80,6 +59,21 @@ export default async function AppointmentDetailsPage({
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('auth_user_id', user.id)
+    .single()
+
+  if (profileError || !profile) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-base font-semibold text-ink">Couldn&rsquo;t load your account</p>
+        <p className="text-base text-muted">Please refresh the page. If this keeps happening, contact the clinic.</p>
+      </main>
+    )
+  }
 
   const { data: appointment, error } = await supabase
     .from('appointments')
@@ -100,105 +94,10 @@ export default async function AppointmentDetailsPage({
   if (!appointment) notFound()
 
   const typical = await getTypicalTime(supabase, appointment.service_id)
-  const isActive = appointment.status === 'booked' || appointment.status === 'checked_in'
-
-  const clinic = appointment.service?.clinic
-  const location = clinic ? [clinic.name, clinic.city].filter(Boolean).join(', ') : null
-
-  const fields: { label: string; icon: LucideIcon; value: ReactNode }[] = [
-    {
-      label: 'Reference number',
-      icon: Hash,
-      value: <span className="font-mono">{appointment.reference ?? '—'}</span>,
-    },
-    { label: 'Service', icon: Stethoscope, value: appointment.service?.name ?? 'Appointment' },
-    {
-      label: 'Date',
-      icon: Calendar,
-      value: formatClinicDate(appointment.scheduled_time, { weekday: 'long', month: 'long' }),
-    },
-    { label: 'Time', icon: Clock, value: <span className="tabular">{formatClinicTime(appointment.scheduled_time)}</span> },
-    ...(location ? [{ label: 'Location', icon: MapPin, value: location }] : []),
-    { label: 'Status', icon: CircleCheck, value: <PatientStatusChip status={appointment.status} /> },
-    {
-      label: 'Typical consultation time',
-      icon: Timer,
-      value:
-        typical.kind === 'known' ? (
-          <span className="flex flex-wrap items-center gap-2">
-            About {typical.minutes} min with the nurse
-            <ConfidenceChip level={toConfidenceLevel(typical.confidence)} sampleCount={typical.sampleCount} />
-          </span>
-        ) : typical.kind === 'no_data' ? (
-          <span className="font-normal text-muted">
-            Not enough completed visits for this service yet to say how long it usually takes.
-          </span>
-        ) : (
-          <span className="font-normal text-muted">Couldn&rsquo;t load this right now.</span>
-        ),
-    },
-  ]
 
   return (
     <main className={PAGE_CLASS}>
-      <Link href="/appointments" className="inline-flex w-fit items-center gap-2 text-sm font-semibold text-primary-700">
-        <ArrowLeft size={20} aria-hidden />
-        Back to appointments
-      </Link>
-
-      <div className="flex w-full max-w-2xl flex-col gap-6">
-        <PageHeader title="Appointment details" />
-
-        <section className="flex flex-col gap-5 rounded-lg border border-border bg-surface p-6">
-          {appointment.service?.description && (
-            <p className="text-base text-muted">{appointment.service.description}</p>
-          )}
-          <dl className="flex flex-col gap-5">
-            {fields.map(({ label, icon: Icon, value }) => (
-              <div key={label} className="flex items-start gap-4">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card-mint text-primary-700">
-                  <Icon size={20} aria-hidden />
-                </span>
-                <div className="flex min-w-0 flex-col gap-1">
-                  <dt className="text-xs text-muted">{label}</dt>
-                  <dd className="text-base font-semibold text-ink">{value}</dd>
-                </div>
-              </div>
-            ))}
-          </dl>
-          <p className="text-xs text-muted">Typical consultation time is time with the nurse, not your waiting time.</p>
-
-          {appointment.status === 'checked_in' && (
-            <LinkButton href="/queue" variant="primary" fullWidth>
-              <ListOrdered size={20} className="mr-2" aria-hidden />
-              Follow my queue
-            </LinkButton>
-          )}
-
-          <CancelAppointmentButton appointmentId={appointment.id} status={appointment.status} />
-        </section>
-
-        {isActive && (
-          <section className="flex flex-col gap-4 rounded-lg border border-border bg-surface p-6" aria-labelledby="before-visit">
-            <h2 id="before-visit" className={TYPE.section}>
-              Before your visit
-            </h2>
-            <ul className="flex flex-col gap-3">
-              {[
-                ...BEFORE_VISIT_CHECKLIST,
-                ...(appointment.reference ? [`Quote your reference ${appointment.reference} at reception.`] : []),
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-3 text-base text-ink">
-                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-700 text-white">
-                    <Check size={14} aria-hidden />
-                  </span>
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
+      <AppointmentDetailsView fullName={profile.full_name} appointment={appointment} typical={typical} />
     </main>
   )
 }
