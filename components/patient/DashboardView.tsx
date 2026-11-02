@@ -39,7 +39,6 @@ export interface NextAppointmentSummary {
 
 export interface DashboardViewProps {
   fullName: string
-  idNumber: string | null
   nextAppointment: NextAppointmentSummary | null
   appointmentError: boolean
   activeEntries: ActiveQueueEntry[]
@@ -81,7 +80,7 @@ const QUICK_ACTIONS: { href: string; label: string; icon: LucideIcon; bg: string
   { href: '/notifications', label: 'Notifications', icon: Bell, bg: 'bg-[#FFF0E6]', showsUnread: true },
   { href: '/profile', label: 'My profile', icon: User, bg: 'bg-card-mint' },
   { href: '/profile/settings', label: 'Update my details', icon: Pencil, bg: 'bg-card-blue' },
-  { href: '/profile/settings#password', label: 'Change password', icon: KeyRound, bg: 'bg-card-purple' },
+  { href: '/profile/settings?panel=password', label: 'Change password', icon: KeyRound, bg: 'bg-card-purple' },
 ]
 
 const CARD = 'flex flex-col gap-5 rounded-lg border border-border bg-surface p-6 shadow-[0_12px_16px_rgba(5,48,46,0.08)]'
@@ -101,8 +100,13 @@ const ARROW_CHIP =
  * expects exactly one). The real app's own Quick Actions — profile and password-management shortcuts found
  * nowhere else on this page — are kept exactly as they were (patient-v3.spec.ts asserts these four by name:
  * Notifications, My profile, Update my details, Change password); only the tile-grid STYLE is Figma's.
+ *
+ * The account chip shows name and role only — never the ID/passport number. Figma's static reference happens
+ * to show one, but that's a design mockup's sample data, not a license to put a national ID on screen every
+ * time this page loads; the full identity record stays behind the existing profile/settings workflows, where
+ * it belongs. The dashboard page no longer even fetches id_number (see app/(patient)/dashboard/page.tsx).
  */
-export function DashboardView({ fullName, idNumber, nextAppointment, appointmentError, activeEntries, clinic, unreadCount, today }: DashboardViewProps) {
+export function DashboardView({ fullName, nextAppointment, appointmentError, activeEntries, clinic, unreadCount, today }: DashboardViewProps) {
   const firstName = fullName.split(' ')[0]!
   const hoursLines = clinic && clinic.hours.length > 0 ? formatOpeningHours(clinic.hours).split(' · ') : []
   const todayLine = clinic ? todayHoursLine(clinic.hours, today) : null
@@ -116,7 +120,7 @@ export function DashboardView({ fullName, idNumber, nextAppointment, appointment
           the full-width greeting instead of squeezing a sliver of photo in beside it. */}
       <div className="relative flex min-h-[160px] flex-col gap-4 overflow-hidden rounded-[24px] bg-card-mint p-6 sm:flex-row sm:flex-wrap sm:items-center sm:gap-6 sm:p-8">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h1 className={TYPE.pageTitle}>
+          <h1 className={`${TYPE.pageTitle} break-words`}>
             {greetingForNow()}, <span className="text-primary-700">{firstName}</span>
           </h1>
           <p className="text-base text-muted">Manage your appointments and stay updated with your queue.</p>
@@ -124,16 +128,14 @@ export function DashboardView({ fullName, idNumber, nextAppointment, appointment
 
         <Link
           href="/profile"
-          className="relative z-10 flex w-fit shrink-0 items-center gap-3 rounded-[24px] bg-surface py-2 pl-3 pr-4 shadow-[0_12px_16px_rgba(5,48,46,0.08)] hover:opacity-90"
+          className="relative z-10 flex w-full min-w-0 items-center gap-3 rounded-[24px] bg-surface py-2 pl-3 pr-4 shadow-[0_12px_16px_rgba(5,48,46,0.08)] hover:opacity-90 sm:w-fit sm:max-w-[280px] sm:shrink-0"
         >
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-700 text-sm font-semibold text-white" aria-hidden>
             {initials(fullName) || '–'}
           </span>
-          <span className="flex flex-col">
-            <span className="text-base leading-6 text-ink">{fullName}</span>
-            <span className="text-xs leading-[18px] text-muted">
-              Patient{idNumber ? <> &bull; <span className="font-mono">{idNumber}</span></> : null}
-            </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-base leading-6 text-ink">{fullName}</span>
+            <span className="text-xs leading-[18px] text-muted">Patient</span>
           </span>
           <ChevronDown size={14} className="shrink-0 text-muted" aria-hidden />
         </Link>

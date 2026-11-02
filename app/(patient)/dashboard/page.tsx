@@ -39,7 +39,7 @@ export default async function DashboardPage() {
 
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('full_name, id_number')
+    .select('full_name')
     .eq('auth_user_id', user.id)
     .single()
 
@@ -73,7 +73,6 @@ export default async function DashboardPage() {
     <main className={PAGE_CLASS}>
       <DashboardView
         fullName={profile.full_name}
-        idNumber={profile.id_number}
         nextAppointment={nextAppointment}
         appointmentError={!!appointmentError}
         activeEntries={activeEntries}

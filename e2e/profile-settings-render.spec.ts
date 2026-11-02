@@ -15,7 +15,10 @@ import { execFileSync } from 'node:child_process'
  */
 
 type Rendered = {
-  states: Record<'complete' | 'missingIdentity' | 'noClinic' | 'legacyPassportShaped' | 'quickActions', string>
+  states: Record<
+    'complete' | 'missingIdentity' | 'noClinic' | 'legacyPassportShaped' | 'quickActions' | 'quickActionsPasswordOpen',
+    string
+  >
   css: string
 }
 let rendered: Rendered
@@ -119,6 +122,22 @@ test.describe('QuickActions markup (real component)', () => {
   test('Sign Out is a real form, not a link pretending to be one', () => {
     const html = rendered.states.quickActions
     expect(html).toMatch(/<form[^>]*><button type="submit"[^>]*>[\s\S]*?Sign Out[\s\S]*?<\/button><\/form>/)
+  })
+
+  test('initialOpenPassword renders the panel already expanded, with the real password form inside it — not merely a page that could open it', () => {
+    const html = rendered.states.quickActionsPasswordOpen
+    const toggle = html.match(/<button type="button"[^>]*aria-expanded="true"[^>]*>[\s\S]*?Change Password[\s\S]*?<\/button>/)
+    expect(toggle).toBeTruthy()
+    expect(html).not.toContain('hidden=""') // the panel is not hidden
+    // The real ChangePasswordForm, not a placeholder: its own labelled fields and submit are present.
+    expect(html).toMatch(/<form aria-label="Change password"/)
+    expect(html).toContain('Current password')
+    expect(html).toContain('New password')
+    expect(html).toContain('Confirm new password')
+    expect(html).toMatch(/<button type="submit"[^>]*>Update password<\/button>/)
+    // Current password is the field a user opening this shortcut needs fastest — it carries the keyboard focus.
+    const currentPasswordInput = html.match(/<input[^>]*name="current_password"[^>]*>/)?.[0] ?? ''
+    expect(currentPasswordInput).toContain('autofocus=""')
   })
 })
 

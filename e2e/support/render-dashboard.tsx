@@ -36,7 +36,6 @@ const CLINIC: PatientClinic = {
 
 const BASE: DashboardViewProps = {
   fullName: 'Sipho Dlamini',
-  idNumber: '8001015009087',
   nextAppointment: null,
   appointmentError: false,
   activeEntries: [],
@@ -105,7 +104,9 @@ async function main() {
     noPhoneClinic: renderToStaticMarkup(createElement(DashboardView, { ...BASE, clinic: { ...CLINIC, phone: null } })),
     noHoursClinic: renderToStaticMarkup(createElement(DashboardView, { ...BASE, clinic: { ...CLINIC, hours: [] } })),
     unreadNotifications: renderToStaticMarkup(createElement(DashboardView, { ...BASE, unreadCount: 3 })),
-    noIdNumber: renderToStaticMarkup(createElement(DashboardView, { ...BASE, idNumber: null })),
+    // Deliberately long, synthetic name — checks the greeting and account chip don't clip, overlap or force
+    // horizontal scrolling when a real patient's name is longer than the "Sipho Dlamini" fixture above.
+    longName: renderToStaticMarkup(createElement(DashboardView, { ...BASE, fullName: 'Keabetswe Palesa Nkosinathi Mahlangu-Dlamini' })),
   }
 
   const cssPath = 'app/globals.css'

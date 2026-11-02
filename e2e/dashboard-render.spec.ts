@@ -28,7 +28,7 @@ type States =
   | 'noPhoneClinic'
   | 'noHoursClinic'
   | 'unreadNotifications'
-  | 'noIdNumber'
+  | 'longName'
 
 type Rendered = { states: Record<States, string>; css: string }
 let rendered: Rendered
@@ -51,18 +51,14 @@ test.describe('DashboardView markup (real component)', () => {
     expect(html).toContain('Manage your appointments and stay updated with your queue.')
   })
 
-  test('the account chip shows the real full name and ID, never Figma’s sample patient number', () => {
+  test('the account chip shows the real full name and role, never Figma’s sample patient number or the patient’s own ID', () => {
     const html = rendered.states.noAppointmentNoQueue
     expect(html).toContain('Sipho Dlamini')
-    expect(html).toContain('8001015009087')
+    expect(html).toMatch(/>Patient<\/span>/)
+    expect(html).not.toContain('•') // no bullet — there's nothing after "Patient" to separate from
+    expect(html).not.toContain('8001015009087') // the chip never shows the real ID either, not just Figma's
     expect(html).not.toContain('202341515')
     expect(html).not.toContain('Thamsanqa')
-  })
-
-  test('with no ID on file, the account chip says "Patient" with no dangling bullet', () => {
-    const html = rendered.states.noIdNumber
-    expect(html).toMatch(/>Patient<\/span>/)
-    expect(html).not.toContain('•')
   })
 
   test('no upcoming appointments: the empty state offers a way to book, and the queue card explains why it’s empty', () => {
@@ -165,6 +161,13 @@ test.describe('DashboardView markup (real component)', () => {
     }
   })
 
+  test('Change password links to a working shortcut that actually opens the password panel, not just the settings page (the #password anchor PR #46 removed no longer exists)', () => {
+    const html = rendered.states.noAppointmentNoQueue
+    const changePassword = html.match(/<a href="[^"]*"[^>]*>[\s\S]*?Change password[\s\S]*?<\/a>/)![0]
+    expect(changePassword).toContain('href="/profile/settings?panel=password"')
+    expect(changePassword).not.toContain('#password')
+  })
+
   test('the three action cards link to the real routes, with Figma-aligned copy naming the real clinic', () => {
     const html = rendered.states.noAppointmentNoQueue
     expect(html).toMatch(/href="\/book"[^>]*>/)
@@ -245,5 +248,48 @@ test.describe('DashboardView layout (real component + real compiled CSS)', () =>
     const next = (await page.locator('section[aria-labelledby="next-appointment"]').boundingBox())!
     const queue = (await page.locator('section[aria-labelledby="current-queue"]').boundingBox())!
     expect(queue.y).toBeGreaterThanOrEqual(next.y + next.height - 1)
+  })
+
+  // A deliberately long, synthetic patient name (see e2e/support/render-dashboard.tsx) — the greeting and the
+  // account chip must neither clip it nor force the page to scroll sideways at any of the four task widths.
+  for (const width of [1440, 768, 390, 320]) {
+    test(`${width}px: a long patient name causes no horizontal scrolling and no overlap between the chip's avatar, name and chevron`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      await page.setContent(page$(rendered.states.longName))
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      expect(overflow).toBeLessThanOrEqual(0)
+
+      const chip = page.getByRole('link', { name: /Keabetswe/ })
+      const chipBox = (await chip.boundingBox())!
+      expect(chipBox.x).toBeGreaterThanOrEqual(0)
+      expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(width + 1)
+
+      // Avatar, name and chevron sit left-to-right with no overlap, in that order — truncation shrinks the
+      // name text, it never pushes a sibling control out from under it.
+      const avatarBox = (await chip.locator('span[aria-hidden]').first().boundingBox())!
+      const nameBox = (await chip.locator('span.truncate').boundingBox())!
+      const chevronBox = (await chip.locator('svg').last().boundingBox())!
+      expect(nameBox.x).toBeGreaterThanOrEqual(avatarBox.x + avatarBox.width - 1)
+      expect(chevronBox.x).toBeGreaterThanOrEqual(nameBox.x + nameBox.width - 1)
+    })
+  }
+
+  test('a long patient name is truncated with a visible ellipsis where it doesn’t fit, rather than silently clipped', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 1200 })
+    await page.setContent(page$(rendered.states.longName))
+    const nameEl = page.locator('span.truncate')
+    const textOverflow = await nameEl.evaluate((el) => getComputedStyle(el).textOverflow)
+    expect(textOverflow).toBe('ellipsis')
+    // The full name is still in the DOM (readable by assistive tech / copyable) — only the visual box clips it.
+    await expect(nameEl).toHaveText('Keabetswe Palesa Nkosinathi Mahlangu-Dlamini')
+  })
+
+  test('the greeting itself wraps rather than overflowing when the first name is long', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 1200 })
+    await page.setContent(page$(rendered.states.longName))
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    expect(overflow).toBeLessThanOrEqual(0)
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Keabetswe')
   })
 })
