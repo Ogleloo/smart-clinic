@@ -398,7 +398,7 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await expect(page.getByLabel('ID or passport number')).toHaveAttribute('required', '')
     await expect(page.getByLabel('Full name')).toHaveAttribute('required', '')
     await expect(page.getByText(/\(optional\)/i)).toHaveCount(1)
-    await expect(page.getByLabel('Phone (optional)')).not.toHaveAttribute('required', '')
+    await expect(page.getByLabel('Mobile number (optional)')).not.toHaveAttribute('required', '')
   })
 
   test('an empty submit shows an error under every required field, focuses the first, and sends nothing', async ({ page, context }) => {
@@ -447,7 +447,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     const posts = await sealed(context)
     await visit(page, '/register')
     const field = page.getByLabel('Password', { exact: true })
-    const toggle = page.getByRole('button', { name: 'Show password' })
+    const toggle = page.getByRole('button', { name: 'Show password' }).first() // the Confirm field has one too
 
     await expect(field).toHaveAttribute('type', 'password')
     await expect(field).toHaveAttribute('autocomplete', 'new-password')
@@ -459,7 +459,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     await expect(field).toHaveAttribute('type', 'text')
     await expect(field).toHaveValue('s3cret-pass')
     await expect(field).toHaveAttribute('autocomplete', 'new-password')
-    await page.getByRole('button', { name: 'Hide password' }).click()
+    await page.getByRole('button', { name: 'Hide password' }).first().click()
     await expect(field).toHaveAttribute('type', 'password')
     await expect(field).toHaveValue('s3cret-pass')
 
@@ -474,7 +474,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     const field = page.getByLabel('Password', { exact: true })
     await field.focus()
     await page.keyboard.press('Tab')
-    await expect(page.getByRole('button', { name: 'Show password' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Show password' }).first()).toBeFocused()
     await page.keyboard.press('Enter')
     await expect(field).toHaveAttribute('type', 'text')
     await page.keyboard.press('Space')
@@ -625,7 +625,7 @@ test.describe('password rules on the registration form (real page, nothing submi
 
   async function fillValidExceptPassword(page: Page) {
     await page.getByLabel('Full name').fill('Thabo Mokoena')
-    await page.getByLabel('Email').fill('thabo@example.com')
+    await page.getByLabel('Email address').fill('thabo@example.com')
     await page.getByLabel('ID or passport number').fill(SA_ID)
     await page.getByLabel('Date of birth').fill('1980-01-01')
   }
@@ -653,6 +653,7 @@ test.describe('password rules on the registration form (real page, nothing submi
     await visit(page, '/register')
     await fillValidExceptPassword(page)
     await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+    await page.getByLabel('Confirm password').fill('correct horse battery staple')
     await page.getByRole('button', { name: 'Create account' }).click()
     // Validation passed, so the form action was attempted — and the sealed context aborted that POST.
     await expect.poll(() => posts.length, { timeout: 30_000 }).toBeGreaterThan(0)
@@ -663,21 +664,60 @@ test.describe('password rules on the registration form (real page, nothing submi
 test.describe('email verification code entry (real page, nothing submitted)', () => {
   test.setTimeout(180_000)
 
-  test('accepts digits only, six at most, and enables Verify only at six; resend is offered', async ({ page, context }) => {
+  const boxes = (page: Page) => page.getByRole('group', { name: 'Verification code' }).getByRole('textbox')
+
+  test('six boxes, digits only, focus advances, and Verify is enabled only at six; resend is offered', async ({ page, context }) => {
     const posts = await sealed(context)
     await visit(page, '/verify?email=someone%40example.com')
-    const code = page.getByLabel('Verification code')
-    const verify = page.getByRole('button', { name: 'Verify' })
-    await expect(page.getByText('6-digit code')).toBeVisible()
+    const verify = page.getByRole('button', { name: 'Verify account' })
+    await expect(boxes(page)).toHaveCount(6)
     await expect(verify).toBeDisabled()
 
-    await code.fill('12ab34')
-    await expect(code).toHaveValue('1234')
+    await boxes(page).nth(0).pressSequentially('1')
+    await expect(boxes(page).nth(0)).toHaveValue('1')
+    await expect(boxes(page).nth(1)).toBeFocused() // focus moves on to the next box
+
+    await boxes(page).nth(1).pressSequentially('a') // a non-digit is simply not accepted
+    await expect(boxes(page).nth(1)).toHaveValue('')
     await expect(verify).toBeDisabled()
-    await code.fill('12345678') // an eight-digit code cannot be entered: only six are kept
-    await expect(code).toHaveValue('123456')
+
+    for (const [i, d] of [...'23456'].entries()) await boxes(page).nth(i + 1).pressSequentially(d)
+    for (const [i, d] of [...'123456'].entries()) await expect(boxes(page).nth(i)).toHaveValue(d)
     await expect(verify).toBeEnabled()
-    await expect(page.getByRole('button', { name: /send a new code/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /resend code/i })).toBeVisible()
     expect(posts).toEqual([])
+  })
+
+  test('a whole code arriving in one box (autofill or paste) spreads across the six, and extra digits are dropped', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    await boxes(page).nth(0).fill('1234567890')
+    for (const [i, d] of [...'123456'].entries()) await expect(boxes(page).nth(i)).toHaveValue(d)
+    await expect(page.getByRole('button', { name: 'Verify account' })).toBeEnabled()
+    expect(posts).toEqual([])
+  })
+
+  test('backspace on an empty box steps back and clears the previous digit', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    await boxes(page).nth(0).pressSequentially('12')
+    await expect(boxes(page).nth(2)).toBeFocused()
+    await page.keyboard.press('Backspace')
+    await expect(boxes(page).nth(1)).toHaveValue('')
+    await expect(boxes(page).nth(1)).toBeFocused()
+  })
+
+  test('it never claims an email was sent: only a resend Supabase accepted may say that', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    const body = await page.locator('main').innerText()
+    expect(body).not.toMatch(/we.{0,3}ve sent|we sent|has been sent|check your (inbox|email)/i)
+    expect(body).toContain('Enter the 6-digit verification code for')
+    expect(body).toContain('someone@example.com')
+    // The only "on its way" wording lives behind a successful resend call, which this offline page never makes.
+    expect(body).not.toContain('on its way')
+    expect(readFileSync('components/auth/VerifyForm.tsx', 'utf8')).toMatch(
+      /setResendState\('sent'\)[\s\S]{0,120}A new code is on its way/
+    )
   })
 })

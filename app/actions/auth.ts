@@ -12,7 +12,7 @@ import {
   type RegistrationErrors,
 } from '@/lib/registrationValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
-import { validatePassword } from '@/lib/passwordValidation'
+import { passwordsMatch, validatePassword } from '@/lib/passwordValidation'
 
 export type ActionState = { error?: string; success?: string }
 
@@ -34,6 +34,11 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
     return { error: first ? errors[first] : 'Check your details and try again.', fieldErrors: errors }
   }
   const { fullName, email, phone, password, dateOfBirth, idNumber } = values
+
+  // The confirmation belongs to the form, not to the account, so it is checked here rather than inside
+  // validateRegistration — but it is still checked on the server, which is the run that counts.
+  const confirmed = passwordsMatch(password, String(formData.get('confirm') ?? ''))
+  if (!confirmed.ok) return { error: confirmed.error, fieldErrors: { confirm: confirmed.error } }
 
   const supabase = await createClient()
   const origin = (await headers()).get('origin') ?? ''

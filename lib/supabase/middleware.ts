@@ -41,6 +41,8 @@ export async function updateSession(request: NextRequest) {
     path === '/' ||
     path.startsWith('/login') ||
     path.startsWith('/register') ||
+    // The V3 welcome entry (Figma 22:39) only offers "create account" and "log in": public by definition.
+    path.startsWith('/welcome') ||
     // Reached before a session exists (or, right now, before Confirm
     // Email is switched on — see app/actions/auth.ts's register()):
     // gating this behind `user` would bounce an unconfirmed signup

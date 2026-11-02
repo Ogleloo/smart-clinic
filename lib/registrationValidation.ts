@@ -8,7 +8,7 @@ import {
   requireIdNumber,
 } from './profileValidation'
 
-export type RegistrationField = 'full_name' | 'email' | 'phone' | 'date_of_birth' | 'id_number' | 'password'
+export type RegistrationField = 'full_name' | 'email' | 'phone' | 'date_of_birth' | 'id_number' | 'password' | 'confirm'
 export type RegistrationErrors = Partial<Record<RegistrationField, string>>
 
 export type RegistrationInput = {
@@ -37,6 +37,9 @@ export const REGISTRATION_FIELD_ORDER: RegistrationField[] = [
   'date_of_birth',
   'id_number',
   'password',
+  // Checked by the form and the Server Action rather than validateRegistration: the confirmation is a property of
+  // the form, not of the account being created, and only the password itself is ever stored.
+  'confirm',
 ]
 
 /** Read the registration fields off a submitted form (client) or FormData (server). */

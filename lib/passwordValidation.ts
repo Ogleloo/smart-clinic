@@ -21,6 +21,15 @@ export const PASSWORD_MIN_CHARACTERS = 8
 
 export type PasswordCheck = { ok: true } | { ok: false; error: string }
 
+/**
+ * The second half of "set a password" wherever a form asks for it twice (registration, reset password). Compared
+ * exactly as typed — trimming here would let two different passwords pass and store the untrimmed one.
+ */
+export function passwordsMatch(password: string, confirm: string): PasswordCheck {
+  if (confirm.length === 0) return { ok: false, error: 'Confirm your password.' }
+  return password === confirm ? { ok: true } : { ok: false, error: 'Those passwords don’t match.' }
+}
+
 export function validatePassword(password: string, { label = 'Password' }: { label?: string } = {}): PasswordCheck {
   if (password.length === 0) return { ok: false, error: `Enter a ${label.toLowerCase()}.` }
   if (password.trim().length === 0) return { ok: false, error: `${label} can’t be only spaces.` }
