@@ -161,6 +161,29 @@ test.describe('validateProfileEdit: date of birth against the South African ID o
     const r = validateProfileEdit({ ...BASE, id_number: SA_ID, date_of_birth: '1981-01-01' }, current, TODAY)
     expect(r.errors.date_of_birth).toMatch(/doesn.t match the south african id/i)
   })
+  test('changing only the South African ID still checks the new one against an unchanged date of birth', () => {
+    // SA_ID means 1 Jan 1980; a DOB of 1981 contradicts it.
+    const current: ProfileEditCurrent = { id_number: 'A1234567', date_of_birth: '1981-01-01' }
+    const r = validateProfileEdit({ ...BASE, id_number: SA_ID, date_of_birth: '1981-01-01' }, current, TODAY)
+    expect(r.errors.date_of_birth).toMatch(/doesn.t match the south african id/i)
+  })
+  test('a legacy profile with a valid South African ID and a mismatched stored date of birth is preserved exactly when the person changes only their phone number', () => {
+    // The pair predates this cross-check (or was never consistent to begin with) — SA_ID means 1 Jan 1980,
+    // but the stored date of birth is a different, equally real date. Neither field is being touched.
+    const current: ProfileEditCurrent = { id_number: SA_ID, date_of_birth: '1999-12-31' }
+    const r = validateProfileEdit({ ...BASE, id_number: SA_ID, date_of_birth: '1999-12-31', phone: '082 123 4567' }, current, TODAY)
+    expect(r.errors).toEqual({})
+    expect(r.values).toEqual({ fullName: 'Thabo Mokoena', phone: '082 123 4567', dateOfBirth: '1999-12-31', idNumber: SA_ID })
+  })
+  test('the same inconsistent legacy pair is rejected the moment either side is actually changed', () => {
+    const current: ProfileEditCurrent = { id_number: SA_ID, date_of_birth: '1999-12-31' }
+    // date of birth changed (to a different, still-contradicting date); ID left exactly as it was
+    const dobChanged = validateProfileEdit({ ...BASE, id_number: SA_ID, date_of_birth: '2000-01-01' }, current, TODAY)
+    expect(dobChanged.errors.date_of_birth).toMatch(/doesn.t match the south african id/i)
+    // ID changed to a different, still-valid-shaped but inconsistent SA ID; date of birth left exactly as it was
+    const idChanged = validateProfileEdit({ ...BASE, id_number: '0506155012087', date_of_birth: '1999-12-31' }, current, TODAY)
+    expect(idChanged.errors.date_of_birth).toMatch(/doesn.t match the south african id/i)
+  })
 })
 
 test.describe('profileEditInputFrom', () => {

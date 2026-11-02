@@ -100,9 +100,17 @@ export function validateProfileEdit(
   }
   if (dob.error) errors.date_of_birth = dob.error
 
-  // Only when both sides are concrete, real values — never forces a relationship onto a legacy field that
-  // was never checked when it was first saved, and never fires just because one side is still empty.
-  if (dob.value && idNumber.value && isValidSouthAfricanId(idNumber.value) && !dobMatchesSaId(dob.value, idNumber.value, today)) {
+  // Only when both sides are concrete, real values, AND at least one of them is actually being changed right
+  // now — never forces a relationship onto a pair of legacy fields that were never checked against each other
+  // when they were first saved. An inconsistent pair that predates this rule is preserved exactly as it is
+  // until the person changes one side of it themselves; changing either side re-checks it against the other.
+  if (
+    dob.value &&
+    idNumber.value &&
+    isValidSouthAfricanId(idNumber.value) &&
+    !(idUnchanged && dobUnchanged) &&
+    !dobMatchesSaId(dob.value, idNumber.value, today)
+  ) {
     errors.date_of_birth = 'That date of birth doesn’t match the South African ID number on file.'
   }
 

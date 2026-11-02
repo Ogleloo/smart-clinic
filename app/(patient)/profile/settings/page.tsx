@@ -106,7 +106,8 @@ export default async function ProfileSettingsPage() {
             </div>
             <div className="h-px bg-border" />
             <p className="text-xs leading-[18px] text-muted">
-              Your photo appears on your profile. If you remove it, we&rsquo;ll show your initials.
+              Photo upload isn&rsquo;t available yet, so your initials are shown wherever your photo would
+              appear.
             </p>
           </section>
 

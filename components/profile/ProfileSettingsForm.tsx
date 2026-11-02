@@ -150,12 +150,17 @@ function ProfileSettingsFormInner({
     // Different value shapes (digits only vs. letters and digits); carrying one into the other is never
     // meaningful, and switching never infers which kind an existing value was.
     setIdValue('')
-    setClientErrors((prev) => {
-      if (!prev || !('id_number' in prev)) return prev
-      const rest = { ...prev }
-      delete rest.id_number
-      return rest
-    })
+    // Clears a stale id_number error regardless of where it came from — a client-side attempt (clientErrors)
+    // or a server round-trip (state.fieldErrors, read when clientErrors is still null because nothing has
+    // failed on the client yet — e.g. the very first submit went straight to the server with no client-side
+    // check in between). Switching document type always starts the field blank, so neither source's complaint
+    // about the OLD value says anything about the new, empty one. Every OTHER field's error — whichever source
+    // it came from — is carried over untouched; a genuine, unrelated failure is never hidden by this.
+    const base = clientErrors ?? state.fieldErrors ?? {}
+    if (!('id_number' in base)) return
+    const rest = { ...base }
+    delete rest.id_number
+    setClientErrors(rest)
   }
 
   function handleIdChange(e: ChangeEvent<HTMLInputElement>) {
