@@ -180,7 +180,8 @@ test('booking wizard: service descriptions, 3 steps, success page shows the data
 
     await page.waitForURL(/\/book\/confirmed\/[0-9a-f-]+$/, { timeout: 30_000 })
     appointmentId = page.url().split('/').pop()!
-    await expect(page.getByRole('heading', { name: 'Appointment booked' })).toBeVisible()
+    // V3 (Figma 68:77): the confirmation heading reads "Appointment confirmed", not "Appointment booked".
+    await expect(page.getByRole('heading', { name: 'Appointment confirmed' })).toBeVisible()
     const shownReference = (await page.getByTestId('appointment-reference').innerText()).trim()
     expect(shownReference).toMatch(/^AP-\d{8}-\d{4}$/)
 

@@ -3,14 +3,16 @@ import { createClient } from '@/lib/supabase/server'
 import { getPatientClinic } from '@/lib/patientClinic'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { BookingWizard } from '@/components/booking/BookingWizard'
-import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
+import { PatientHeaderBanner } from '@/components/patient/PatientHeaderBanner'
+import { PAGE_CLASS } from '@/components/patient/PageHeader'
 
 /**
- * Book an appointment — V3 three-step wizard.
+ * Book an appointment — V3 three-step wizard (Figma 48:77 / 52:348 / 57:101).
  *
- * Services are read once, server-side — RLS lets any authenticated user
- * read active services. Everything after that (date, available slots)
- * is inherently interactive, so it lives in the client-side wizard.
+ * Services and the signed-in patient's name are read once, server-side —
+ * RLS lets any authenticated user read active services. Everything after
+ * that (date, available slots, the booking submission itself) is
+ * inherently interactive, so it lives in the client-side wizard.
  */
 export default async function BookPage() {
   const supabase = await createClient()
@@ -18,6 +20,21 @@ export default async function BookPage() {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('full_name')
+    .eq('auth_user_id', user.id)
+    .single()
+
+  if (profileError || !profile) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-2 px-6 text-center">
+        <p className="text-base font-semibold text-ink">Couldn&rsquo;t load your account</p>
+        <p className="text-base text-muted">Please refresh the page. If this keeps happening, contact the clinic.</p>
+      </main>
+    )
+  }
 
   // Unfiltered by clinic, deliberately: profiles.clinic_id is null for
   // patients (verified live) — only staff belong to a clinic. A patient
@@ -32,12 +49,16 @@ export default async function BookPage() {
 
   return (
     <main className={PAGE_CLASS}>
-      <PageHeader title="Book an appointment" subtitle="Three quick steps: service, day and time, confirm." />
+      <PatientHeaderBanner
+        title="Book an appointment"
+        subtitle="Choose a service to get started. We'll guide you through the next steps to find a time that works for you."
+        fullName={profile.full_name}
+      />
 
       {error ? (
         <p className="text-base text-danger">Couldn&rsquo;t load services. Try refreshing.</p>
       ) : services && services.length > 0 ? (
-        <BookingWizard services={services} clinicHours={clinic?.hours ?? []} clinicName={clinic?.name ?? null} />
+        <BookingWizard services={services} clinic={clinic} />
       ) : (
         <EmptyState
           headline="No services available"

@@ -22,13 +22,7 @@ import { LinkButton } from '@/components/ui/LinkButton'
 import { PAGE_CLASS, PageHeader, TYPE } from '@/components/patient/PageHeader'
 import { toConfidenceLevel } from '@/lib/confidence'
 import { formatClinicDate, formatClinicTime } from '@/lib/clinicTime'
-
-const CHECKLIST = [
-  'Bring your ID document or passport.',
-  'Bring any medication you are currently taking, or a list of it.',
-  'Bring your clinic card, referral letter or test results if you have them.',
-  'Check in at reception when you arrive — your queue token is issued then.',
-]
+import { BEFORE_VISIT_CHECKLIST } from '@/lib/beforeVisitChecklist'
 
 type TypicalTime =
   | { kind: 'known'; minutes: number; sampleCount: number; confidence: string }
@@ -191,7 +185,7 @@ export default async function AppointmentDetailsPage({
             </h2>
             <ul className="flex flex-col gap-3">
               {[
-                ...CHECKLIST,
+                ...BEFORE_VISIT_CHECKLIST,
                 ...(appointment.reference ? [`Quote your reference ${appointment.reference} at reception.`] : []),
               ].map((item) => (
                 <li key={item} className="flex items-start gap-3 text-base text-ink">
