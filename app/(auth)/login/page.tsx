@@ -1,10 +1,11 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
 import { logout } from '@/app/actions/auth'
 import { LoginForm } from '@/components/auth/LoginForm'
-import { Button } from '@/components/ui/Button'
-import { LinkButton } from '@/components/ui/LinkButton'
+import { AuthBrand, AuthShell } from '@/components/auth/v3/AuthShell'
+import { BTN_PRIMARY, BTN_SECONDARY, HEADING, SUBHEADING } from '@/components/auth/v3/authStyles'
 import type { UserRole } from '@/lib/types/database.types'
 
 /**
@@ -23,6 +24,8 @@ import type { UserRole } from '@/lib/types/database.types'
  * rather than verified twice. Any other non-empty `reason` — an
  * invalid link, a just-updated password, an idle timeout — means this
  * isn't a plain visit either, so the interstitial stays off.
+ *
+ * V3 only restyles it into the shared auth card; none of the above changed.
  */
 export default async function LoginPage({
   searchParams,
@@ -57,24 +60,27 @@ export default async function LoginPage({
     const roleLabel = role.charAt(0).toUpperCase() + role.slice(1)
 
     return (
-      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
-        <div className="h-14 w-14 rounded-full bg-primary-700" aria-hidden />
-        <h1 className="font-display text-[22px] font-bold text-ink">
-          Signed in as {fullName} — {roleLabel}
-        </h1>
-        <p className="text-sm text-muted">
-          On a shared device, sign out before leaving it unattended.
-        </p>
-
-        <LinkButton href={homeForRole(role)} variant="primary" fullWidth>
-          Continue as {firstName}
-        </LinkButton>
-        <form action={logout} className="w-full">
-          <Button type="submit" variant="tertiary" fullWidth>
-            Sign out and use another account
-          </Button>
-        </form>
-      </main>
+      <AuthShell blobs="login">
+        <div className="flex flex-col items-center gap-8 text-center">
+          <AuthBrand />
+          <div className="flex flex-col items-center gap-3">
+            <h1 className={HEADING}>
+              Signed in as {fullName} — {roleLabel}
+            </h1>
+            <p className={SUBHEADING}>On a shared device, sign out before leaving it unattended.</p>
+          </div>
+          <div className="flex w-full flex-col gap-4">
+            <Link href={homeForRole(role)} className={BTN_PRIMARY}>
+              Continue as {firstName}
+            </Link>
+            <form action={logout} className="w-full">
+              <button type="submit" className={BTN_SECONDARY}>
+                Sign out and use another account
+              </button>
+            </form>
+          </div>
+        </div>
+      </AuthShell>
     )
   }
 

@@ -1,56 +1,142 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useActionState, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { IdCard, Lock, Mail, Phone, User } from 'lucide-react'
 import { register, type RegisterState } from '@/app/actions/auth'
-import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { PasswordInput } from '@/components/ui/PasswordInput'
+import { AuthBrand, AuthShell } from '@/components/auth/v3/AuthShell'
+import { BTN_PRIMARY, HEADING, LINK, SUBHEADING } from '@/components/auth/v3/authStyles'
 import { formatCalendarDate, todayInClinicTimezone } from '@/lib/clinicTime'
+import { passwordsMatch } from '@/lib/passwordValidation'
 import { saIdBirthDateCandidates } from '@/lib/profileValidation'
 import {
   REGISTRATION_FIELD_ORDER,
   registrationInputFrom,
   validateRegistration,
+  type DocumentType,
   type RegistrationErrors,
+  type RegistrationInput,
 } from '@/lib/registrationValidation'
 
-/** The same normalisation the server and handle_new_user() apply before the number is stored. */
-const normaliseId = (raw: string) => raw.replace(/\s/g, '').toUpperCase()
+const ID_NUMBER_DIGITS = 13
 
+/**
+ * Patient V3 registration (Figma 33:49).
+ *
+ * The design shows five fields; the account needs seven. Date of birth and ID/passport number are required by
+ * the Server Action, by handle_new_user() and by the supervisor's identification requirement, so they are added
+ * to the V3 card rather than dropped to match the drawing — side by side from sm, stacked below it. Everything
+ * else about the rules is untouched: the same validateRegistration runs here and again on the server.
+ */
 export default function RegisterPage() {
   const [state, formAction, pending] = useActionState<RegisterState, FormData>(register, {})
+  // null until a submit (client- or server-side) has actually been attempted — that is what keeps
+  // every field quiet on first load, and is also the signal recheck() uses to decide whether live
+  // corrections should run at all: no attempt yet means nothing to correct.
   const [clientErrors, setClientErrors] = useState<RegistrationErrors | null>(null)
+  const [documentType, setDocumentType] = useState<DocumentType>('sa_id')
   const [idNumber, setIdNumber] = useState('')
   const [dob, setDob] = useState('')
   // True while the date in the field came from the ID number (not typed by the person), so a
   // changed ID number may replace it — and a date they typed themselves is never overwritten.
   const [dobFromId, setDobFromId] = useState(false)
+  const formRef = useRef<HTMLFormElement>(null)
 
-  const candidates = saIdBirthDateCandidates(normaliseId(idNumber), todayInClinicTimezone())
+  // A passport never suggests a date — only a South African ID encodes one.
+  const candidates = documentType === 'sa_id' ? saIdBirthDateCandidates(idNumber, todayInClinicTimezone()) : []
 
-  function handleIdChange(e: ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value
-    setIdNumber(value)
-    const found = saIdBirthDateCandidates(normaliseId(value), todayInClinicTimezone())
+  /**
+   * Re-runs the whole rule set against the form's current values and replaces clientErrors with the result —
+   * so a field whose value just became valid loses its error, and every other field's error (its value hasn't
+   * changed) reappears exactly as it was. Only runs once something has actually been submitted — a client-side
+   * failed attempt (clientErrors) or a server round-trip that came back with field errors (state.fieldErrors,
+   * read directly rather than copied into clientErrors by an effect, so there is no render where the two
+   * disagree); before either has happened, fields stay quiet while the form is being filled in for the first
+   * time.
+   *
+   * `partial` carries a value this render's closure can't see yet — the id_number or date_of_birth a specific
+   * handler just computed, before its own setState has committed. Every other field is read straight off the
+   * live DOM via FormData, which for those plain, uncontrolled inputs is always already up to date.
+   */
+  function recheck(partial: Partial<RegistrationInput> = {}) {
+    if ((clientErrors === null && !state.fieldErrors) || !formRef.current) return
+    const data = new FormData(formRef.current)
+    const input: RegistrationInput = {
+      ...registrationInputFrom(data),
+      document_type: documentType,
+      id_number: idNumber,
+      date_of_birth: dob,
+      ...partial,
+    }
+    const { errors } = validateRegistration(input, todayInClinicTimezone())
+    const match = passwordsMatch(String(data.get('password') ?? ''), String(data.get('confirm') ?? ''))
+    setClientErrors({ ...errors, ...(match.ok ? {} : { confirm: match.error }) })
+  }
+
+  /** Full name, email, phone, password and confirm: plain fields with no filtering of their own to race against. */
+  function handleFieldChange() {
+    recheck()
+  }
+
+  function handleDocumentTypeChange(type: DocumentType) {
+    setDocumentType(type)
+    // The two fields keep different value shapes (digits only vs. letters and digits); carrying one
+    // into the other is never meaningful, and is exactly the kind of leftover value that could let a
+    // malformed South African ID ride through under "Passport" by accident rather than by choice.
+    setIdNumber('')
+    if (dobFromId) {
+      setDob('')
+      setDobFromId(false)
+    }
+    // The old document type's id_number error (a checksum complaint, a shape complaint) no longer applies to
+    // a field that is now empty in the other mode — cleared outright, not replaced with a fresh "required"
+    // error the person hasn't had a chance to address yet.
+    setClientErrors((prev) => {
+      if (!prev || !('id_number' in prev)) return prev
+      const rest = { ...prev }
+      delete rest.id_number
+      return rest
+    })
+  }
+
+  function handleSaIdChange(e: ChangeEvent<HTMLInputElement>) {
+    // Only digits are ever stored, however they arrived — typed, pasted, or autofilled — so a leading
+    // zero is never at risk of being parsed away, and the field can never hold a non-digit character.
+    const digits = e.target.value.replace(/\D/g, '').slice(0, ID_NUMBER_DIGITS)
+    setIdNumber(digits)
+    const found = saIdBirthDateCandidates(digits, todayInClinicTimezone())
     if (found.length === 1 && (dob === '' || dobFromId)) {
       setDob(found[0])
       setDobFromId(true)
+      recheck({ id_number: digits, date_of_birth: found[0] })
+      return
     } else if (found.length !== 1 && dobFromId) {
       // The ID changed (or stopped being a valid SA ID): a date taken from it no longer stands.
       setDob('')
       setDobFromId(false)
+      recheck({ id_number: digits, date_of_birth: '' })
+      return
     }
+    recheck({ id_number: digits })
+  }
+
+  function handlePassportChange(e: ChangeEvent<HTMLInputElement>) {
+    setIdNumber(e.target.value)
+    recheck({ id_number: e.target.value })
   }
 
   function handleDobChange(e: ChangeEvent<HTMLInputElement>) {
     setDob(e.target.value)
     setDobFromId(false)
+    recheck({ date_of_birth: e.target.value })
   }
 
   function chooseCandidate(iso: string) {
     setDob(iso)
     setDobFromId(true)
+    recheck({ date_of_birth: iso })
   }
 
   // noValidate: the browser's own bubbles would pre-empt these messages and
@@ -58,15 +144,18 @@ export default function RegisterPage() {
   // run here and again in the Server Action, which is the one that counts.
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
     const form = e.currentTarget
-    const { errors } = validateRegistration(registrationInputFrom(new FormData(form)), todayInClinicTimezone())
-    const first = REGISTRATION_FIELD_ORDER.find((f) => errors[f])
+    const data = new FormData(form)
+    const { errors } = validateRegistration(registrationInputFrom(data), todayInClinicTimezone())
+    const match = passwordsMatch(String(data.get('password') ?? ''), String(data.get('confirm') ?? ''))
+    const all: RegistrationErrors = { ...errors, ...(match.ok ? {} : { confirm: match.error }) }
+    const first = REGISTRATION_FIELD_ORDER.find((f) => all[f])
     if (!first) {
       setClientErrors(null)
       return
     }
     // Stops the form action: nothing is sent while the form is incomplete.
     e.preventDefault()
-    setClientErrors(errors)
+    setClientErrors(all)
     ;(form.elements.namedItem(first) as HTMLElement | null)?.focus()
   }
 
@@ -75,72 +164,208 @@ export default function RegisterPage() {
   const formError = state.error && !state.fieldErrors ? state.error : undefined
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 px-6">
-      <div className="h-14 w-14 rounded-full bg-primary-700" aria-hidden />
-      <h1 className="font-display text-[26px] font-bold text-ink">Create your account</h1>
-      <p className="text-center text-sm text-muted">Book appointments and skip the queue</p>
+    <AuthShell>
+      <div className="flex flex-col items-center gap-7">
+        <AuthBrand />
 
-      <form action={formAction} onSubmit={handleSubmit} noValidate className="flex w-full flex-col gap-4">
-        <Input label="Full name" name="full_name" autoComplete="name" required
-               placeholder="Thabo Mokoena" error={errors.full_name} />
-        <Input label="Email" name="email" type="email" autoComplete="email" required
-               placeholder="you@email.com" error={errors.email} />
-        <Input label="Phone (optional)" name="phone" type="tel" autoComplete="tel"
-               placeholder="+27 82 555 0134" error={errors.phone} />
-        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input label="ID or passport number" name="id_number" autoComplete="off" required
-                 value={idNumber} onChange={handleIdChange}
-                 helper="SA ID (13 digits) or passport number." error={errors.id_number} />
-          <Input label="Date of birth" name="date_of_birth" type="date" autoComplete="bday" required
-                 value={dob} onChange={handleDobChange}
-                 min="1900-01-01" max={todayInClinicTimezone()} error={errors.date_of_birth} />
+        <div className="flex flex-col items-center gap-3 text-center">
+          <h1 className={HEADING}>Create your account</h1>
+          <p className={SUBHEADING}>
+            Join Smart Clinic to book appointments, track your queue position, and stay updated — all in one place.
+          </p>
         </div>
 
-        {/* What the ID number says about the date of birth. It is a convenience and a consistency
-            check, not identity verification. A passport number never produces a suggestion. */}
-        <div aria-live="polite" className="flex flex-col gap-2">
-          {candidates.length === 1 && dob === candidates[0] && dobFromId && (
-            <p role="status" className="text-xs text-muted">
-              Date of birth filled in from your ID number ({formatCalendarDate(candidates[0])}). Check it is correct.
-            </p>
-          )}
-          {candidates.length === 2 && (
-            <fieldset className="flex flex-col gap-2 rounded-lg border border-border p-3">
-              <legend className="px-1 text-[13px] font-semibold text-muted">
-                Your ID number fits two birth years. Which is yours?
-              </legend>
-              {candidates.map((iso) => (
-                <label key={iso} className="flex min-h-11 cursor-pointer items-center gap-3 text-[15px] text-ink">
+        <form ref={formRef} action={formAction} onSubmit={handleSubmit} noValidate className="flex w-full flex-col gap-4">
+          <Input
+            variant="auth"
+            label="Full name"
+            name="full_name"
+            autoComplete="name"
+            required
+            placeholder="Enter your full name"
+            leading={<User aria-hidden size={20} />}
+            onChange={handleFieldChange}
+            error={errors.full_name}
+          />
+          <Input
+            variant="auth"
+            label="Email address"
+            name="email"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder="you@email.com"
+            leading={<Mail aria-hidden size={20} />}
+            onChange={handleFieldChange}
+            error={errors.email}
+          />
+          {/* Figma pairs this with a "+27" country selector. There is no country list behind it and the validator
+              accepts an international number as typed (a passport holder may not have an SA number), so the
+              prefix lives in the placeholder instead of a control that could only ever offer one choice. */}
+          <Input
+            variant="auth"
+            label="Mobile number (optional)"
+            name="phone"
+            type="tel"
+            autoComplete="tel"
+            placeholder="+27 82 555 0134"
+            leading={<Phone aria-hidden size={20} />}
+            onChange={handleFieldChange}
+            error={errors.phone}
+          />
+
+          {/* An explicit choice, not inferred from what was typed — the Server Action enforces whichever
+              is selected, so this is never the only thing standing between a malformed ID and the database. */}
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-base leading-6 text-ink">Identification</legend>
+            <div className="flex flex-wrap gap-4">
+              {(
+                [
+                  ['sa_id', 'South African ID'],
+                  ['passport', 'Passport'],
+                ] as const
+              ).map(([type, label]) => (
+                <label key={type} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-ink">
                   <input
                     type="radio"
-                    name="dob_choice"
-                    value={iso}
-                    checked={dob === iso}
-                    onChange={() => chooseCandidate(iso)}
-                    className="h-5 w-5 accent-primary-700"
+                    name="document_type"
+                    value={type}
+                    checked={documentType === type}
+                    onChange={() => handleDocumentTypeChange(type)}
+                    className="h-5 w-5 accent-[#037F74]"
                   />
-                  {formatCalendarDate(iso)}
+                  {label}
                 </label>
               ))}
-            </fieldset>
+            </div>
+          </fieldset>
+
+          <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+            {documentType === 'sa_id' ? (
+              <Input
+                variant="auth"
+                label="South African ID number"
+                name="id_number"
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                required
+                value={idNumber}
+                onChange={handleSaIdChange}
+                // No maxLength here: capping the RAW characters (before non-digits are stripped) would truncate
+                // a messy paste — e.g. 16 characters of "800-101-5009-087" — losing real digits past position 13
+                // before handleSaIdChange ever sees them. The 13-digit cap is enforced on the filtered result instead.
+                placeholder="13-digit ID number"
+                leading={<IdCard aria-hidden size={20} />}
+                helper={`${idNumber.length}/${ID_NUMBER_DIGITS} digits`}
+                error={errors.id_number}
+              />
+            ) : (
+              <Input
+                variant="auth"
+                label="Passport number"
+                name="id_number"
+                type="text"
+                autoComplete="off"
+                required
+                value={idNumber}
+                onChange={handlePassportChange}
+                maxLength={20}
+                placeholder="Passport number"
+                leading={<IdCard aria-hidden size={20} />}
+                helper="Letters and numbers, 6–20 characters."
+                error={errors.id_number}
+              />
+            )}
+            <Input
+              variant="auth"
+              label="Date of birth"
+              name="date_of_birth"
+              type="date"
+              autoComplete="bday"
+              required
+              value={dob}
+              onChange={handleDobChange}
+              min="1900-01-01"
+              max={todayInClinicTimezone()}
+              error={errors.date_of_birth}
+            />
+          </div>
+
+          {/* What the ID number says about the date of birth. It is a convenience and a consistency
+              check, not identity verification. A passport number never produces a suggestion. */}
+          <div aria-live="polite" className="flex flex-col gap-2">
+            {candidates.length === 1 && dob === candidates[0] && dobFromId && (
+              <p role="status" className="text-xs text-muted">
+                Date of birth filled in from your ID number ({formatCalendarDate(candidates[0])}). Check it is correct.
+              </p>
+            )}
+            {candidates.length === 2 && (
+              <fieldset className="flex flex-col gap-2 rounded-[12px] border border-border bg-surface p-3">
+                <legend className="px-1 text-[13px] font-semibold text-muted">
+                  Your ID number fits two birth years. Which is yours?
+                </legend>
+                {candidates.map((iso) => (
+                  <label key={iso} className="flex min-h-11 cursor-pointer items-center gap-3 text-[15px] text-ink">
+                    <input
+                      type="radio"
+                      name="dob_choice"
+                      value={iso}
+                      checked={dob === iso}
+                      onChange={() => chooseCandidate(iso)}
+                      className="h-5 w-5 accent-[#037F74]"
+                    />
+                    {formatCalendarDate(iso)}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+          </div>
+
+          <PasswordInput
+            variant="auth"
+            label="Password"
+            name="password"
+            autoComplete="new-password"
+            required
+            placeholder="Create a password"
+            leading={<Lock aria-hidden size={20} />}
+            onChange={handleFieldChange}
+            // Figma asks for "a mix of letters, numbers and a symbol"; the rule actually enforced is length
+            // alone, and stating a rule the system does not apply would be false.
+            helper="At least 8 characters, not counting spaces."
+            error={errors.password}
+          />
+          <PasswordInput
+            variant="auth"
+            label="Confirm password"
+            name="confirm"
+            autoComplete="new-password"
+            required
+            placeholder="Confirm your password"
+            onChange={handleFieldChange}
+            leading={<Lock aria-hidden size={20} />}
+            error={errors.confirm}
+          />
+
+          {formError && (
+            <p role="alert" className="text-sm font-semibold text-danger">
+              {formError}
+            </p>
           )}
-        </div>
 
-        <PasswordInput label="Password" name="password" autoComplete="new-password"
-                       required placeholder="••••••••" helper="At least 8 characters, not counting spaces."
-                       error={errors.password} />
+          <button type="submit" className={`${BTN_PRIMARY} mt-2`} disabled={pending}>
+            {pending ? 'Creating your account…' : 'Create account →'}
+          </button>
+        </form>
 
-        {formError && (
-          <p role="alert" className="text-sm font-semibold text-danger">{formError}</p>
-        )}
-
-        <Button type="submit" fullWidth loading={pending}>Create account</Button>
-      </form>
-
-      <p className="text-sm text-muted">
-        Already have an account?{' '}
-        <Link href="/login" className="font-semibold text-primary-700">Log in</Link>
-      </p>
-    </main>
+        <p className="text-base text-ink">
+          Already have an account?{' '}
+          <Link href="/login" className={LINK}>
+            Log in
+          </Link>
+        </p>
+      </div>
+    </AuthShell>
   )
 }

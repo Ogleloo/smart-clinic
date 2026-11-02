@@ -420,21 +420,27 @@ test('mobile profile: Sign Out is shown and ends the session', async ({ page }) 
   await expect(page).toHaveURL(/\/login/)
 })
 
-test('registration: optional DOB and ID fields are present and validated before any account is created', async ({
+test('registration: date of birth and ID are required and validated before any account is created', async ({
   page,
 }) => {
   await page.goto('/register')
-  await expect(page.getByLabel('Date of birth (optional)')).toBeVisible()
-  await expect(page.getByLabel('ID or passport number (optional)')).toBeVisible()
+  // Both became required in PR #38 and are part of the V3 card (Figma 33:49 omits them; the account needs them).
+  await expect(page.getByLabel('Date of birth')).toHaveAttribute('required', '')
+  await expect(page.getByLabel('ID or passport number')).toHaveAttribute('required', '')
 
   const email = `v3-reg-should-not-exist-${Date.now()}@test.local`
   await page.getByLabel('Full name').fill('Validation Only')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('ID or passport number (optional)').fill('!!')
+  await page.getByLabel('Email address').fill(email)
+  await page.getByLabel('ID or passport number').fill('!!')
+  await page.getByLabel('Date of birth').fill('1980-01-01')
   // A throwaway value: this test never gets as far as creating an account (the ID field fails validation first).
-  await page.getByLabel('Password').fill(`${crypto.randomUUID()}-Aa1`)
+  const throwaway = `${crypto.randomUUID()}-Aa1`
+  await page.getByLabel('Password', { exact: true }).fill(throwaway)
+  await page.getByLabel('Confirm password').fill(throwaway)
   await page.getByRole('button', { name: 'Create account' }).click()
   await waitSettled(page)
-  await expect(page.getByText('ID or passport number must be 6–20 letters or digits.')).toBeVisible()
+  await expect(
+    page.getByText('ID or passport number must be 6–20 letters or digits, with no dashes or symbols.')
+  ).toBeVisible()
   await expect(page).toHaveURL(/\/register/)
 })

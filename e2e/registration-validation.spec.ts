@@ -7,10 +7,11 @@ import {
   isValidSouthAfricanId,
   parseOptionalPhone,
   requireDateOfBirth,
-  requireIdNumber,
+  requirePassportNumber,
+  requireSouthAfricanId,
   saIdBirthDateCandidates,
 } from '../lib/profileValidation'
-import { validateRegistration, type RegistrationInput } from '../lib/registrationValidation'
+import { validateRegistration, type DocumentType, type RegistrationInput } from '../lib/registrationValidation'
 
 // OFFLINE spec. Part 1 is pure logic. Part 2 loads the real /register, /login and /reset-password pages from the offline dev
 // server (its Supabase URL is a closed local port) and never completes a submission: every non-GET request is aborted and
@@ -45,12 +46,12 @@ test.describe('requireDateOfBirth', () => {
   })
 })
 
-test.describe('isValidSouthAfricanId / requireIdNumber', () => {
-  test('accepts well-formed SA ID numbers, including a leap day', () => {
+test.describe('isValidSouthAfricanId / requireSouthAfricanId', () => {
+  test('accepts a value that already is exactly 13 ASCII digits, including a leap day', () => {
     expect(isValidSouthAfricanId(SA_ID)).toBe(true)
     expect(isValidSouthAfricanId(SA_ID_LEAP_DAY)).toBe(true)
-    expect(requireIdNumber(SA_ID)).toEqual({ value: SA_ID })
-    expect(requireIdNumber('800101 5009 087')).toEqual({ value: SA_ID }) // spaces are stripped, as handle_new_user() does
+    expect(requireSouthAfricanId(SA_ID)).toEqual({ value: SA_ID })
+    expect(requireSouthAfricanId(SA_ID_LEAP_DAY)).toEqual({ value: SA_ID_LEAP_DAY })
   })
   test('the negative vectors are Luhn-valid, so each is rejected by the rule it is named after', () => {
     const luhn = (d: string) =>
@@ -64,30 +65,65 @@ test.describe('isValidSouthAfricanId / requireIdNumber', () => {
     expect(isValidSouthAfricanId(SA_ID_BAD_DATE)).toBe(false)
     expect(isValidSouthAfricanId(SA_ID_BAD_CITIZENSHIP)).toBe(false)
     for (const bad of ['8001015009088', SA_ID_BAD_DATE, SA_ID_BAD_CITIZENSHIP]) {
-      const r = requireIdNumber(bad)
+      const r = requireSouthAfricanId(bad)
       expect(r.value, bad).toBeNull()
       expect(r.error, bad).toMatch(/south african id number isn.t valid/i)
     }
   })
-  test('a digit-only number of the wrong length is refused as a mistyped ID, not accepted as a passport', () => {
-    for (const bad of ['800101500908', '80010150090877', '1234567890']) {
-      expect(requireIdNumber(bad).error, bad).toMatch(/13 digits/i)
+  test('anything other than exactly 13 digits is refused on length, before the checksum ever runs', () => {
+    for (const bad of ['800101500908', '80010150090877', '1234567890', '0']) {
+      expect(requireSouthAfricanId(bad).error, bad).toMatch(/13 digits/i)
+    }
+    expect(requireSouthAfricanId('').error).toMatch(/enter your south african id/i)
+    expect(requireSouthAfricanId('   ').error).toMatch(/enter your south african id/i)
+  })
+  test('a value that needs cleaning is refused outright, not cleaned and then validated — a forged request cannot get the browser’s normalisation for free', () => {
+    for (const bad of [
+      '800101 5009 087', // spaces
+      `${SA_ID.slice(0, 6)}-${SA_ID.slice(6)}`, // a dash
+      `a${SA_ID.slice(1)}`, // a letter in place of a digit
+      ` ${SA_ID}`, // leading space
+      `${SA_ID} `, // trailing space
+      `${SA_ID}\n`, // trailing newline
+      '＋8001015009087', // a non-ASCII character prepended
+    ]) {
+      const r = requireSouthAfricanId(bad)
+      expect(r.value, bad).toBeNull()
+      expect(r.error, bad).toMatch(/13 digits/i)
     }
   })
-  test('passport numbers: letters+digits or short numeric, upper-cased, 6–20 characters', () => {
-    expect(requireIdNumber('a1234567')).toEqual({ value: 'A1234567' })
-    expect(requireIdNumber('ab 12 34 56')).toEqual({ value: 'AB123456' })
-    expect(requireIdNumber('123456789')).toEqual({ value: '123456789' }) // 9-digit numeric passport
-    expect(requireIdNumber('A'.repeat(20)).error).toBeUndefined()
+  test('leading zeros are preserved, not parsed away as a number', () => {
+    expect(SA_ID_LEAP_DAY.startsWith('00')).toBe(true)
+    expect(requireSouthAfricanId(SA_ID_LEAP_DAY)).toEqual({ value: SA_ID_LEAP_DAY })
+  })
+})
+
+test.describe('requirePassportNumber', () => {
+  test('letters+digits or short numeric, upper-cased, 6–20 characters', () => {
+    expect(requirePassportNumber('a1234567')).toEqual({ value: 'A1234567' })
+    expect(requirePassportNumber('ab 12 34 56')).toEqual({ value: 'AB123456' })
+    expect(requirePassportNumber('123456789')).toEqual({ value: '123456789' }) // 9-digit numeric passport
+    expect(requirePassportNumber('A'.repeat(20)).error).toBeUndefined()
   })
   test('missing, too short, too long and punctuation are rejected', () => {
-    expect(requireIdNumber('').error).toMatch(/enter your south african id or passport/i)
-    expect(requireIdNumber('   ').error).toMatch(/enter your south african id or passport/i)
+    expect(requirePassportNumber('').error).toMatch(/enter your passport/i)
+    expect(requirePassportNumber('   ').error).toMatch(/enter your passport/i)
     for (const bad of ['A1234', 'A'.repeat(21), 'AB-123456', 'AB.123456', 'ÅB123456']) {
-      const r = requireIdNumber(bad)
+      const r = requirePassportNumber(bad)
       expect(r.error, bad).toMatch(/6–20 letters or digits/i)
       expect(r.value, bad).toBeNull()
     }
+  })
+  test('a 13-digit numeric value that fails the SA ID checksum is refused, not accepted as a passport', () => {
+    // Choosing "Passport" must not be a way to submit a South African ID number that is malformed.
+    for (const bad of ['8001015009088', SA_ID_BAD_DATE, SA_ID_BAD_CITIZENSHIP]) {
+      const r = requirePassportNumber(bad)
+      expect(r.value, bad).toBeNull()
+      expect(r.error, bad).toMatch(/looks like a south african id/i)
+    }
+  })
+  test('a 13-digit numeric value that passes the SA ID checksum is still accepted: the rule only blocks a malformed one', () => {
+    expect(requirePassportNumber(SA_ID)).toEqual({ value: SA_ID })
   })
 })
 
@@ -96,13 +132,14 @@ const VALID: RegistrationInput = {
   email: 'thabo@example.com',
   phone: '',
   date_of_birth: '1980-01-01',
+  document_type: 'sa_id',
   id_number: SA_ID,
   password: 'longenough',
 }
 
 test.describe('validateRegistration', () => {
   test('a complete form yields normalised values and no errors', () => {
-    const r = validateRegistration({ ...VALID, full_name: '  Thabo   Mokoena ', id_number: '800101 5009 087' }, TODAY)
+    const r = validateRegistration({ ...VALID, full_name: '  Thabo   Mokoena ', id_number: SA_ID }, TODAY)
     expect(r.errors).toEqual({})
     expect(r.values).toEqual({
       fullName: 'Thabo Mokoena',
@@ -114,9 +151,29 @@ test.describe('validateRegistration', () => {
     })
   })
   test('an empty form reports every required field, including date of birth and ID/passport number', () => {
-    const r = validateRegistration({ full_name: '', email: '', phone: '', date_of_birth: '', id_number: '', password: '' }, TODAY)
+    const r = validateRegistration(
+      { full_name: '', email: '', phone: '', date_of_birth: '', document_type: '', id_number: '', password: '' },
+      TODAY,
+    )
     expect(r.values).toBeNull()
     expect(Object.keys(r.errors).sort()).toEqual(['date_of_birth', 'email', 'full_name', 'id_number', 'password'])
+  })
+  test('a document_type other than exactly "passport" is treated as "sa_id" — a forged or missing value can only tighten validation, never relax it', () => {
+    for (const forged of ['', 'PASSPORT', 'sa_id ', 'anything', 'passport\u0000']) {
+      const r = validateRegistration({ ...VALID, document_type: forged, id_number: 'A1234567' }, TODAY)
+      expect(r.values, JSON.stringify(forged)).toBeNull()
+      expect(r.errors.id_number, JSON.stringify(forged)).toMatch(/south african id/i)
+    }
+    // the one exact value that opens the passport rule
+    expect(validateRegistration({ ...VALID, document_type: 'passport', id_number: 'A1234567' }, TODAY).errors).toEqual({})
+  })
+  test('a clean 13-digit South African ID passes through validateRegistration; a forged request with the same digits dressed up in extra characters does not', () => {
+    expect(validateRegistration({ ...VALID, id_number: SA_ID }, TODAY).errors).toEqual({})
+    for (const forged of [`${SA_ID} `, `${SA_ID.slice(0, 6)} ${SA_ID.slice(6)}`, `${SA_ID}\t`]) {
+      const r = validateRegistration({ ...VALID, id_number: forged }, TODAY)
+      expect(r.values, JSON.stringify(forged)).toBeNull()
+      expect(r.errors.id_number, JSON.stringify(forged)).toMatch(/13 digits/i)
+    }
   })
   test('date of birth and ID number are each individually required', () => {
     expect(validateRegistration({ ...VALID, date_of_birth: '' }, TODAY).errors).toEqual({ date_of_birth: 'Enter your date of birth.' })
@@ -188,8 +245,10 @@ test.describe('validateRegistration: date of birth against the ID number', () =>
     expect(validateRegistration({ ...VALID, id_number: SA_ID_LEAP_DAY, date_of_birth: '1900-02-28' }, TODAY).errors.date_of_birth).toMatch(/doesn.t match/i)
   })
   test('a passport number encodes nothing: any real past date entered by hand is accepted, a missing one is not', () => {
-    expect(validateRegistration({ ...VALID, id_number: 'A1234567', date_of_birth: '1999-12-31' }, TODAY).errors).toEqual({})
-    expect(validateRegistration({ ...VALID, id_number: 'A1234567', date_of_birth: '' }, TODAY).errors.date_of_birth).toMatch(/enter your date of birth/i)
+    expect(validateRegistration({ ...VALID, document_type: 'passport', id_number: 'A1234567', date_of_birth: '1999-12-31' }, TODAY).errors).toEqual({})
+    expect(
+      validateRegistration({ ...VALID, document_type: 'passport', id_number: 'A1234567', date_of_birth: '' }, TODAY).errors.date_of_birth,
+    ).toMatch(/enter your date of birth/i)
   })
   test('a bad ID is reported on the ID, with no extra complaint about the date', () => {
     const r = validateRegistration({ ...VALID, id_number: '8001015009088', date_of_birth: '1999-12-31' }, TODAY)
@@ -272,20 +331,20 @@ function triggerKeeps(dob: string, id: string, today: string): { dob: boolean; i
 
 test.describe('what the form sends is what handle_new_user() stores', () => {
   test('every date of birth and ID/passport number the form accepts passes the trigger’s own checks', () => {
-    // [date of birth, ID/passport]: an SA ID must be paired with a date it can mean; a passport takes any real past date.
-    const pairs: [string, string][] = [
-      ['1980-01-01', SA_ID],
-      ['2000-02-29', SA_ID_LEAP_DAY],
-      ['1905-06-15', SA_ID_AMBIGUOUS],
-      ['2005-06-15', SA_ID_AMBIGUOUS],
-      ['1900-01-01', 'A1234567'],
-      ['1980-01-01', 'ab 12 34 56'],
-      ['2000-02-29', '123456789'],
-      [TODAY, 'Z'.repeat(20)],
-      ['1992-07-15', 'P12345'],
+    // [date of birth, document type, ID/passport]: an SA ID must be paired with a date it can mean; a passport takes any real past date.
+    const pairs: [string, DocumentType, string][] = [
+      ['1980-01-01', 'sa_id', SA_ID],
+      ['2000-02-29', 'sa_id', SA_ID_LEAP_DAY],
+      ['1905-06-15', 'sa_id', SA_ID_AMBIGUOUS],
+      ['2005-06-15', 'sa_id', SA_ID_AMBIGUOUS],
+      ['1900-01-01', 'passport', 'A1234567'],
+      ['1980-01-01', 'passport', 'ab 12 34 56'],
+      ['2000-02-29', 'passport', '123456789'],
+      [TODAY, 'passport', 'Z'.repeat(20)],
+      ['1992-07-15', 'passport', 'P12345'],
     ]
-    for (const [dob, id] of pairs) {
-      const r = validateRegistration({ ...VALID, date_of_birth: dob, id_number: id }, TODAY)
+    for (const [dob, documentType, id] of pairs) {
+      const r = validateRegistration({ ...VALID, document_type: documentType, date_of_birth: dob, id_number: id }, TODAY)
       expect(r.errors, `${dob} / ${id}`).toEqual({})
       const kept = triggerKeeps(r.values!.dateOfBirth, r.values!.idNumber, TODAY)
       expect(kept, `${dob} / ${id}`).toEqual({ dob: true, id: true })
@@ -312,7 +371,7 @@ test.describe('what the form sends is what handle_new_user() stores', () => {
 
   test('a value the trigger would drop is rejected by the form first', () => {
     for (const [dob, id] of [['1992-02-30', 'A1234567'], ['2027-01-01', 'A1234567'], ['1980-01-01', 'AB-123456'], ['1980-01-01', 'A12']]) {
-      const r = validateRegistration({ ...VALID, date_of_birth: dob, id_number: id }, TODAY)
+      const r = validateRegistration({ ...VALID, document_type: 'passport', date_of_birth: dob, id_number: id }, TODAY)
       expect(r.values, `${dob} / ${id}`).toBeNull()
     }
   })
@@ -395,10 +454,19 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await sealed(context)
     await visit(page, '/register')
     await expect(page.getByLabel('Date of birth')).toHaveAttribute('required', '')
-    await expect(page.getByLabel('ID or passport number')).toHaveAttribute('required', '')
+    await expect(page.getByLabel('South African ID number')).toHaveAttribute('required', '')
     await expect(page.getByLabel('Full name')).toHaveAttribute('required', '')
     await expect(page.getByText(/\(optional\)/i)).toHaveCount(1)
-    await expect(page.getByLabel('Phone (optional)')).not.toHaveAttribute('required', '')
+    await expect(page.getByLabel('Mobile number (optional)')).not.toHaveAttribute('required', '')
+  })
+
+  test('South African ID is the default document type', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    await expect(page.getByRole('radio', { name: 'South African ID' })).toBeChecked()
+    await expect(page.getByRole('radio', { name: 'Passport' })).not.toBeChecked()
+    await expect(page.getByLabel('South African ID number')).toHaveCount(1)
+    await expect(page.getByLabel('Passport number')).toHaveCount(0)
   })
 
   test('an empty submit shows an error under every required field, focuses the first, and sends nothing', async ({ page, context }) => {
@@ -409,11 +477,11 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await expect(page.getByText('Enter your full name.')).toBeVisible()
     await expect(page.getByText('Enter your email address.')).toBeVisible()
     await expect(page.getByText('Enter your date of birth.')).toBeVisible()
-    await expect(page.getByText('Enter your South African ID or passport number.')).toBeVisible()
+    await expect(page.getByText('Enter your South African ID number.')).toBeVisible()
     await expect(page.getByText('Enter a password.')).toBeVisible()
     await expect(page.getByLabel('Full name')).toBeFocused()
-    await expect(page.getByLabel('ID or passport number')).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByLabel('ID or passport number')).toHaveAttribute('aria-describedby', /-error$/)
+    await expect(page.getByLabel('South African ID number')).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByLabel('South African ID number')).toHaveAttribute('aria-describedby', /-error$/)
     expect(posts).toEqual([])
   })
 
@@ -423,20 +491,212 @@ test.describe('registration form (real page, nothing submitted)', () => {
     await page.getByLabel('Full name').fill('Thabo Mokoena')
     await page.getByLabel('Email').fill('thabo@example.com')
     await page.getByLabel('Date of birth').fill('1980-01-01')
-    await page.getByLabel('ID or passport number').fill('8001015009088')
+    await page.getByLabel('South African ID number').fill('8001015009088')
     await page.getByLabel('Password', { exact: true }).fill('longenough')
     await page.getByRole('button', { name: 'Create account' }).click()
 
     await expect(page.getByText(/south african id number isn.t valid/i)).toBeVisible()
     await expect(page.getByText('Enter your date of birth.')).toHaveCount(0)
-    await expect(page.getByLabel('ID or passport number')).toBeFocused()
+    await expect(page.getByLabel('South African ID number')).toBeFocused()
 
     await page.getByLabel('Date of birth').fill('')
-    await page.getByLabel('ID or passport number').fill('A1234567') // a passport suggests no date, so it stays empty
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await page.getByLabel('Passport number').fill('A1234567') // a passport suggests no date, so it stays empty
     await page.getByRole('button', { name: 'Create account' }).click()
     await expect(page.getByText('Enter your date of birth.')).toBeVisible()
     await expect(page.getByLabel('Date of birth')).toBeFocused()
     expect(posts).toEqual([])
+  })
+
+  test('South African ID number: digits only, up to 13, leading zeros kept, with a live 0/13–13/13 counter', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    const field = page.getByLabel('South African ID number')
+
+    await expect(page.getByText('0/13 digits')).toBeVisible()
+    await field.pressSequentially('00')
+    await expect(field).toHaveValue('00') // leading zeros kept, not parsed away as a number
+    await expect(page.getByText('2/13 digits')).toBeVisible()
+
+    // letters and symbols are simply not accepted, not reported as an error while still typing
+    await field.pressSequentially('-ab!')
+    await expect(field).toHaveValue('00')
+    await expect(page.getByText('2/13 digits')).toBeVisible()
+    await expect(page.getByText(/isn.t valid|has 13 digits|enter your south african id/i)).toHaveCount(0)
+
+    await field.pressSequentially(SA_ID_LEAP_DAY.slice(2))
+    await expect(field).toHaveValue(SA_ID_LEAP_DAY)
+    await expect(page.getByText('13/13 digits')).toBeVisible()
+
+    // more than 13 digits is simply not accepted
+    await field.pressSequentially('9')
+    await expect(field).toHaveValue(SA_ID_LEAP_DAY)
+    await expect(page.getByText('13/13 digits')).toBeVisible()
+  })
+
+  test('South African ID number: a pasted or autofilled string is filtered the same way as typing', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    const field = page.getByLabel('South African ID number')
+
+    // .fill() delivers the whole string in one go, the same way a paste or browser autofill does —
+    // the component reads it through the same onChange handler either way.
+    await field.fill('80-01 015009087extra-digits-9999')
+    await expect(field).toHaveValue(SA_ID) // non-digits dropped, capped at 13
+
+    await field.fill('456') // a full replacement (select-all-and-paste), not an append onto the old value
+    await expect(field).toHaveValue('456')
+  })
+
+  test('switching to Passport clears whatever was typed as a South African ID, and back again', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    await page.getByLabel('South African ID number').fill('8001015009087')
+    await expect(page.getByLabel('Date of birth')).toHaveValue('1980-01-01') // filled in from the ID
+
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await expect(page.getByLabel('Passport number')).toHaveValue('')
+    await expect(page.getByLabel('Date of birth')).toHaveValue('') // a date taken from the ID no longer stands
+
+    await page.getByLabel('Passport number').fill('AB123456')
+    await page.getByRole('radio', { name: 'South African ID' }).check()
+    await expect(page.getByLabel('South African ID number')).toHaveValue('') // not carried over as a mangled value
+  })
+
+  test('Passport: letters and digits up to 20 characters, no digit filtering, no counter', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    const field = page.getByLabel('Passport number')
+    await field.fill('ab-123456')
+    await expect(field).toHaveValue('ab-123456') // normalised only at validation time, not forced while typing
+    await expect(page.getByText(/\d+\/13/)).toHaveCount(0)
+  })
+
+  test('choosing Passport for a malformed South African ID number is still refused, not silently accepted', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email').fill('thabo@example.com')
+    await page.getByLabel('Date of birth').fill('1980-01-01')
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await page.getByLabel('Passport number').fill('8001015009088') // 13 digits, wrong check digit
+    await page.getByLabel('Password', { exact: true }).fill('longenough')
+    await page.getByRole('button', { name: 'Create account' }).click()
+
+    await expect(page.getByText(/looks like a south african id number, but it isn.t valid/i)).toBeVisible()
+    expect(posts).toEqual([])
+  })
+
+  test('the server enforces the selected document type itself: a forged document_type cannot relax validation', () => {
+    // app/actions/auth.ts calls registrationInputFrom() + validateRegistration() on whatever FormData the
+    // request actually carries — not on anything the browser's radio buttons restricted — so a request built
+    // by hand (skipping the client entirely) is validated exactly the same way. See lib/registrationValidation.ts.
+    const src = readFileSync('app/actions/auth.ts', 'utf8')
+    expect(src).toContain('validateRegistration(registrationInputFrom(formData)')
+    const lib = readFileSync('lib/registrationValidation.ts', 'utf8')
+    expect(lib).toContain("document_type: get('document_type')")
+    expect(lib).toMatch(/input\.document_type === 'passport' \? 'passport' : 'sa_id'/)
+  })
+})
+
+test.describe('registration form: live correction of errors (real page, nothing submitted)', () => {
+  test.setTimeout(180_000)
+
+  async function fillValid(page: Page) {
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await page.getByLabel('Email address').fill('thabo@example.com')
+    await page.getByLabel('South African ID number').fill(SA_ID)
+    await page.getByLabel('Date of birth').fill('1980-01-01')
+    await page.getByLabel('Password', { exact: true }).fill('longenough')
+    await page.getByLabel('Confirm password').fill('longenough')
+  }
+
+  test('no error is shown before any interaction or submission', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/register')
+    for (const msg of [
+      'Enter your full name.',
+      'Enter your email address.',
+      'Enter your South African ID number.',
+      'Enter your date of birth.',
+      'Enter a password.',
+    ]) {
+      await expect(page.getByText(msg)).toHaveCount(0)
+    }
+  })
+
+  test('correcting a field clears only that field’s error; the other stays until it too is corrected', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('Email address').fill('not-an-email') // break exactly one field
+    await page.getByLabel('Mobile number (optional)').fill('12345') // and a second, differently
+    await page.getByRole('button', { name: 'Create account' }).click()
+
+    await expect(page.getByText('Enter a valid email address.')).toBeVisible()
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible()
+
+    await page.getByLabel('Email address').fill('thabo@example.com')
+    await expect(page.getByText('Enter a valid email address.')).toHaveCount(0)
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible() // untouched, still shown
+
+    await page.getByLabel('Mobile number (optional)').fill('')
+    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toHaveCount(0)
+    expect(posts).toEqual([])
+  })
+
+  test('correcting a wrong South African ID checksum clears its error without another submission', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('South African ID number').fill('8001015009088') // wrong check digit
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toBeVisible()
+
+    await page.getByLabel('South African ID number').fill(SA_ID) // the correct check digit, nothing else changed
+    await expect(page.getByText(/south african id number isn.t valid/i)).toHaveCount(0)
+    expect(posts).toEqual([]) // the error disappeared without a second submit attempt
+  })
+
+  test('switching document type clears a stale South African ID error without flagging the now-empty Passport field', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('South African ID number').fill('8001015009088') // wrong check digit
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toBeVisible()
+
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await expect(page.getByText(/south african id number isn.t valid/i)).toHaveCount(0)
+    await expect(page.getByText('Enter your passport number.')).toHaveCount(0) // not replaced with a fresh error either
+    expect(posts).toEqual([])
+  })
+
+  test('after some fields are corrected live, a second submit still focuses the first field still invalid', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/register')
+    await fillValid(page)
+    await page.getByLabel('Full name').fill('')
+    await page.getByLabel('Email address').fill('not-an-email')
+    await page.getByRole('button', { name: 'Create account' }).click()
+    await expect(page.getByLabel('Full name')).toBeFocused()
+
+    await page.getByLabel('Full name').fill('Thabo Mokoena')
+    await expect(page.getByText('Enter your full name.')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Create account' }).click() // only email is still wrong now
+    await expect(page.getByLabel('Email address')).toBeFocused()
+    expect(posts).toEqual([])
+  })
+
+  test('server-returned field errors feed the same live-correction path as a client-side failed attempt (source level)', () => {
+    // The offline harness cannot exercise a real Server Action round-trip (every POST is sealed off), so this
+    // pins the mechanism at the source instead of behaviourally: recheck()'s gate and the rendered `errors`
+    // both read state.fieldErrors directly, so a server-returned error lives in the same place a client-side
+    // one does and clears the same way once the field is corrected.
+    const src = readFileSync('app/(auth)/register/page.tsx', 'utf8')
+    expect(src).toMatch(/if \(\(clientErrors === null && !state\.fieldErrors\) \|\| !formRef\.current\) return/)
+    expect(src).toContain('const errors = clientErrors ?? state.fieldErrors ?? {}')
   })
 })
 
@@ -447,7 +707,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     const posts = await sealed(context)
     await visit(page, '/register')
     const field = page.getByLabel('Password', { exact: true })
-    const toggle = page.getByRole('button', { name: 'Show password' })
+    const toggle = page.getByRole('button', { name: 'Show password' }).first() // the Confirm field has one too
 
     await expect(field).toHaveAttribute('type', 'password')
     await expect(field).toHaveAttribute('autocomplete', 'new-password')
@@ -459,7 +719,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     await expect(field).toHaveAttribute('type', 'text')
     await expect(field).toHaveValue('s3cret-pass')
     await expect(field).toHaveAttribute('autocomplete', 'new-password')
-    await page.getByRole('button', { name: 'Hide password' }).click()
+    await page.getByRole('button', { name: 'Hide password' }).first().click()
     await expect(field).toHaveAttribute('type', 'password')
     await expect(field).toHaveValue('s3cret-pass')
 
@@ -474,7 +734,7 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
     const field = page.getByLabel('Password', { exact: true })
     await field.focus()
     await page.keyboard.press('Tab')
-    await expect(page.getByRole('button', { name: 'Show password' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Show password' }).first()).toBeFocused()
     await page.keyboard.press('Enter')
     await expect(field).toHaveAttribute('type', 'text')
     await page.keyboard.press('Space')
@@ -519,8 +779,9 @@ test.describe('show/hide password (real pages, nothing submitted)', () => {
 test.describe('date of birth from the ID number (real page, nothing submitted)', () => {
   test.setTimeout(180_000)
 
-  const idField = (page: Page) => page.getByLabel('ID or passport number')
+  const idField = (page: Page) => page.getByLabel('South African ID number')
   const dobField = (page: Page) => page.getByLabel('Date of birth')
+  const yearGroup = (page: Page) => page.getByRole('group', { name: /fits two birth years/i })
 
   test('an unambiguous SA ID fills the date and says so; clearing the ID removes a date it supplied', async ({ page, context }) => {
     const posts = await sealed(context)
@@ -529,7 +790,7 @@ test.describe('date of birth from the ID number (real page, nothing submitted)',
     await expect(dobField(page)).toHaveValue('1980-01-01')
     await expect(page.getByRole('status')).toContainText('filled in from your ID number')
     await expect(page.getByRole('status')).toContainText('1 January 1980')
-    await expect(page.getByRole('group')).toHaveCount(0) // no year question when there is only one possibility
+    await expect(yearGroup(page)).toHaveCount(0) // no year question when there is only one possibility
 
     await idField(page).fill('')
     await expect(dobField(page)).toHaveValue('')
@@ -575,10 +836,11 @@ test.describe('date of birth from the ID number (real page, nothing submitted)',
   test('a passport number never produces a suggestion; the date is entered by hand and accepted', async ({ page, context }) => {
     const posts = await sealed(context)
     await visit(page, '/register')
-    await idField(page).fill('A1234567')
+    await page.getByRole('radio', { name: 'Passport' }).check()
+    await page.getByLabel('Passport number').fill('A1234567')
     await expect(dobField(page)).toHaveValue('')
     await expect(page.getByRole('status')).toHaveCount(0)
-    await expect(page.getByRole('group')).toHaveCount(0)
+    await expect(yearGroup(page)).toHaveCount(0)
 
     await page.getByLabel('Full name').fill('Thabo Mokoena')
     await page.getByLabel('Email').fill('thabo@example.com')
@@ -625,8 +887,8 @@ test.describe('password rules on the registration form (real page, nothing submi
 
   async function fillValidExceptPassword(page: Page) {
     await page.getByLabel('Full name').fill('Thabo Mokoena')
-    await page.getByLabel('Email').fill('thabo@example.com')
-    await page.getByLabel('ID or passport number').fill(SA_ID)
+    await page.getByLabel('Email address').fill('thabo@example.com')
+    await page.getByLabel('South African ID number').fill(SA_ID)
     await page.getByLabel('Date of birth').fill('1980-01-01')
   }
 
@@ -653,6 +915,7 @@ test.describe('password rules on the registration form (real page, nothing submi
     await visit(page, '/register')
     await fillValidExceptPassword(page)
     await page.getByLabel('Password', { exact: true }).fill('correct horse battery staple')
+    await page.getByLabel('Confirm password').fill('correct horse battery staple')
     await page.getByRole('button', { name: 'Create account' }).click()
     // Validation passed, so the form action was attempted — and the sealed context aborted that POST.
     await expect.poll(() => posts.length, { timeout: 30_000 }).toBeGreaterThan(0)
@@ -663,21 +926,60 @@ test.describe('password rules on the registration form (real page, nothing submi
 test.describe('email verification code entry (real page, nothing submitted)', () => {
   test.setTimeout(180_000)
 
-  test('accepts digits only, six at most, and enables Verify only at six; resend is offered', async ({ page, context }) => {
+  const boxes = (page: Page) => page.getByRole('group', { name: 'Verification code' }).getByRole('textbox')
+
+  test('six boxes, digits only, focus advances, and Verify is enabled only at six; resend is offered', async ({ page, context }) => {
     const posts = await sealed(context)
     await visit(page, '/verify?email=someone%40example.com')
-    const code = page.getByLabel('Verification code')
-    const verify = page.getByRole('button', { name: 'Verify' })
-    await expect(page.getByText('6-digit code')).toBeVisible()
+    const verify = page.getByRole('button', { name: 'Verify account' })
+    await expect(boxes(page)).toHaveCount(6)
     await expect(verify).toBeDisabled()
 
-    await code.fill('12ab34')
-    await expect(code).toHaveValue('1234')
+    await boxes(page).nth(0).pressSequentially('1')
+    await expect(boxes(page).nth(0)).toHaveValue('1')
+    await expect(boxes(page).nth(1)).toBeFocused() // focus moves on to the next box
+
+    await boxes(page).nth(1).pressSequentially('a') // a non-digit is simply not accepted
+    await expect(boxes(page).nth(1)).toHaveValue('')
     await expect(verify).toBeDisabled()
-    await code.fill('12345678') // an eight-digit code cannot be entered: only six are kept
-    await expect(code).toHaveValue('123456')
+
+    for (const [i, d] of [...'23456'].entries()) await boxes(page).nth(i + 1).pressSequentially(d)
+    for (const [i, d] of [...'123456'].entries()) await expect(boxes(page).nth(i)).toHaveValue(d)
     await expect(verify).toBeEnabled()
-    await expect(page.getByRole('button', { name: /send a new code/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /resend code/i })).toBeVisible()
     expect(posts).toEqual([])
+  })
+
+  test('a whole code arriving in one box (autofill or paste) spreads across the six, and extra digits are dropped', async ({ page, context }) => {
+    const posts = await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    await boxes(page).nth(0).fill('1234567890')
+    for (const [i, d] of [...'123456'].entries()) await expect(boxes(page).nth(i)).toHaveValue(d)
+    await expect(page.getByRole('button', { name: 'Verify account' })).toBeEnabled()
+    expect(posts).toEqual([])
+  })
+
+  test('backspace on an empty box steps back and clears the previous digit', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    await boxes(page).nth(0).pressSequentially('12')
+    await expect(boxes(page).nth(2)).toBeFocused()
+    await page.keyboard.press('Backspace')
+    await expect(boxes(page).nth(1)).toHaveValue('')
+    await expect(boxes(page).nth(1)).toBeFocused()
+  })
+
+  test('it never claims an email was sent: only a resend Supabase accepted may say that', async ({ page, context }) => {
+    await sealed(context)
+    await visit(page, '/verify?email=someone%40example.com')
+    const body = await page.locator('main').innerText()
+    expect(body).not.toMatch(/we.{0,3}ve sent|we sent|has been sent|check your (inbox|email)/i)
+    expect(body).toContain('Enter the 6-digit verification code for')
+    expect(body).toContain('someone@example.com')
+    // The only "on its way" wording lives behind a successful resend call, which this offline page never makes.
+    expect(body).not.toContain('on its way')
+    expect(readFileSync('components/auth/VerifyForm.tsx', 'utf8')).toMatch(
+      /setResendState\('sent'\)[\s\S]{0,120}A new code is on its way/
+    )
   })
 })
