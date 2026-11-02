@@ -24,15 +24,6 @@ export function parseDateOfBirth(raw: string, today: string): FieldResult {
   return { value }
 }
 
-export function parseIdNumber(raw: string): FieldResult {
-  const value = raw.replace(/\s/g, '').toUpperCase()
-  if (!value) return { value: null }
-  if (!/^[A-Z0-9]{6,20}$/.test(value)) {
-    return { value: null, error: 'ID or passport number must be 6–20 letters or digits.' }
-  }
-  return { value }
-}
-
 /**
  * Required variants for patient registration. They return exactly what the
  * optional parsers return — so a value that passes here also passes
@@ -165,6 +156,24 @@ export function requirePassportNumber(raw: string): FieldResult {
     return { value: null, error: 'That looks like a South African ID number, but it isn’t valid. Check each digit, or switch document type to South African ID.' }
   }
   return { value }
+}
+
+/**
+ * Optional South African ID number for profile editing: empty is allowed (the field can be left blank), but
+ * anything entered is held to the exact same rule registration enforces — profile editing must never be a
+ * looser path to the same column. Only applied to a value the person is actively changing; an existing stored
+ * value that predates this rule is never re-run through it just because something else on the form changed
+ * (see validateProfileEdit in lib/profileEditValidation.ts).
+ */
+export function parseOptionalSouthAfricanId(raw: string): FieldResult {
+  if (!raw.trim()) return { value: null }
+  return requireSouthAfricanId(raw)
+}
+
+/** Optional passport number for profile editing — the same relationship to requirePassportNumber() as above. */
+export function parseOptionalPassportNumber(raw: string): FieldResult {
+  if (!raw.trim()) return { value: null }
+  return requirePassportNumber(raw)
 }
 
 /**

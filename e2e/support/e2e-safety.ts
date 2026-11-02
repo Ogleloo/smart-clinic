@@ -25,7 +25,7 @@ import { PRODUCTION_PROJECT_REF, resolveLocalTarget } from './local-supabase-gua
  * OFFLINE: no backend at all — pure logic, or the mocked harness that intercepts and fulfils every request itself. They
  * sign in nowhere (they must not use the live helpers: ACCOUNTS, loginAs, ...).
  */
-export const OFFLINE_SPECS = ['admin-v3-dashboard', 'auth-v3', 'landing-page', 'e2e-safety', 'nurse-v3-landing', 'nurse-v3-queue', 'profile-completeness', 'reception-profile-validation', 'registration-validation']
+export const OFFLINE_SPECS = ['admin-v3-dashboard', 'auth-v3', 'landing-page', 'e2e-safety', 'nurse-v3-landing', 'nurse-v3-queue', 'profile-completeness', 'profile-edit-validation', 'profile-settings-render', 'reception-profile-validation', 'registration-validation']
 
 /**
  * READ-ONLY (live): run by default against whatever project the app server is wired to — possibly the shared one. They may
@@ -39,6 +39,7 @@ export const READ_ONLY_SPECS = [
   'logout',
   'nurse-v3-dashboard',
   'nurse-v3-queue-live',
+  'patient-profile-settings',
   'reception-profile',
   'reception-queue',
 ]

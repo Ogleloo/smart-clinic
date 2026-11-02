@@ -2,11 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import { parseDateOfBirth, parseIdNumber } from '@/lib/profileValidation'
+import { profileEditInputFrom, validateProfileEdit, PROFILE_EDIT_FIELD_ORDER, type ProfileEditErrors } from '@/lib/profileEditValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
 import { validatePassword } from '@/lib/passwordValidation'
 
-export type ActionState = { error?: string; success?: string }
+export type ActionState = { error?: string; success?: string; fieldErrors?: ProfileEditErrors }
 
 /**
  * Patient edits their own profile. profiles_update_own scopes the write
@@ -18,32 +18,40 @@ export type ActionState = { error?: string; success?: string }
  * makes "exactly this one row" the query's own invariant, and .select()
  * lets a silently-filtered update (zero rows) surface as an error
  * instead of a false "saved".
+ *
+ * date_of_birth and id_number are read back first (`current`) so
+ * validateProfileEdit can tell an edited value from an untouched one —
+ * an existing value saved under an older, looser rule is written back
+ * exactly as it already was, not re-validated and not blanked, unless
+ * the person actually changes it.
  */
 export async function updateProfile(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const fullName = String(formData.get('full_name') ?? '').trim()
-  const phone = String(formData.get('phone') ?? '').trim()
-  const dob = parseDateOfBirth(String(formData.get('date_of_birth') ?? ''), todayInClinicTimezone())
-  const idNumber = parseIdNumber(String(formData.get('id_number') ?? ''))
-
-  if (!fullName) return { error: 'Enter your full name.' }
-  if (fullName.length > 120) return { error: 'Full name is too long.' }
-  if (phone.length > 30) return { error: 'Phone number is too long.' }
-  if (dob.error) return { error: dob.error }
-  if (idNumber.error) return { error: idNumber.error }
-
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return { error: 'Your session has expired. Log in again.' }
 
+  const { data: current, error: fetchError } = await supabase
+    .from('profiles')
+    .select('id_number, date_of_birth')
+    .eq('auth_user_id', user.id)
+    .single()
+  if (fetchError || !current) return { error: 'Couldn’t load your current details. Try again.' }
+
+  const { errors, values } = validateProfileEdit(profileEditInputFrom(formData), current, todayInClinicTimezone())
+  if (!values) {
+    const first = PROFILE_EDIT_FIELD_ORDER.find((f) => errors[f])
+    return { error: first ? errors[first] : 'Check your details and try again.', fieldErrors: errors }
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .update({
-      full_name: fullName,
-      phone: phone || null,
-      date_of_birth: dob.value,
-      id_number: idNumber.value,
+      full_name: values.fullName,
+      phone: values.phone,
+      date_of_birth: values.dateOfBirth,
+      id_number: values.idNumber,
     })
     .eq('auth_user_id', user.id)
     .select('id')
