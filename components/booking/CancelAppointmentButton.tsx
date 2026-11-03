@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useState } from 'react'
+import { Trash2 } from 'lucide-react'
 import { cancelAppointment, type ActionState } from '@/app/actions/appointments'
 import { Button } from '@/components/ui/Button'
 import type { AppointmentStatus } from '@/lib/types/database.types'
@@ -38,10 +39,12 @@ export function CancelAppointmentButton({
   if (!confirming) {
     return compact ? (
       <Button variant="danger-outline" onClick={() => setConfirming(true)}>
+        <Trash2 size={16} className="mr-2" aria-hidden />
         Cancel
       </Button>
     ) : (
       <Button variant="danger-outline" fullWidth onClick={() => setConfirming(true)}>
+        <Trash2 size={18} className="mr-2" aria-hidden />
         Cancel appointment
       </Button>
     )
