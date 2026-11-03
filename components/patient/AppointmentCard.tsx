@@ -57,7 +57,7 @@ export function AppointmentCard({ appointment, cancellable }: { appointment: App
           </span>
           <span className="flex min-w-0 flex-col gap-1">
             <span className={COLUMN_LABEL}>Date</span>
-            <span className="text-base text-ink">{formatClinicDate(appointment.scheduled_time, { weekday: 'short' })}</span>
+            <span className="text-base text-ink">{formatClinicDate(appointment.scheduled_time, { month: 'long', year: 'numeric' })}</span>
           </span>
         </div>
 

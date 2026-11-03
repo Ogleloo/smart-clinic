@@ -76,7 +76,7 @@ export function AppointmentDetailsView({ fullName, appointment, typical }: Appoi
         Back to appointments
       </Link>
 
-      <div className="flex w-full max-w-2xl flex-col gap-6">
+      <div className="flex w-full flex-col gap-6">
         <section className={CARD}>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex items-start gap-4">
@@ -95,7 +95,7 @@ export function AppointmentDetailsView({ fullName, appointment, typical }: Appoi
           <div className="h-px bg-border" />
 
           <dl className="flex flex-col gap-4">
-            <FieldRow label="Date" value={formatClinicDate(appointment.scheduled_time, { weekday: 'long', month: 'long' })} />
+            <FieldRow label="Date" value={formatClinicDate(appointment.scheduled_time, { month: 'long', year: 'numeric' })} />
             <FieldRow label="Time" value={<span className="tabular">{formatClinicTime(appointment.scheduled_time)}</span>} />
             <FieldRow
               label="Typical consultation time"
