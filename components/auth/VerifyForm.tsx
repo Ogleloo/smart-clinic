@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useId, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { homeForRole } from '@/lib/auth/homeForRole'
 import { AuthBrand, AuthShell } from '@/components/auth/v3/AuthShell'
 import { BTN_PRIMARY, HEADING, LINK } from '@/components/auth/v3/authStyles'
 
@@ -129,7 +130,35 @@ export function VerifyForm({ email }: VerifyFormProps) {
         setVerifyError('That code is not correct or has expired.')
         return
       }
-      router.push('/dashboard')
+
+      // Staff onboarding (migration 0053). Safe and idempotent for every user: accept_staff_invitation()
+      // does nothing unless an open, unexpired invitation exists for the caller's now-VERIFIED address, so a
+      // patient signing up normally gets {status:'none'} and keeps the 'patient' role handle_new_user() gave
+      // them. The database decides entirely — the browser passes no role, no email and no invitation id, and
+      // the function re-reads the verified address from auth.users itself.
+      //
+      // A failure here must not strand a successfully verified account: the verification itself already
+      // succeeded, so we fall through to the patient dashboard rather than showing an error for something the
+      // person cannot act on. An invitation that was missed this way is still open, and applies on next sign-in
+      // if that call is reached again.
+      let destination = '/dashboard'
+      try {
+        const { data: accepted } = await supabase.rpc('accept_staff_invitation')
+        const status = (accepted as { status?: string; role?: string } | null)?.status
+        const role = (accepted as { status?: string; role?: string } | null)?.role
+        if (status === 'accepted' && (role === 'nurse' || role === 'receptionist')) {
+          destination = homeForRole(role)
+        }
+      } catch {
+        // Network/RPC failure — keep the verified session and land on the patient dashboard.
+      }
+
+      // The role just changed server-side, so the cached session's claims are stale. Refreshing before
+      // navigating means the destination's own requireRole() guard sees the new role rather than bouncing
+      // a freshly-activated nurse straight back out.
+      await supabase.auth.refreshSession()
+      router.push(destination)
+      router.refresh()
     } catch {
       // A thrown error (offline, DNS failure, the request never reaching Supabase at all) is not a
       // {error} response and would otherwise leave `verifying` true and the button disabled forever.

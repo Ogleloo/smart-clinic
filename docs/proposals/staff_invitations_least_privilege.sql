@@ -1,0 +1,82 @@
+-- PROPOSAL ONLY — NOT APPLIED, NOT A MIGRATION.
+--
+-- Nothing in this file has been run against any database. It is the recommendation asked for while building
+-- admin-controlled staff onboarding (PR: feat/admin-staff-invitations), recorded here rather than applied
+-- because changing permissions on the shared project is a production change that needs its own decision.
+--
+-- ---------------------------------------------------------------------
+-- FINDING
+-- ---------------------------------------------------------------------
+-- migration 0053 deliberately granted only SELECT on staff_invitations:
+--
+--     grant select on public.staff_invitations to authenticated;
+--     -- "Read only. All writes go through the functions below, which carry the
+--     --  authorisation logic, so there is deliberately no insert/update grant."
+--
+-- The live grants are wider than that. Observed on the shared project:
+--
+--     staff_invitations: anon=arwdDxtm/postgres | authenticated=arwdDxtm/postgres
+--
+-- i.e. anon and authenticated both hold INSERT, UPDATE, DELETE and TRUNCATE.
+--
+-- ---------------------------------------------------------------------
+-- IS IT EXPLOITABLE TODAY? NO.
+-- ---------------------------------------------------------------------
+-- RLS is enabled on the table and it has exactly ONE policy:
+--
+--     staff_invitations_admin_read  FOR SELECT  USING (auth_role() = 'admin' AND clinic_id = auth_clinic_id())
+--
+-- RLS is deny-by-default: a command with no permissive policy is refused no matter what the table grant
+-- says. With no INSERT/UPDATE/DELETE policy, those writes are already impossible for anon and for any
+-- authenticated non-admin. anon's SELECT grant is likewise inert, because the one SELECT policy requires
+-- auth_role() = 'admin'.
+--
+-- This is the mirror of the rule already in CLAUDE.md ("A policy without a grant does nothing"): here, a
+-- grant without a policy also does nothing. The risk is latent, not live — it only becomes real if someone
+-- later adds a broad policy (e.g. FOR ALL USING (true)) and assumes the grants were already narrow.
+--
+-- ---------------------------------------------------------------------
+-- SCOPE: THIS IS NOT A staff_invitations PROBLEM
+-- ---------------------------------------------------------------------
+-- The same over-broad grants are on almost every table in the schema — 12 of 14 public tables carry anon
+-- INSERT/UPDATE/DELETE, all of them likewise held back only by RLS:
+--
+--   appointments, clinic_hours, clinic_settings, clinics, consultation_notes, consultations,
+--   patient_vitals, profiles, queue_entries, queue_events, services, staff_invitations
+--
+-- (notifications and nurse_actions are already tighter.)
+--
+-- So this is a project-wide default — the usual "GRANT ALL ON ALL TABLES IN SCHEMA public TO anon,
+-- authenticated" that a Supabase project starts with — not something migration 0053 introduced. Fixing it
+-- only for staff_invitations would be inconsistent and would leave the systemic issue in place while
+-- implying it had been dealt with.
+--
+-- ---------------------------------------------------------------------
+-- RECOMMENDATION
+-- ---------------------------------------------------------------------
+-- Treat this as its own hardening change, reviewed and applied on its own, NOT bundled into a feature PR.
+-- Order of work:
+--
+--   1. Decide it as a project-wide piece of work, not table by table.
+--   2. For each table, enumerate what the application genuinely needs per role. The functions are already
+--      SECURITY DEFINER, so they keep working regardless of what the caller's own grants are: they run as
+--      the definer, not the caller. That is what makes this safe to tighten.
+--   3. Apply, then re-run the full destructive suite against a LOCAL stack before the shared project — a
+--      revoked grant that some screen quietly depended on fails closed, and the suite is what finds it.
+--   4. Add an assertion to system_health_check_v2() so the narrowed grants can't silently widen again.
+--
+-- For staff_invitations specifically, the least-privilege end state matching migration 0053's stated intent:
+
+-- revoke all on public.staff_invitations from anon;
+-- revoke all on public.staff_invitations from authenticated;
+-- grant select on public.staff_invitations to authenticated;
+
+-- Nothing else is needed: admin_invite_staff(), admin_revoke_staff_invitation() and
+-- accept_staff_invitation() are all SECURITY DEFINER and own every write to this table.
+--
+-- Verification after applying (expect anon_* false, authenticated_select true):
+--
+--   select has_table_privilege('anon','public.staff_invitations','INSERT')          as anon_insert,
+--          has_table_privilege('anon','public.staff_invitations','SELECT')          as anon_select,
+--          has_table_privilege('authenticated','public.staff_invitations','SELECT') as authenticated_select,
+--          has_table_privilege('authenticated','public.staff_invitations','INSERT') as authenticated_insert;
