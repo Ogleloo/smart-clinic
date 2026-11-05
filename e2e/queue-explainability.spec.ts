@@ -89,7 +89,7 @@ test('multi-nurse shows the method sentence, no equation', async () => {
   //     covers just full_name/phone, even for an admin caller (RLS
   //     would allow the write — auth_role() = 'admin' — but there's no
   //     grant for that column, and a policy without a grant does nothing).
-  //   - The existing second seeded nurse (Sr. Pillay) has clinic_id set
+  //   - The existing second seeded nurse (Nurse Pillay) has clinic_id set
   //     and would work, but her password isn't known here, and directly
   //     writing her is_on_duty/current_service_id via elevated database
   //     access was (correctly) refused as a live write to shared state
