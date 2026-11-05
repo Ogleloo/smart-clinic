@@ -83,5 +83,5 @@ Build approach: same as Patient V3.
 
 - **Input validation:** email format, SA phone (`+27` / `0xx`), name (non-empty), password strength — not yet implemented
 - **Stale queue cleanup:** 65 entries stuck open across 11 past dates — not yet resolved
-- **SMTP:** Gmail App Password recommended to replace Resend. Confirm email currently OFF.
+- **SMTP:** stale — verified read-only against the shared project on 2026-11-05: confirm email is **ON** and OTP mail is being delivered (recent signups confirm in ~26–150s). Delivery to an arbitrary third-party address is still untested; only the addresses actually in use are known to work.
 - **Error display fix:** use `error.message` not `JSON.stringify(error)` on auth pages

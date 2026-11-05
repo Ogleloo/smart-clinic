@@ -153,10 +153,11 @@ export function VerifyForm({ email }: VerifyFormProps) {
         // Network/RPC failure — keep the verified session and land on the patient dashboard.
       }
 
-      // The role just changed server-side, so the cached session's claims are stale. Refreshing before
-      // navigating means the destination's own requireRole() guard sees the new role rather than bouncing
-      // a freshly-activated nurse straight back out.
-      await supabase.auth.refreshSession()
+      // No session refresh is needed for the new role to take effect. auth_role(), auth_clinic_id() and
+      // auth_profile_id() all read public.profiles directly rather than a JWT claim, and requireRole() reads
+      // the same row — so the role applied a moment ago is already live for RLS, for every RPC and for the
+      // destination's own guard. router.refresh() is what matters here: it re-renders the server components
+      // so they read the updated profile instead of a cached one.
       router.push(destination)
       router.refresh()
     } catch {
