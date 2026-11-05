@@ -212,7 +212,8 @@ rather than in the browser. The three offline specs above, plus the
   reads consultations rather than queue entries — but `reset_demo_state()` only
   closes *today's*, so the backlog keeps growing. Harmless for the
   demonstration, worth a sweep afterwards.
-- **PR #50 is still a draft.** It is mergeable, based on current `main`, and its
-  Vercel preview passes. Nothing is blocking it except being marked draft:
-  `gh pr ready 50`, then merge.
+- **PR #50 is merged** (2026-11-05, `654e26c`, squashed). It went in before
+  `e2e/admin-staff-invitations.spec.ts` had ever been run, so the database
+  authorisation it adds is reviewed but not test-proven. §3 above is the
+  substitute; run it before the demonstration.
 - **Leaked-password protection is off** (Supabase advisor). A dashboard toggle.

@@ -24,13 +24,33 @@ Latest development checkpoint. Read this when continuing previous work.
 - **OTP delivery is domain-dependent.** gmail.com 33/35 confirmed, 24–51s typically; icloud.com 0/1, the only non-Gmail consumer address tried. Cause unconfirmed — the relevant auth logs are past retention and the sender configuration is a dashboard setting. Runbook §2 has the two candidates and how to tell them apart. Demonstrate with Gmail.
 - **`e2e/admin-staff-invitations.spec.ts` (PR #50) still runs nowhere.** Docker is unavailable, and the guard rejects hosted Supabase URLs, so a cloud test project will not substitute. The deeper blocker is the one already recorded below: **there is no committed local seed**, so even with Docker the six test accounts must be made by hand. Runbook §3 gives the Docker route and a manual walk-through whose entire residue is a few revoked invitation rows for a fake address.
 - **133 queue entries still `waiting`/`in_progress` across 25 past dates.** Invisible (every screen filters by today) and harmless to the engine (it reads consultations), but `reset_demo_state()` only closes today's, so the backlog grows.
-- **PR #50 is a draft** — mergeable, on current `main`, Vercel preview passing. `gh pr ready 50`, then merge. Nothing else blocks it.
+- ~~PR #50 is a draft~~ — **merged 2026-11-05 as `654e26c`** (squashed), and `main` was merged into this branch afterwards. It went in before `e2e/admin-staff-invitations.spec.ts` had ever been run, so that spec's assertions remain unproven against a database; the manual walk-through in `docs/DEMO_RUNBOOK.md` §3 is the substitute.
 
 **Expected merge conflict:** PR #50 also inserts a checkpoint at the top of this file. Keep both.
 
 ---
 
-## Latest checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37)
+## Previous checkpoint — Admin-controlled staff onboarding (PR #50)
+
+**Date:** 2026-11-05 · **Branch:** `feat/admin-staff-invitations` · **PR #50 — merged** 2026-11-05 as `654e26c`, squashed. It was merged before the destructive spec had ever run; that spec still runs nowhere (see the latest checkpoint and `docs/DEMO_RUNBOOK.md` §3). Branched from `main` `e061e9c`.
+
+**The finding that set the scope:** migration `0053_staff_invitations.sql` had **already implemented staff onboarding end to end** — `staff_invitations` plus `admin_invite_staff`, `admin_revoke_staff_invitation`, `accept_staff_invitation` and a hardened `admin_set_staff_status`, all `SECURITY DEFINER`, all verified live in the shared project. Three of the four were **never called by the application**: the table had zero rows and `/admin/staff` still said staff accounts are "created outside this app". So this PR is wiring, not building — **no new migration, no new privileged function, no service-role credential, no email provider.**
+
+**Done:** Add Staff Member form (name, email, Nurse/Receptionist) → `admin_invite_staff`; invitations list with the statuses the columns support (awaiting registration / active / revoked / expired) → `admin_revoke_staff_invitation`; activation hook calling `accept_staff_invitation()` after `verifyOtp`, then session refresh and routing via the existing `homeForRole()` (nurse → `/nurse/dashboard`, receptionist → `/reception`). Administrator removed from the staff role dropdown and admin rows made read-only, because `admin_set_staff_status` refuses any non-nurse/receptionist target — Edit there had always produced a guaranteed error. One real defect fixed: a rejected invitation wiped the form (React resets `<form action={…}>` on resolve), so the most likely error — duplicate address — forced retyping; inputs are controlled now.
+
+**Design decision to remember:** nothing in this system emails the invitee, and the UI must never imply otherwise. The administrator records an invitation and passes the registration instructions on **out of band**; the invitee gets only the ordinary signup OTP when they themselves register. The submit button says "Record invitation", not "Send", and the confirmation states plainly that no email was sent. An "invitation email" would need `inviteUserByEmail` (service-role) or a new mail provider — i.e. a privileged/external dependency this architecture deliberately does not have.
+
+**Remaining:**
+- **`e2e/admin-staff-invitations.spec.ts` has never been run.** It is classified `DESTRUCTIVE` and covers the real authorisation story: who may invite, privilege escalation refusal, duplicate supersession, revocation, direct-write refusal and RLS visibility. Docker Desktop was unavailable in the authoring environment, so there was no isolated local stack, and it must never touch the shared project. To run: start Docker → `npx supabase start` → `E2E_ENABLE_DESTRUCTIVE=1` against the local stack. **This is the one gap between "reviewed" and "verified" on PR #50.**
+- Staff Management still renders in the V2 820px column (`AdminContentFrame` treats only `/admin` as V3). Converting the admin area to the V3 palette is its own piece of work.
+- Figma `168:412`'s Service / Workload % / On-duty columns are deliberately absent — profiles carry no service assignment, there is no workload metric in the schema, and duty is a per-session fact. Same discipline as the dashboard's omitted "+6 from yesterday" trend lines.
+- **`staff_invitations` grants are wider than migration 0053 intended** (`anon=arwdDxtm` vs the stated `GRANT SELECT`). Not exploitable — RLS has only a SELECT policy and is deny-by-default — and **not specific to this table**: the same grants are on 12 of 14 public tables, i.e. the usual project-wide Supabase default. Deliberately not changed. Recommendation and a proposed, unapplied correction: `docs/proposals/staff_invitations_least_privilege.sql`. It should be its own reviewed change, applied against a local stack first.
+
+**Verified:** TypeScript, ESLint and production build clean; full offline suite **917/917** (881 baseline + 36 new). New offline coverage: validation and status logic for every state, plus an esbuild harness (`e2e/support/staff-invite-harness/`) exercising the real components with the server actions mocked — form open/collapse, no Administrator option, multi-field validation before any round trip, honest confirmation wording, database rejection, rejection→recovery, double-submit protection, keyboard reachability and 1440/768/390/320 with no sideways scrolling.
+
+---
+
+## Previous checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37)
 
 **Date:** 2026-10-20 · **Branch:** `chore/remove-demo-credentials` · **Draft PR #37** (do not merge until re-reviewed; PR #36 is separate and also unmerged). Touches no `app/`, `lib/`, `components/` or `supabase/` file.
 
@@ -423,14 +443,14 @@ against the dev account):**
       avatar upload (no backend support confirmed).
 - [ ] **Nurse V3 screens** — 13 frames in Figma page `05 · Nurse V3`
 - [ ] **Admin V3 screens** — 10 frames in Figma page `06 · Admin V3`
-- [ ] **Fix SMTP** — configure Gmail App Password so OTP emails work (Confirm email currently OFF)
+- [x] **SMTP / confirm email** — superseded. Verified read-only against the shared project on 2026-11-05: email confirmation is ON and OTP mail is being delivered. Recent signups confirm in ~26-150s (3 Nov: 1/1; 4 Nov: 2/3). Whether an arbitrary third-party address receives mail is still unverified — only that the addresses actually in use do.
 - [ ] **Fix error display** — `error.message` instead of `JSON.stringify(error)` on auth pages
 - [ ] **Input validation** — email, SA phone, name, password strength
 - [ ] **Stale queue entries** — 65 entries stuck open across 11 past dates
 
 ### Blockers
 
-- SMTP not configured — Resend free tier only delivers to account owner. Gmail App Password recommended but not yet set up.
+- ~~SMTP not configured~~ — stale as of 2026-11-05: confirmations are landing within seconds (see the SMTP line above). The Resend free-tier "owner address only" limit may still apply to unknown third-party addresses; that specific case has not been tested.
 - Call Next Patient / emergency escalation for reception both need a backend
   decision (new RPC or loosened RLS) that's explicitly still under review —
   do not build either without that decision landing first.
@@ -471,11 +491,11 @@ against the dev account):**
 - [ ] **Reception V3 screens** — 11 frames in Figma page `04 · Reception V3` ← **next task**
 - [ ] **Nurse V3 screens** — 13 frames in Figma page `05 · Nurse V3`
 - [ ] **Admin V3 screens** — 10 frames in Figma page `06 · Admin V3`
-- [ ] **Fix SMTP** — configure Gmail App Password so OTP emails work (Confirm email currently OFF)
+- [x] **SMTP / confirm email** — superseded. Verified read-only against the shared project on 2026-11-05: email confirmation is ON and OTP mail is being delivered. Recent signups confirm in ~26-150s (3 Nov: 1/1; 4 Nov: 2/3). Whether an arbitrary third-party address receives mail is still unverified — only that the addresses actually in use do.
 - [ ] **Fix error display** — `error.message` instead of `JSON.stringify(error)` on auth pages
 - [ ] **Input validation** — email, SA phone, name, password strength
 - [ ] **Stale queue entries** — 65 entries stuck open across 11 past dates
 
 ### Blockers
 
-- SMTP not configured — Resend free tier only delivers to account owner. Gmail App Password recommended but not yet set up.
+- ~~SMTP not configured~~ — stale as of 2026-11-05: confirmations are landing within seconds (see the SMTP line above). The Resend free-tier "owner address only" limit may still apply to unknown third-party addresses; that specific case has not been tested.

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { validateStaffInvite, type InvitableRole, type StaffInviteErrors } from '@/lib/staffInvitationValidation'
 import type { Database } from '@/lib/types/database.types'
 
 async function requireAdminClinicId(supabase: Awaited<ReturnType<typeof createClient>>) {
@@ -217,7 +218,13 @@ export async function updateClinicHours(_prev: HoursFormState, formData: FormDat
 
 export type StaffFormState = { error?: string; success?: boolean; changed?: string[] }
 
-const STAFF_ROLES = ['receptionist', 'nurse', 'admin'] as const
+/**
+ * Administrator is deliberately absent. admin_set_staff_status() refuses any target that isn't already a
+ * nurse or receptionist, and refuses any role change to anything else, so offering "Admin" here only ever
+ * produced a guaranteed server-side error. Administrator accounts are created out of band by the platform
+ * operator (migration 0053).
+ */
+const STAFF_ROLES = ['receptionist', 'nurse'] as const
 
 export async function updateStaffMember(_prev: StaffFormState, formData: FormData): Promise<StaffFormState> {
   const id = String(formData.get('id') ?? '')
@@ -250,6 +257,59 @@ export async function updateStaffMember(_prev: StaffFormState, formData: FormDat
 
   revalidatePath('/admin/staff')
   return { success: true, changed }
+}
+
+export type StaffInviteState = {
+  error?: string
+  fieldErrors?: StaffInviteErrors
+  /** Set only once the database has actually written the invitation — never optimistically. */
+  invited?: { full_name: string; email: string; role: InvitableRole }
+}
+
+/**
+ * Records a staff invitation. Every authorisation decision belongs to admin_invite_staff(): it checks the
+ * caller is an administrator, that they have a clinic, that the role is nurse/receptionist, that no account
+ * already exists for the address, and it supersedes any older open invitation for the same email. None of
+ * that is re-decided here — this action only shapes the form input and surfaces whatever the database says.
+ *
+ * Nothing is emailed to the invitee. This system has no outbound mail of its own; the invitee receives the
+ * ordinary signup OTP when THEY register, and the administrator passes on the instructions out of band. The
+ * returned `invited` payload is what the UI uses to show those instructions — it never claims a message was
+ * sent.
+ */
+export async function inviteStaffMember(_prev: StaffInviteState, formData: FormData): Promise<StaffInviteState> {
+  const { errors, values } = validateStaffInvite({
+    full_name: String(formData.get('full_name') ?? ''),
+    email: String(formData.get('email') ?? ''),
+    role: String(formData.get('role') ?? ''),
+  })
+  if (!values) return { fieldErrors: errors }
+
+  const supabase = await createClient()
+  const { error } = await supabase.rpc('admin_invite_staff', {
+    p_email: values.email,
+    p_full_name: values.full_name,
+    p_role: values.role,
+  })
+  if (error) return { error: error.message }
+
+  revalidatePath('/admin/staff')
+  return { invited: values }
+}
+
+export type RevokeInviteState = { error?: string; revoked?: boolean }
+
+/** Revocation is likewise the database's decision: admin_revoke_staff_invitation() scopes it to the caller's own clinic and refuses an invitation that was already used or revoked. */
+export async function revokeStaffInvitation(_prev: RevokeInviteState, formData: FormData): Promise<RevokeInviteState> {
+  const id = String(formData.get('invitation_id') ?? '')
+  if (!id) return { error: 'Missing invitation.' }
+
+  const supabase = await createClient()
+  const { error } = await supabase.rpc('admin_revoke_staff_invitation', { p_id: id })
+  if (error) return { error: error.message }
+
+  revalidatePath('/admin/staff')
+  return { revoked: true }
 }
 
 export type MergeState = { error?: string; result?: { queueEntriesMoved: number; appointmentsMoved: number; notificationsMoved: number; auditRefsMoved: number } }

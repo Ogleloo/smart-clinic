@@ -14,7 +14,13 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
 }
 
+/**
+ * admin_set_staff_status() refuses any target that is not already a nurse or receptionist, and refuses any
+ * role change to anything else. An administrator row therefore has nothing this form can successfully
+ * change, so it is shown read-only instead of offering an Edit that would always fail.
+ */
 export function StaffRow({ staff, isSelf }: { staff: Profile; isSelf: boolean }) {
+  const editable = staff.role === 'nurse' || staff.role === 'receptionist'
   const [editing, setEditing] = useState(false)
   const [showSaved, setShowSaved] = useState(false)
   const [state, formAction, pending] = useActionState<StaffFormState, FormData>(updateStaffMember, {})
@@ -41,12 +47,17 @@ export function StaffRow({ staff, isSelf }: { staff: Profile; isSelf: boolean })
               {staff.full_name} {isSelf && <span className="text-xs font-normal text-muted">(you)</span>}
             </p>
             <p className="text-xs text-muted">{ROLE_LABELS[staff.role] ?? staff.role}</p>
+            {!editable && (
+              <p className="text-xs text-muted">Administrator accounts are managed outside this app.</p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <StatusChip status={staff.is_active ? 'booked' : 'cancelled'} label={staff.is_active ? 'Active' : 'Inactive'} />
-            <Button variant="tertiary" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
+            {editable && (
+              <Button variant="tertiary" onClick={() => setEditing(true)}>
+                Edit
+              </Button>
+            )}
           </div>
         </div>
         {showSaved && (
@@ -79,7 +90,6 @@ export function StaffRow({ staff, isSelf }: { staff: Profile; isSelf: boolean })
         >
           <option value="receptionist">Receptionist</option>
           <option value="nurse">Nurse</option>
-          <option value="admin">Admin</option>
         </select>
       </div>
       <label className="flex items-center gap-2 text-sm font-semibold text-ink">
