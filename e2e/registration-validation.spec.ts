@@ -315,8 +315,13 @@ test.describe('optional phone at registration', () => {
   })
 })
 
-// What handle_new_user() does with the signup metadata — written out from migration 20261006151206 so that anything this form
+// What handle_new_user() does with the signup metadata — written out from migration 20261105132322 so that anything this form
 // accepts can be shown to survive it. (The trigger drops a malformed value silently; nothing is ever reported back.)
+//
+// One trigger rule is deliberately NOT mirrored: since 20261105132322, an id_number already held by another profile is
+// dropped too. That is a fact about the whole profiles table, not about the value in hand, so a pure-logic mirror cannot
+// decide it — triggerKeeps() answers "is this value well-formed enough to survive", which is what the form controls.
+// The uniqueness rule itself is enforced by the trigger that migration installs, against a real database.
 function triggerKeeps(dob: string, id: string, today: string): { dob: boolean; id: boolean } {
   const normalisedId = id.replace(/\s/g, '').toUpperCase()
   const d = new Date(`${dob}T12:00:00Z`)
@@ -359,7 +364,7 @@ test.describe('what the form sends is what handle_new_user() stores', () => {
       .filter((f) => /create (or replace )?function public\.handle_new_user\b/i.test(readFileSync(join(dir, f), 'utf8')))
       .sort()
     // A newer definition would silently invalidate the mirror: fail until it is reviewed.
-    expect(defining.at(-1)).toBe('20261006151206_patient_profile_fields.sql')
+    expect(defining.at(-1)).toBe('20261105132322_one_identity_per_profile.sql')
     const sql = readFileSync(join(dir, defining.at(-1) as string), 'utf8')
     expect(sql).toContain("'^\\d{4}-\\d{2}-\\d{2}$'")
     expect(sql).toContain("'^[A-Z0-9]{6,20}$'")
@@ -367,6 +372,12 @@ test.describe('what the form sends is what handle_new_user() stores', () => {
     expect(sql).toContain("dob > current_date")
     expect(sql).toMatch(/upper\(regexp_replace\(coalesce\(new\.raw_user_meta_data ->> 'id_number', ''\), '\\s', '', 'g'\)\)/)
     expect(sql).toContain("'patient'")
+
+    // The rule 20261105132322 adds: an already-registered ID is dropped rather than duplicated, and signup still
+    // succeeds. Pinned on the source because the alternative — letting the trigger raise — would reach the registrant
+    // as GoTrue's generic "Database error saving new user", and that choice is the part worth not losing silently.
+    expect(sql).toContain('if idn is not null and exists (select 1 from public.profiles p where p.id_number = idn) then')
+    expect(sql).toContain('idn := null;')
   })
 
   test('a value the trigger would drop is rejected by the form first', () => {

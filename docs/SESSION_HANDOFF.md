@@ -4,6 +4,32 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
+## Latest checkpoint — Pre-demonstration polish (`fix/demo-polish`)
+
+**Date:** 2026-11-05 · **Branch:** `fix/demo-polish` (from `main` `e061e9c`) · demonstration is **6 November 2026**.
+
+**Read `docs/DEMO_RUNBOOK.md` first.** It is the operational half of this checkpoint: what to apply, how to verify it, how to run the blocked test, and what to say about the parts that are not fixed.
+
+**Done (code, verified):**
+- Landing page has **one** "Log in", not two. The header's and the hero's rendered as identical outline buttons in the same viewport on first load. `BTN_OUTLINE` removed with it — nothing else used it. Three assertions in `e2e/landing-page.spec.ts` updated to assert the hero has *no* login link and the page has exactly three; negative-controlled by re-adding the button and watching the assertion fail. 63/63 pass.
+- **`lib/patientQueue.ts` read the wrong clock.** It filtered `queue_date` against the literal `'today'`, which PostgREST resolves in the *database server's* timezone — UTC on this project. Johannesburg is UTC+2, so between midnight and 02:00 SAST it returned yesterday's entries and hid today's. Now `todayInClinicTimezone()`, like every other `queue_date` filter (ADR-020). This was a live defect, found while looking for polish items.
+
+**Written, committed, NOT APPLIED — three migrations.** Applying was refused in-session as a production deploy, which is correct: there is no staging database. Apply in filename order and verify per the runbook.
+- `20261105131920_nurse_title_naming.sql` — `Sr. X` → `Nurse X` for nurses carrying the title (a nurse registered under their own name keeps it). **`reset_demo_state()` is changed in the same file and for that reason:** it puts nurses on duty by matching `full_name` literally, so renaming the rows alone would leave a reset with no nurse on duty, and the engine correctly shows no estimate when no nurse is available — nothing would look broken until someone asked why. The function now matches either spelling, so it is order-independent.
+- `20261105132322_one_identity_per_profile.sql` — `profiles_id_number_clinic_unique` is unique on `(clinic_id, id_number)`, and self-registered patients have `clinic_id` NULL; NULLs never conflict, so the constraint excluded exactly the rows it was meant to cover. A trigger now refuses a *new* duplicate on insert or update, and `handle_new_user` drops an already-registered ID rather than failing signup (GoTrue replaces a trigger's message with "Database error saving new user", which explains nothing to a registrant). Either way the ID lands on one profile only.
+- `20261105132831_pin_search_path_remaining_functions.sql` — pins `search_path` on `update_updated_at` and `revoke_anon_on_new_functions`, the two the Supabase advisor flags. Neither is `SECURITY DEFINER`, so `system_health_check()`'s own search_path assertion was already passing; this clears the advisor, not a failing check.
+
+**Remaining (needs a decision, not code):**
+- **Two ID numbers are held by seven profiles, all with real logins.** The trigger stops new duplicates; it does not remove these, and a global unique index cannot be built while they exist. Removing them means choosing which accounts lose their stored ID, and one of the seven is a nurse whose ID a strict global constraint would stop them from also holding as a patient. Both the cleanup and the index, plus the `system_health_check_v2()` assertion that would keep it true, are in `docs/proposals/one_identity_per_profile_cleanup.sql` — deliberately not applied. Note that `find_duplicate_patients()` cannot surface these: it matches on name/phone, not `id_number`, and excludes pairs where both profiles have logins.
+- **OTP delivery is domain-dependent.** gmail.com 33/35 confirmed, 24–51s typically; icloud.com 0/1, the only non-Gmail consumer address tried. Cause unconfirmed — the relevant auth logs are past retention and the sender configuration is a dashboard setting. Runbook §2 has the two candidates and how to tell them apart. Demonstrate with Gmail.
+- **`e2e/admin-staff-invitations.spec.ts` (PR #50) still runs nowhere.** Docker is unavailable, and the guard rejects hosted Supabase URLs, so a cloud test project will not substitute. The deeper blocker is the one already recorded below: **there is no committed local seed**, so even with Docker the six test accounts must be made by hand. Runbook §3 gives the Docker route and a manual walk-through whose entire residue is a few revoked invitation rows for a fake address.
+- **133 queue entries still `waiting`/`in_progress` across 25 past dates.** Invisible (every screen filters by today) and harmless to the engine (it reads consultations), but `reset_demo_state()` only closes today's, so the backlog grows.
+- **PR #50 is a draft** — mergeable, on current `main`, Vercel preview passing. `gh pr ready 50`, then merge. Nothing else blocks it.
+
+**Expected merge conflict:** PR #50 also inserts a checkpoint at the top of this file. Keep both.
+
+---
+
 ## Latest checkpoint — Security: demo-credential removal and fail-closed E2E (PR #37)
 
 **Date:** 2026-10-20 · **Branch:** `chore/remove-demo-credentials` · **Draft PR #37** (do not merge until re-reviewed; PR #36 is separate and also unmerged). Touches no `app/`, `lib/`, `components/` or `supabase/` file.
