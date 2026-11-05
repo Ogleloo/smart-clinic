@@ -109,8 +109,6 @@ export const HOURS_EMPTY = 'Opening hours have not been published yet.'
 
 export const BTN_PRIMARY =
   'inline-flex min-h-12 items-center justify-center rounded-[8px] bg-[#037F74] px-8 text-sm font-semibold text-white transition-colors hover:bg-[#026B62]'
-export const BTN_OUTLINE =
-  'inline-flex min-h-12 items-center justify-center rounded-[8px] border-[1.5px] border-[#037F74] bg-white px-8 text-sm font-semibold text-[#037F74] transition-colors hover:bg-primary-50'
 /** Focus ring that stays visible on the teal panel (the global ring is teal and would vanish into it). */
 export const RING_ON_TEAL = 'focus-visible:shadow-[0_0_0_2px_#037F74,0_0_0_4px_#FFFFFF]'
 export const BTN_WHITE = `inline-flex min-h-[52px] items-center justify-center rounded-[8px] bg-white px-7 text-sm font-semibold text-[#037F74] transition-colors hover:bg-primary-50 ${RING_ON_TEAL}`

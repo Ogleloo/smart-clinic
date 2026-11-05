@@ -199,10 +199,13 @@ test.describe('navigation: every link goes somewhere real', () => {
     expect(footer).toMatch(/href="\/register"[^>]*>Create an account/)
     expect((h.match(/href="\/register"/g) ?? []).length).toBe(3) // header, CTA, footer — not the hero anymore
 
-    // Log in is unaffected everywhere, including the hero's own "Log in" button.
-    expect(hero).toMatch(/href="\/login"[^>]*>\s*Log in/)
-    expect((h.match(/href="\/login"/g) ?? []).length).toBeGreaterThanOrEqual(4) // header, hero, CTA, footer
+    // Log in: the hero no longer carries one. The header's Log in sits directly above the hero, so the two
+    // rendered as a pair of identical buttons in the same viewport on first load. One way in per screenful.
+    expect(hero).not.toMatch(/href="\/login"/)
+    expect(header).toMatch(/href="\/login"/)
+    expect((h.match(/href="\/login"/g) ?? []).length).toBe(3) // header, CTA, footer
     expect(cta).toMatch(/href="\/login"[^>]*>Log in/)
+    expect(footer).toMatch(/href="\/login"/)
   })
 
   test('service rows and the waiting-room links go to the public display of a real service id', () => {
@@ -561,7 +564,9 @@ test.describe('layout, geometry and accessibility (real component + real compile
       const pick = (k: string, el: Element | null | undefined) => { if (el) out[k] = ratio(getComputedStyle(el).color, bgOf(el)) }
       const byText = (sel: string, t: string) => [...document.querySelectorAll(sel)].find((e) => e.textContent?.trim().startsWith(t))
       pick('primaryButton', byText('a', 'Get started'))
-      pick('outlineButton', document.querySelector('#top a[href="/login"]'))
+      // The hero's outline "Log in" is gone (duplicate of the header's). The remaining outline button is the
+      // CTA panel's white-on-teal Log in, probed below as ctaOutlineButton.
+      pick('ctaOutlineButton', document.querySelector('[aria-labelledby="cta-title"] a[href="/login"]'))
       pick('headerLogin', document.querySelector('header a[href="/login"]'))
       pick('headerBook', document.querySelector('header a[href="/register"]'))
       pick('navActive', document.querySelector('header nav a[aria-current]'))

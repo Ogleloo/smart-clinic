@@ -1,0 +1,101 @@
+-- PROPOSAL -- NOT APPLIED. Requires a decision that a migration cannot make.
+--
+-- Companion to supabase/migrations/20261105132322_one_identity_per_profile.sql,
+-- which stops NEW duplicate ID numbers. This file is the other half: removing
+-- the duplicates that already exist, and then enforcing the rule in the one
+-- place that cannot be bypassed -- a unique index.
+--
+-- Why it is not in the migration: every duplicate row below belongs to a real
+-- auth account. Resolving them means choosing which account keeps the ID and
+-- which accounts have theirs cleared. Clearing an ID is reversible (the holder
+-- re-enters it), but it is still someone's record, and the choice depends on
+-- facts the database does not hold -- which of these accounts a person actually
+-- uses. No ID numbers are written here: they are personal data and this file is
+-- in version control.
+--
+-- ---------------------------------------------------------------- the situation
+--
+-- Two ID numbers are held by seven profiles. All seven have logins.
+--
+--   Group A -- three patient profiles
+--     936d05e7-a784-42e9-ab56-c383b0026681   created 2026-11-04 12:05   0 appointments, 0 queue entries
+--     4307c66a-fb5a-465d-acf3-3f621ee1d53d   created 2026-11-04 12:06   1 appointment,  0 queue entries
+--     5617331e-014a-4bfa-8e2d-3062a45627e4   created 2026-11-04 12:11   1 appointment,  0 queue entries
+--
+--   Group B -- three patient profiles and one nurse profile
+--     d63c2edf-dfd8-4945-bba8-19e619d2bec5   created 2026-09-23         1 appointment,  1 queue entry
+--     76cb46c4-ec6e-436d-a37d-043ff2c65214   created 2026-11-01         0 appointments, 0 queue entries
+--     93abc68d-46ac-4890-a8a7-918e386ef901   created 2026-11-02         2 appointments, 1 queue entry
+--     dfccbcf9-ee24-44bd-8c78-2cc85602477a   created 2026-11-05  NURSE  0 appointments, 0 queue entries
+--
+-- Group A and group B both look like the same person registering repeatedly
+-- while testing, three minutes apart in group A's case.
+--
+-- Group B raises a question group A does not: one of its profiles is a nurse.
+-- A global unique index would forbid one person from holding both a staff
+-- profile and a patient profile, which in a real clinic is a normal thing to
+-- want (a nurse is also somebody's patient). Decide which rule is intended
+-- before running anything here:
+--
+--   Rule 1 -- one ID, one profile, full stop.  Simple, matches "no two users
+--     share an ID" literally. Costs the nurse/patient overlap: whoever holds
+--     that ID keeps it on one profile only.
+--
+--   Rule 2 -- one ID, one profile per role.  Index on (role, id_number)
+--     instead. Allows the nurse/patient overlap. Still forbids the case the
+--     complaint is actually about -- two patients claiming one ID.
+--
+-- ------------------------------------------------------------- step 1: cleanup
+--
+-- Keep the most-used profile in each group, clear the ID on the rest. Under
+-- rule 2, drop `dfccbcf9` from the second list (the nurse keeps its ID).
+--
+-- Replace this list only after confirming with the account holder which profile
+-- they use. The ids below are the "most dependent records" reading, not a
+-- decision.
+--
+-- update public.profiles set id_number = null
+--  where id in (
+--    -- group A: 5617331e keeps it
+--    '936d05e7-a784-42e9-ab56-c383b0026681',
+--    '4307c66a-fb5a-465d-acf3-3f621ee1d53d',
+--    -- group B: 93abc68d keeps it
+--    'd63c2edf-dfd8-4945-bba8-19e619d2bec5',
+--    '76cb46c4-ec6e-436d-a37d-043ff2c65214',
+--    'dfccbcf9-ee24-44bd-8c78-2cc85602477a'   -- rule 1 only
+--  );
+--
+-- ----------------------------------------------------- step 2: the real guard
+--
+-- Rule 1:
+-- create unique index concurrently profiles_id_number_unique
+--   on public.profiles (id_number) where id_number is not null;
+--
+-- Rule 2:
+-- create unique index concurrently profiles_id_number_role_unique
+--   on public.profiles (role, id_number) where id_number is not null;
+--
+-- CONCURRENTLY cannot run inside a transaction block; run it on its own. It
+-- fails rather than blocking if a duplicate is still present, which is the
+-- desired outcome -- step 1 was then incomplete.
+--
+-- Then drop the index that never worked, and only then:
+-- drop index if exists public.profiles_id_number_clinic_unique;
+--
+-- Note the ordering. Dropping first would leave a window with no constraint at
+-- all. Expand, then contract.
+--
+-- ------------------------------------------------- step 3: assert it stays true
+--
+-- Add to system_health_check_v2() so the invariant is checked continuously
+-- rather than remembered. Written as an assertion, not a checklist item --
+-- CLAUDE.md's rule. It will FAIL until step 1 is done, which is why it is here
+-- and not already applied.
+--
+--   select 'no duplicate id_numbers'::text,
+--          not exists (
+--            select 1 from public.profiles
+--             where id_number is not null
+--             group by id_number having count(*) > 1
+--          ),
+--          'two profiles may not hold the same identity document'::text

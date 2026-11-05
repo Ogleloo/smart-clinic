@@ -1,7 +1,7 @@
 import Image from 'next/image'
 import Link from 'next/link'
 import {
-  ANCHORS, BTN_OUTLINE, BTN_PRIMARY, BTN_WHITE, BTN_WHITE_OUTLINE, CARD, CHECK_IN_NOTE, CTA_SUBTITLE, EMPTY_SERVICES_TEXT,
+  ANCHORS, BTN_PRIMARY, BTN_WHITE, BTN_WHITE_OUTLINE, CARD, CHECK_IN_NOTE, CTA_SUBTITLE, EMPTY_SERVICES_TEXT,
   FEATURES, FOOTER_BLURB, HERO_SUBTITLE, HOURS_EMPTY, HOURS_UNAVAILABLE, ICON_BADGE, MICRO_FEATURES, NAV_LINKS,
   SNAPSHOT_NOTE, STEPS, UNAVAILABLE_SERVICES_TEXT,
   displayHref, serviceIconFor, serviceStatusText, type HoursState, type ServicesState,
@@ -93,12 +93,13 @@ function Hero() {
             {/* The only landing link that goes to /welcome (PR #45): every other "register" action on this page
                 — the header, this section's own "Book appointment" elsewhere, the CTA panel, the footer — still
                 goes straight to /register. This one alone opens the V3 welcome entry, which itself offers
-                "Get started" (→ /register) and "Log in" (→ /login), plus a link back to this page. */}
+                "Get started" (→ /register) and "Log in" (→ /login), plus a link back to this page.
+
+                No "Log in" beside it: the header's own Log in sits directly above this, so the two rendered as
+                a pair of identical buttons in the same viewport on first load. One way in per screenful — the
+                header keeps it, since that is where a returning visitor looks for it. */}
             <Link href="/welcome" className={BTN_PRIMARY}>
               Get started →
-            </Link>
-            <Link href="/login" className={BTN_OUTLINE}>
-              Log in
             </Link>
           </div>
 

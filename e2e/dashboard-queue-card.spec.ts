@@ -56,7 +56,7 @@ test('dashboard shows "not currently being served" with no number when no nurse 
   await loginAs(nursePage, ACCOUNTS.nurse.email, ACCOUNTS.nurse.password)
   await nursePage.getByRole('button', { name: 'End session' }).click()
   // checkEndSessionImpact is a server round-trip; the confirmation
-  // dialog (Sr. Mabaso is the only nurse on GC with patients waiting)
+  // dialog (Nurse Mabaso is the only nurse on GC with patients waiting)
   // can take a while to appear under this sandbox's variable latency.
   // isVisible() checks the DOM *right now* — it doesn't wait — so
   // racing it against the eventual outcome (rather than polling
