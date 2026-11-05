@@ -30,6 +30,10 @@ npx supabase db push
 
 `db push` applies only migrations not already in
 `supabase_migrations.schema_migrations`, so it will pick up exactly these three.
+Confirmed on 2026-11-05: 66 files in `supabase/migrations/`, 63 rows recorded
+remotely. If those two numbers are not 3 apart when you run it, stop and find
+out why before pushing — something was applied without being committed, which
+has happened on this project before.
 
 ### Verify immediately after
 
