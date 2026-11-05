@@ -398,7 +398,15 @@ test.describe('Verify account (Figma 45:68)', () => {
     expect(src).toContain('submittingRef')
     expect(src).toContain('over_email_send_rate_limit')
     expect(src).toContain('That code is not correct or has expired.')
-    expect(src).toContain("router.push('/dashboard')")
+    // Verification used to always land on '/dashboard'. Staff onboarding (migration 0053) made the
+    // destination depend on what accept_staff_invitation() returns, so the literal is gone: a patient still
+    // reaches /dashboard via the default below, while a just-activated nurse or receptionist is routed by
+    // the shared homeForRole(). The default must stay '/dashboard' — an invitation lookup that fails or
+    // finds nothing must not strand a successfully verified account.
+    expect(src).toContain("let destination = '/dashboard'")
+    expect(src).toContain('router.push(destination)')
+    expect(src).toContain('accept_staff_invitation')
+    expect(src).toContain('homeForRole(role)')
   })
 
   test('the code is six digits: fewer leaves Verify disabled and the action is never reached', async ({ page, context }) => {
