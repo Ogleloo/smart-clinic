@@ -2,11 +2,13 @@ import { validatePassword } from './passwordValidation'
 import {
   dobMatchesSaId,
   isValidSouthAfricanId,
+  parseEmail,
   parseOptionalPhone,
   parseStaffName,
   requireDateOfBirth,
   requirePassportNumber,
   requireSouthAfricanId,
+  saIdDobMismatchMessage,
 } from './profileValidation'
 
 export type DocumentType = 'sa_id' | 'passport'
@@ -85,9 +87,11 @@ export function validateRegistration(
   const name = parseStaffName(input.full_name)
   if (name.error) errors.full_name = name.error
 
-  const email = input.email.trim()
-  if (!email) errors.email = 'Enter your email address.'
-  else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.email = 'Enter a valid email address.'
+  // Syntax only, and lower-cased so the address this account is created under is the one a later sign-in
+  // compares against. Nothing here claims the mailbox exists or can receive anything.
+  const emailResult = parseEmail(input.email)
+  if (emailResult.error) errors.email = emailResult.error
+  const email = emailResult.value ?? ''
 
   const phone = parseOptionalPhone(input.phone)
   if (phone.error) errors.phone = phone.error
@@ -100,7 +104,8 @@ export function validateRegistration(
   if (idNumber.error) errors.id_number = idNumber.error
 
   if (dob.value && idNumber.value && isValidSouthAfricanId(idNumber.value) && !dobMatchesSaId(dob.value, idNumber.value, today)) {
-    errors.date_of_birth = 'That date of birth doesn’t match your South African ID number.'
+    // Names the date the ID encodes, so it is clear which of the two fields to correct.
+    errors.date_of_birth = saIdDobMismatchMessage(idNumber.value, today)
   }
 
   const password = validatePassword(input.password)

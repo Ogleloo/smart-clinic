@@ -13,6 +13,7 @@ import {
 } from '@/lib/registrationValidation'
 import { todayInClinicTimezone } from '@/lib/clinicTime'
 import { passwordsMatch, validatePassword } from '@/lib/passwordValidation'
+import { parseEmail } from '@/lib/profileValidation'
 
 export type ActionState = { error?: string; success?: string }
 
@@ -77,7 +78,11 @@ export async function register(_prev: RegisterState, formData: FormData): Promis
 }
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
-  const email = String(formData.get('email') ?? '').trim()
+  // Lower-cased to match the address registration stored, and trimmed because a pasted address often carries a
+  // trailing space. Deliberately NOT shape-validated: on a sign-in form the only useful answer to a malformed
+  // address is the same "Email or password is incorrect" every wrong credential gets, and a separate "that isn't
+  // a valid address" message would tell an attacker which half of the guess to keep.
+  const email = String(formData.get('email') ?? '').trim().toLowerCase()
   const password = String(formData.get('password') ?? '')
 
   if (!email || !password) return { error: 'Enter your email and password.' }
@@ -150,8 +155,13 @@ export async function requestPasswordReset(
   _prev: ActionState,
   formData: FormData
 ): Promise<ActionState> {
-  const email = String(formData.get('email') ?? '').trim()
-  if (!email) return { error: 'Enter your email address.' }
+  // Shape-checked here, unlike sign-in: this form has no password to be wrong, so a typo would otherwise be
+  // answered with the same deliberately vague "if that address has an account, a link is on its way" as a
+  // correct address, and the person would wait for mail that was never sent anywhere. Lower-cased to match the
+  // stored address. The reply below still does not reveal whether an account exists.
+  const parsed = parseEmail(String(formData.get('email') ?? ''))
+  if (parsed.error) return { error: parsed.error }
+  const email = parsed.value as string
 
   const supabase = await createClient()
   const origin = (await headers()).get('origin') ?? ''

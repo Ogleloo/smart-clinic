@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { parseConsultationMinutes, parseServiceName, parseTokenPrefix } from '@/lib/serviceValidation'
 import { validateStaffInvite, type InvitableRole, type StaffInviteErrors } from '@/lib/staffInvitationValidation'
 import type { Database } from '@/lib/types/database.types'
 
@@ -24,17 +25,19 @@ const SERVICE_FIELD_LABELS: Record<string, string> = {
 }
 
 export async function createService(_prev: ServiceFormState, formData: FormData): Promise<ServiceFormState> {
-  const name = String(formData.get('name') ?? '').trim()
-  const tokenPrefix = String(formData.get('token_prefix') ?? '')
-    .trim()
-    .toUpperCase()
-  const defaultMinutes = Number(formData.get('default_consultation_minutes'))
+  // Mirrors the CHECK constraints on public.services, so a mistake comes back as a sentence rather than as the
+  // raw constraint violation this action returns verbatim. See lib/serviceValidation.ts.
+  const nameResult = parseServiceName(String(formData.get('name') ?? ''))
+  if (nameResult.error) return { error: nameResult.error }
+  const name = nameResult.value as string
 
-  if (!name) return { error: 'Enter a service name.' }
-  if (!tokenPrefix) return { error: 'Enter a token prefix.' }
-  if (!Number.isFinite(defaultMinutes) || defaultMinutes <= 0) {
-    return { error: 'Enter a valid default duration in minutes.' }
-  }
+  const prefixResult = parseTokenPrefix(String(formData.get('token_prefix') ?? ''))
+  if (prefixResult.error) return { error: prefixResult.error }
+  const tokenPrefix = prefixResult.value as string
+
+  const minutesResult = parseConsultationMinutes(formData.get('default_consultation_minutes'))
+  if (minutesResult.error) return { error: minutesResult.error }
+  const defaultMinutes = minutesResult.value as number
 
   const supabase = await createClient()
   const clinicId = await requireAdminClinicId(supabase)
@@ -54,19 +57,22 @@ export async function createService(_prev: ServiceFormState, formData: FormData)
 
 export async function updateService(_prev: ServiceFormState, formData: FormData): Promise<ServiceFormState> {
   const id = String(formData.get('id') ?? '')
-  const name = String(formData.get('name') ?? '').trim()
-  const tokenPrefix = String(formData.get('token_prefix') ?? '')
-    .trim()
-    .toUpperCase()
-  const defaultMinutes = Number(formData.get('default_consultation_minutes'))
   const isActive = formData.get('is_active') === 'true'
 
   if (!id) return { error: 'Missing service.' }
-  if (!name) return { error: 'Enter a service name.' }
-  if (!tokenPrefix) return { error: 'Enter a token prefix.' }
-  if (!Number.isFinite(defaultMinutes) || defaultMinutes <= 0) {
-    return { error: 'Enter a valid default duration in minutes.' }
-  }
+
+  // Same rules as createService — editing a service must not be a looser path to the same columns.
+  const nameResult = parseServiceName(String(formData.get('name') ?? ''))
+  if (nameResult.error) return { error: nameResult.error }
+  const name = nameResult.value as string
+
+  const prefixResult = parseTokenPrefix(String(formData.get('token_prefix') ?? ''))
+  if (prefixResult.error) return { error: prefixResult.error }
+  const tokenPrefix = prefixResult.value as string
+
+  const minutesResult = parseConsultationMinutes(formData.get('default_consultation_minutes'))
+  if (minutesResult.error) return { error: minutesResult.error }
+  const defaultMinutes = minutesResult.value as number
 
   const newValues = {
     name,

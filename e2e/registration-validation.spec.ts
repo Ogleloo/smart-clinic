@@ -230,7 +230,10 @@ test.describe('validateRegistration: date of birth against the ID number', () =>
     for (const dob of ['1999-12-31', '1980-01-02', '1980-02-01', '1981-01-01']) {
       const r = validateRegistration({ ...VALID, date_of_birth: dob }, TODAY)
       expect(r.values, dob).toBeNull()
-      expect(r.errors.date_of_birth, dob).toMatch(/doesn.t match your south african id/i)
+      // The message names the date the ID encodes, so it is clear which of the two fields is the wrong one.
+      expect(r.errors.date_of_birth, dob).toBe(
+        'That ID number encodes a birth date of 1980-01-01, which doesn’t match the date of birth you entered.',
+      )
       expect(r.errors.id_number, dob).toBeUndefined()
     }
   })
@@ -238,7 +241,11 @@ test.describe('validateRegistration: date of birth against the ID number', () =>
     for (const dob of ['1905-06-15', '2005-06-15']) {
       expect(validateRegistration({ ...VALID, id_number: SA_ID_AMBIGUOUS, date_of_birth: dob }, TODAY).errors).toEqual({})
     }
-    expect(validateRegistration({ ...VALID, id_number: SA_ID_AMBIGUOUS, date_of_birth: '1955-06-15' }, TODAY).errors.date_of_birth).toMatch(/doesn.t match/i)
+    // Both candidate years are named, because the ID genuinely does not say which one it is — claiming one
+    // would be asserting something the number does not contain.
+    expect(validateRegistration({ ...VALID, id_number: SA_ID_AMBIGUOUS, date_of_birth: '1955-06-15' }, TODAY).errors.date_of_birth).toBe(
+      'That ID number encodes a birth date of 1905-06-15 or 2005-06-15 — neither matches the date of birth you entered.',
+    )
   })
   test('the same rule holds on a leap day', () => {
     expect(validateRegistration({ ...VALID, id_number: SA_ID_LEAP_DAY, date_of_birth: '2000-02-29' }, TODAY).errors).toEqual({})
@@ -302,9 +309,26 @@ test.describe('optional phone at registration', () => {
     expect(parseOptionalPhone('')).toEqual({ value: null })
     expect(validateRegistration({ ...VALID, phone: '   ' }, TODAY).values?.phone).toBeNull()
   })
-  test('South African and foreign numbers are kept exactly as typed', () => {
-    for (const raw of ['082 123 4567', '+27 82 123 4567', '+44 20 7946 0958', '(035) 123-4567', '0821234567']) {
-      expect(parseOptionalPhone(raw), raw).toEqual({ value: raw })
+  /**
+   * Registration used to keep the phone number exactly as typed and accept foreign numbers, so a patient
+   * registering with a passport could give a +44 number. That is now refused: the rule is the same South African
+   * one every other phone field in the app uses, and the number is normalised to the single stored format.
+   *
+   * The trade is deliberate — two different phone rules meant the same number was accepted on one form and
+   * refused on the next, and was stored in whatever shape it was typed, so no two records were comparable and
+   * none could be dialled from the record alone. A number the clinic cannot call is worth less than the
+   * flexibility costs. International numbers need a country field, not a second rule.
+   */
+  test('every accepted South African format is normalised to one stored format', () => {
+    for (const raw of ['082 123 4567', '+27 82 123 4567', '0821234567', '27821234567', '082-123-4567']) {
+      expect(parseOptionalPhone(raw), raw).toEqual({ value: '+27 82 123 4567' })
+    }
+    expect(parseOptionalPhone('(035) 123 4567'), '(035) 123 4567').toEqual({ value: '+27 35 123 4567' })
+    expect(validateRegistration({ ...VALID, phone: '0821234567' }, TODAY).values?.phone).toBe('+27 82 123 4567')
+  })
+  test('a foreign number is now refused, and says what is expected', () => {
+    for (const raw of ['+44 20 7946 0958', '+263 77 123 4567', '+1 555 0100']) {
+      expect(parseOptionalPhone(raw).error, raw).toMatch(/south african number/i)
     }
   })
   test('letters, symbols, too few or too many digits and over-long text are refused', () => {
@@ -312,6 +336,8 @@ test.describe('optional phone at registration', () => {
       expect(parseOptionalPhone(raw).error, raw).toBeTruthy()
     }
     expect(validateRegistration({ ...VALID, phone: 'abc' }, TODAY).errors.phone).toBeTruthy()
+    // A leading 0 followed by nine digits, but starting 00 — not a real national number.
+    expect(parseOptionalPhone('0012345678').error).toBeTruthy()
   })
 })
 
@@ -631,18 +657,18 @@ test.describe('registration form: live correction of errors (real page, nothing 
     await visit(page, '/register')
     await fillValid(page)
     await page.getByLabel('Email address').fill('not-an-email') // break exactly one field
-    await page.getByLabel('Mobile number (optional)').fill('12345') // and a second, differently
+    await page.getByLabel('Mobile number (optional)').fill('12345') // and a second, differently (not an SA number)
     await page.getByRole('button', { name: 'Create account' }).click()
 
     await expect(page.getByText('Enter a valid email address.')).toBeVisible()
-    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible()
+    await expect(page.getByText('Enter a South African number, like 082 123 4567 or +27 82 123 4567.')).toBeVisible()
 
     await page.getByLabel('Email address').fill('thabo@example.com')
     await expect(page.getByText('Enter a valid email address.')).toHaveCount(0)
-    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toBeVisible() // untouched, still shown
+    await expect(page.getByText('Enter a South African number, like 082 123 4567 or +27 82 123 4567.')).toBeVisible() // untouched, still shown
 
     await page.getByLabel('Mobile number (optional)').fill('')
-    await expect(page.getByText('That phone number should have between 7 and 15 digits.')).toHaveCount(0)
+    await expect(page.getByText('Enter a South African number, like 082 123 4567 or +27 82 123 4567.')).toHaveCount(0)
     expect(posts).toEqual([])
   })
 
@@ -863,7 +889,7 @@ test.describe('date of birth from the ID number (real page, nothing submitted)',
     await page.getByLabel('Password', { exact: true }).fill('longenough')
     await page.getByRole('button', { name: 'Create account' }).click()
 
-    await expect(page.getByText(/date of birth doesn.t match your south african id/i)).toBeVisible()
+    await expect(page.getByText(/encodes a birth date of 1980-01-01/i)).toBeVisible()
     await expect(dobField(page)).toBeFocused()
     await expect(dobField(page)).toHaveAttribute('aria-invalid', 'true')
     expect(posts).toEqual([])
