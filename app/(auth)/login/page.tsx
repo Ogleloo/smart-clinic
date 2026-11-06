@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { homeForRole } from '@/lib/auth/homeForRole'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { LoginForm } from '@/components/auth/LoginForm'
 import { AuthBrand, AuthShell } from '@/components/auth/v3/AuthShell'
 import { BTN_PRIMARY, BTN_SECONDARY, HEADING, SUBHEADING } from '@/components/auth/v3/authStyles'
@@ -73,11 +73,9 @@ export default async function LoginPage({
             <Link href={homeForRole(role)} className={BTN_PRIMARY}>
               Continue as {firstName}
             </Link>
-            <form action={logout} className="w-full">
-              <button type="submit" className={BTN_SECONDARY}>
-                Sign out and use another account
-              </button>
-            </form>
+            <SignOutConfirm formClassName="w-full" buttonClassName={BTN_SECONDARY}>
+              Sign out and use another account
+            </SignOutConfirm>
           </div>
         </div>
       </AuthShell>

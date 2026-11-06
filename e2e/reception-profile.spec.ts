@@ -199,7 +199,9 @@ test.describe('Profile Settings — navigation, responsiveness, Sign Out', () =>
 
   test('Sign Out on this page uses the real logout and lands on /login', async ({ page }) => {
     await openSettings(page)
+    // Two steps since components/ui/SignOutConfirm.tsx — the page control confirms first, the dialog's button acts.
     await page.getByRole('button', { name: 'Sign Out' }).last().click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Sign Out' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 30_000 })
     await page.goto(SETTINGS)
     await expect(page).toHaveURL(/\/login/)

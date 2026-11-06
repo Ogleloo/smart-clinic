@@ -7,6 +7,7 @@ import {
   parseOptionalPhone,
   parseOptionalSouthAfricanId,
   parseStaffName,
+  saIdDobMismatchMessage,
   type FieldResult,
 } from './profileValidation'
 
@@ -111,7 +112,28 @@ export function validateProfileEdit(
     !(idUnchanged && dobUnchanged) &&
     !dobMatchesSaId(dob.value, idNumber.value, today)
   ) {
-    errors.date_of_birth = 'That date of birth doesn’t match the South African ID number on file.'
+    errors.date_of_birth = saIdDobMismatchMessage(idNumber.value, today)
+  }
+
+  /**
+   * One of the pair filled in while the other is left empty is refused, but only when the person is changing one
+   * of them right now — the same gate the cross-check above uses, and for the same reason: a legacy profile that
+   * holds one without the other must stay editable without being made to supply the missing one.
+   *
+   * Both columns are nullable, so without this an ID number could be saved with the date-of-birth field left
+   * blank, and the check that the two agree would simply never run: a South African ID that encodes a birth date
+   * nobody has to match is only half-entered, and the half that would have contradicted it is the half omitted.
+   * Requiring the other side is what closes that, in both directions — the app already asks for both together
+   * (lib/profileCompleteness.ts treats either one missing as an incomplete profile), so this refuses nothing the
+   * rest of the screen was not already asking for.
+   */
+  const changingEither = !(idUnchanged && dobUnchanged)
+  if (changingEither && !errors.id_number && !errors.date_of_birth) {
+    if (idNumber.value && !dob.value) {
+      errors.date_of_birth = 'Enter your date of birth too — an ID or passport number is only saved together with one.'
+    } else if (dob.value && !idNumber.value) {
+      errors.id_number = 'Enter your ID or passport number too — a date of birth is only saved together with one.'
+    }
   }
 
   if (Object.keys(errors).length > 0) return { errors, values: null }

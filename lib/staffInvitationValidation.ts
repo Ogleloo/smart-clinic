@@ -1,3 +1,5 @@
+import { parseEmail, parseStaffName } from './profileValidation'
+
 /** The only roles an administrator may invite. Mirrors staff_invitation_role_is_staff in migration 0053. */
 export const INVITABLE_ROLES = ['nurse', 'receptionist'] as const
 export type InvitableRole = (typeof INVITABLE_ROLES)[number]
@@ -23,20 +25,39 @@ export const STAFF_INVITE_FIELD_ORDER = ['full_name', 'email', 'role'] as const
  * an account already exists, none of which the browser can be trusted to decide. This exists so a typo is
  * caught before a round trip, not to replace that check: anything this misses is still refused server-side.
  *
- * The email pattern is deliberately the same shape as the function's own regex rather than a stricter one,
- * so the form never accepts an address the database would then reject (or vice versa).
+ * The email rule may be stricter than the function's own regex, never looser — see parseEmail's note below.
+ * That direction is the safe one: the form can refuse an address the database would have taken, but it can
+ * never accept one the database will then reject.
  */
+
 export function validateStaffInvite(input: StaffInviteInput): { errors: StaffInviteErrors; values: { full_name: string; email: string; role: InvitableRole } | null } {
   const errors: StaffInviteErrors = {}
 
-  const fullName = input.full_name.trim()
-  if (!fullName) errors.full_name = 'Enter the staff member’s full name.'
+  // The same name rule as every other name field in the app (letters, spaces, hyphens, apostrophes, full stops),
+  // with this form's own wording for the empty case — an invited nurse's name is displayed on the queue screens
+  // beside patients', so it cannot be held to a looser standard than a patient's own.
+  const name = parseStaffName(input.full_name)
+  const fullName = name.value ?? ''
+  if (name.error) errors.full_name = name.error === 'Enter your full name.' ? 'Enter the staff member’s full name.' : name.error
 
-  const email = input.email.trim().toLowerCase()
-  if (!email) {
-    errors.email = 'Enter their work email address.'
-  } else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    errors.email = 'That doesn’t look like an email address.'
+  /**
+   * Syntax only — it says nothing about whether the mailbox exists or can be reached, and nothing in this system
+   * sends the invitee anything (see invitationStatus below), so there is no delivery for it to imply.
+   *
+   * Stricter than admin_invite_staff()'s own regex, which is the safe direction: this can refuse an address the
+   * database would have accepted, but it can never accept one the database will then reject, so the form still
+   * cannot promise something the database refuses. The extra rules — consecutive dots, a dot at the edge of a
+   * part, the 254-character limit — reject text that is not a deliverable address under any reading.
+   */
+  const parsed = parseEmail(input.email)
+  const email = parsed.value ?? ''
+  if (parsed.error) {
+    errors.email =
+      parsed.error === 'Enter your email address.'
+        ? 'Enter their work email address.'
+        : parsed.error === 'Enter a valid email address.'
+          ? 'That doesn’t look like an email address.'
+          : parsed.error
   }
 
   const role = input.role as InvitableRole

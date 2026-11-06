@@ -602,9 +602,14 @@ test.describe('Nurse V3 dashboard — live, read-only', () => {
     await expect(page).toHaveURL(/\/nurse\/queue$/, { timeout: 90_000 })
   })
 
-  test('Sign Out from the dashboard lands on /login', async ({ page }) => {
+  test('Sign Out from the dashboard asks first, then lands on /login', async ({ page }) => {
     await openDashboard(page)
     await page.getByRole('navigation', { name: 'Main' }).first().getByRole('button', { name: 'Sign Out' }).click()
+    // The sidebar control opens a confirmation (components/ui/SignOutConfirm.tsx); the dialog's own button is the
+    // one that reaches the Server Action. Still on the dashboard until it is used.
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(page).toHaveURL(/\/nurse\/dashboard$/)
+    await page.getByRole('dialog').getByRole('button', { name: 'Sign Out' }).click()
     await expect(page).toHaveURL(/\/login/, { timeout: 90_000 })
   })
 

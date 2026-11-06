@@ -2,7 +2,7 @@
 
 import { useActionState, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { ChevronDown, KeyRound, LogOut } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { updateProfile, changePassword, type ActionState } from '@/app/actions/profile'
 import {
   profileEditInputFrom,
@@ -384,13 +384,11 @@ export function QuickActions({ initialOpenPassword = false }: QuickActionsProps 
         )}
       </div>
 
-      {/* Same logout() Server Action the sidebar uses. */}
-      <form action={logout}>
-        <button type="submit" className={`${row} text-danger`}>
-          <LogOut size={20} aria-hidden className="shrink-0" />
-          Sign Out
-        </button>
-      </form>
+      {/* Same logout() Server Action the sidebar uses, behind the same confirmation step. */}
+      <SignOutConfirm buttonClassName={`${row} text-danger`}>
+        <LogOut size={20} aria-hidden className="shrink-0" />
+        Sign Out
+      </SignOutConfirm>
     </div>
   )
 }

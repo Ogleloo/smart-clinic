@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Headphones, LogOut, Phone, UserRound } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { SIDEBAR_ITEMS, isActivePath } from './navItems'
 import { PROFILE_SETTINGS_HREF } from './ProfileChip'
 
@@ -78,15 +78,10 @@ export function ReceptionSidebar({ clinicName, clinicPhone }: ReceptionSidebarPr
           {/* No nav-row equivalent in Figma (frame 111:2) — the profile chip's chevron implies a dropdown with
               sign-out, but no such menu exists yet. Kept here, same row styling, so every receptionist still has
               a visible way to sign out from the dashboard shell. Same Server Action as the rest of the app. */}
-          <form action={logout}>
-            <button
-              type="submit"
-              className="flex h-[58px] w-full items-center gap-4 rounded-md pl-5 pr-4 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
-            >
-              <LogOut size={24} aria-hidden />
-              Sign Out
-            </button>
-          </form>
+          <SignOutConfirm buttonClassName="flex h-[58px] w-full items-center gap-4 rounded-md pl-5 pr-4 text-base text-muted transition-colors hover:bg-paper hover:text-ink">
+            <LogOut size={24} aria-hidden />
+            Sign Out
+          </SignOutConfirm>
         </nav>
       </div>
 

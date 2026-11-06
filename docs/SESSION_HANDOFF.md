@@ -4,7 +4,41 @@ Latest development checkpoint. Read this when continuing previous work.
 
 ---
 
-## Latest checkpoint — Admin-controlled staff onboarding (PR #50)
+## Latest checkpoint — Sign-out confirmation + input validation (PR #52)
+
+**Date:** 2026-11-06 · **Branch:** `fix/form-validation` · **Draft PR #52** (open, do not merge). Branched from `main` `654e26c`. **No migrations.** Nothing touching email confirmation / Resend / SMTP.
+
+Two commits: `4858853` sign-out confirmation on all twelve surfaces via the new
+`components/ui/SignOutConfirm.tsx`; `23cf0f4` shared email / name / phone / service-field rules plus the
+ID-and-date-of-birth pairing rule.
+
+**Verified:** `tsc` clean, `next build` succeeds, ESLint clean on every changed path, **full offline suite 967
+passed / 0 failed** (+89 tests), negative-controlled three times with byte-identical restores.
+
+**What remains:**
+
+1. **Five live specs were updated but not run** — `logout`, `nurse-v3-dashboard`,
+   `patient-profile-settings`, `reception-profile` now click through the dialog. They need the shared project.
+2. **No manual click-through** of the twelve sign-out surfaces as each role. Ten minutes, worth doing before
+   the demo.
+3. **A decision is waiting on the phone rule.** Registration no longer accepts a foreign number: both forms now
+   use the South African rule and store one format (`+27 82 123 4567`). This reverses a documented decision
+   (a passport-holding patient may have a foreign number) in exchange for ending two divergent rules. Reverting
+   is a two-line change in `lib/profileValidation.ts` (`parseOptionalPhone`).
+4. **A judgement call to confirm:** the confirmation was also applied to `/login`'s "Sign out and use another
+   account", which is literally a sign-out control but exists to switch accounts.
+5. The SA ID century is still deliberately *not* resolved to one date — both candidate years are accepted and
+   the error message names both. See PR #52 for why.
+
+**Checked against production, read-only:** 27 of 98 patient names fail the new name rule, all on digits, all
+walk-in rows with **no login**, and no code path re-saves a patient's name — so no real person is locked out.
+
+> **Conflict warning:** this branch touches `docs/SESSION_HANDOFF.md`, as `fix/demo-polish` (PR #51) does.
+> Keep both checkpoints when merging; they describe different branches.
+
+---
+
+## Previous checkpoint — Admin-controlled staff onboarding (PR #50)
 
 **Date:** 2026-11-05 · **Branch:** `feat/admin-staff-invitations` · **Draft PR #50** (open, CLEAN, no reviews; do not merge until the destructive spec below has been run once). Branched from `main` `e061e9c`.
 

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { parsePhone, parseStaffName } from '@/lib/profileValidation'
 
 export type CheckInState = { error?: string; token?: string }
 
@@ -37,14 +38,26 @@ export async function createWalkinPatient(
   _prev: CreatePatientState,
   formData: FormData
 ): Promise<CreatePatientState> {
-  const fullName = String(formData.get('full_name') ?? '').trim()
-  const phone = String(formData.get('phone') ?? '').trim()
-  if (!fullName) return { error: 'Enter the patient’s full name.' }
+  /**
+   * The same name and phone rules the patient's own registration and profile forms use — this action creates a
+   * real profile row, and it was previously the one path into that table that checked nothing but "not empty".
+   * A walk-in created here is indistinguishable from a self-registered patient afterwards, so it cannot be the
+   * loose door: anything refused on /register has to be refused here too, or the rule only applies to patients
+   * who type their own details.
+   *
+   * Phone is optional (a walk-in may not give one) but, when given, is normalised to the one stored format so
+   * the number on the record can actually be dialled and can be matched against an existing patient.
+   */
+  const name = parseStaffName(String(formData.get('full_name') ?? ''))
+  if (name.error) return { error: name.error === 'Enter your full name.' ? 'Enter the patient’s full name.' : name.error }
+
+  const phone = parsePhone(String(formData.get('phone') ?? ''))
+  if (phone.error) return { error: phone.error }
 
   const supabase = await createClient()
   const { data, error } = await supabase.rpc('create_walkin_patient', {
-    p_full_name: fullName,
-    p_phone: phone || undefined,
+    p_full_name: name.value as string,
+    p_phone: phone.value ?? undefined,
   })
   if (error) return { error: error.message }
 

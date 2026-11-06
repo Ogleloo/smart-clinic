@@ -101,22 +101,100 @@ export function dobMatchesSaId(dob: string, id: string, today: string): boolean 
 }
 
 /**
- * Optional phone number for self-registration. Deliberately NOT South-African-only: a
- * patient may register with a passport and a foreign number. Checks only that it looks
- * like a phone number (digits, spaces, dashes, brackets, a leading +; 7–15 digits, the
- * E.164 maximum; 30 characters at most). The text is kept as typed — it is not reformatted.
+ * The message for a date of birth that contradicts the ID number beside it. It names the date the ID actually
+ * encodes, so the person can see which of the two fields is the wrong one — "these don't match" leaves them
+ * guessing which to change, and the ID is the field they are more likely to have mistyped.
+ *
+ * Both centuries are named when the ID is ambiguous (the number carries YYMMDD and never the century), because
+ * claiming one of them would be stating a fact the ID does not contain. Nothing here guesses: a person born in
+ * 1904 and a person born in 2004 have the same six digits, and only they know which is theirs.
+ *
+ * Callers reach this only once `dobMatchesSaId` has already said no.
+ */
+export function saIdDobMismatchMessage(id: string, today: string): string {
+  const candidates = saIdBirthDateCandidates(id, today)
+  if (candidates.length === 1) {
+    return `That ID number encodes a birth date of ${candidates[0]}, which doesn’t match the date of birth you entered.`
+  }
+  if (candidates.length > 1) {
+    return `That ID number encodes a birth date of ${candidates.join(' or ')} — neither matches the date of birth you entered.`
+  }
+  // No candidate survives (the encoded date is not real, or is in the future): the ID is the broken field, and
+  // its own checksum/date rule will have said so on id_number. Nothing specific can honestly be named here.
+  return 'That date of birth doesn’t match your South African ID number.'
+}
+
+/**
+ * Email address SYNTAX. This is the only thing it checks, and the only thing it can check: that the text is
+ * shaped like an address. It is not evidence that the mailbox exists, that anyone reads it, or that mail sent to
+ * it would arrive, and it must never be presented as any of those. Nothing in this system verifies an address.
+ *
+ * Lower-cased on the way through, because the stored value is compared — "Thabo@Example.com" and
+ * "thabo@example.com" are one mailbox, and storing both would make two accounts out of one person. The domain
+ * is genuinely case-insensitive; the local part technically is not, but no mail provider in practice treats it
+ * otherwise, and the alternative is duplicate accounts.
+ *
+ * 254 characters is the maximum length of an address that can be delivered (RFC 5321's limit on a path).
+ * Consecutive dots, and a dot at either edge of the local part or the domain, are refused: all are invalid in an
+ * address, and all are the shape of a typo rather than of a mailbox.
+ */
+const INVALID_EMAIL = 'Enter a valid email address.'
+
+export function parseEmail(raw: string): FieldResult {
+  const value = raw.trim().toLowerCase()
+  if (!value) return { value: null, error: 'Enter your email address.' }
+  if (/\s/.test(value)) return { value: null, error: 'An email address can’t contain spaces.' }
+  if (value.length > 254) return { value: null, error: 'That email address is too long (254 characters at most).' }
+
+  // Exactly one @, with something on each side.
+  if (!/^[^@]+@[^@]+$/.test(value)) return { value: null, error: INVALID_EMAIL }
+  const at = value.indexOf('@')
+  const local = value.slice(0, at)
+  const domain = value.slice(at + 1)
+
+  // These two are checked before the character sets below so the message can name the actual problem — "two
+  // dots in a row" is something a person can act on, where "not a valid address" leaves them re-reading it.
+  if (value.includes('..')) return { value: null, error: 'An email address can’t contain two dots in a row.' }
+  for (const part of [local, domain]) {
+    if (part.startsWith('.') || part.endsWith('.')) {
+      return { value: null, error: 'An email address can’t start or end a part with a dot.' }
+    }
+  }
+
+  // Local part: an allow-list, so angle brackets, quotes, ampersands, braces, backslashes and control
+  // characters cannot appear in a stored address. RFC 5322 does permit some of them inside a quoted local part;
+  // no mail provider issues such an address, and accepting markup into a value this app displays and logs is a
+  // worse trade than refusing an address nobody has.
+  if (!/^[a-z0-9._%+'-]+$/.test(local)) return { value: null, error: INVALID_EMAIL }
+
+  // Domain: dot-separated labels of letters, digits and hyphens, no label starting or ending with a hyphen, and
+  // an alphabetic top-level label of at least two characters.
+  const labels = domain.split('.')
+  if (labels.length < 2) return { value: null, error: INVALID_EMAIL }
+  for (const label of labels) {
+    if (!/^[a-z0-9-]+$/.test(label) || label.startsWith('-') || label.endsWith('-')) {
+      return { value: null, error: INVALID_EMAIL }
+    }
+  }
+  if (!/^[a-z]{2,}$/.test(labels[labels.length - 1]!)) return { value: null, error: INVALID_EMAIL }
+
+  return { value }
+}
+
+/**
+ * Optional South African phone number for self-registration — the same rule, and the same single stored format,
+ * as every other phone field in the app (see parsePhone below, which this delegates to).
+ *
+ * It used to be deliberately permissive, on the reasoning that a patient registering with a passport might have
+ * a foreign number. That is a real case and this rule does reject it: a +44 or +263 number cannot be registered
+ * any more. The trade was made on purpose — two different phone rules in one application meant the same person's
+ * number was accepted in one form and refused in the next, and was stored in whatever shape they happened to
+ * type, so no two records were comparable and none could be dialled from the record alone. A clinic phone number
+ * that cannot be called is not worth the flexibility. If international numbers are needed, the right fix is a
+ * country field, not a second rule.
  */
 export function parseOptionalPhone(raw: string): FieldResult {
-  const value = raw.trim()
-  if (!value) return { value: null }
-  if (value.length > 30 || !/^\+?[0-9 ()\-]+$/.test(value)) {
-    return { value: null, error: 'Enter a phone number using digits, spaces, dashes and brackets, like 082 123 4567.' }
-  }
-  const digits = value.replace(/\D/g, '').length
-  if (digits < 7 || digits > 15) {
-    return { value: null, error: 'That phone number should have between 7 and 15 digits.' }
-  }
-  return { value }
+  return parsePhone(raw)
 }
 
 /**
@@ -177,15 +255,36 @@ export function parseOptionalPassportNumber(raw: string): FieldResult {
 }
 
 /**
- * Staff display name. Trimmed and whitespace-collapsed; 2–120 characters;
- * no control characters (a newline in a name breaks every list it appears in).
+ * A person's name. Trimmed and whitespace-collapsed; 2–120 characters; no control characters (a newline in a
+ * name breaks every list it appears in); and an allow-listed character set: it must begin with a letter, after
+ * which only letters, combining marks, spaces, apostrophes, hyphens and full stops are accepted.
+ *
+ * An allow-list, not a block-list of whatever has caused trouble before. It refuses a "name" that is entirely
+ * digits or punctuation ("1234", "---"), and it refuses the angle brackets, ampersands, quotes and braces that
+ * markup and script are made of, so nothing tag-shaped can be stored in the first place. React escapes on
+ * output, and that is one layer; this is the other. A name is also read back by the public queue display and by
+ * SQL reports, neither of which is React, so input that is never dangerous is worth more than output escaping
+ * alone.
+ *
+ * Full stops are allowed because the clinic's own staff names carry titles — "Nurse Mabaso", and the "Sr. Botha"
+ * spelling still in the database. Combining marks are allowed because South African names are routinely
+ * accented, and `\p{L}` already covers the letters of every language the clinic serves rather than just A–Z.
+ * Both straight and typographic apostrophes are accepted, because phone keyboards produce the curly one.
  */
+const NAME_SHAPE = /^[\p{L}\p{M}][\p{L}\p{M} '’.-]*$/u
+
 export function parseStaffName(raw: string): FieldResult {
   const value = raw.replace(/\s+/g, ' ').trim()
   if (!value) return { value: null, error: 'Enter your full name.' }
   if (value.length < 2) return { value: null, error: 'Full name must be at least 2 characters.' }
   if (value.length > 120) return { value: null, error: 'Full name is too long (120 characters at most).' }
   if (/[\u0000-\u001f\u007f]/.test(value)) return { value: null, error: 'Full name contains characters that aren’t allowed.' }
+  if (!NAME_SHAPE.test(value)) {
+    return {
+      value: null,
+      error: 'A name can only contain letters, spaces, hyphens, apostrophes and full stops, and must start with a letter.',
+    }
+  }
   return { value }
 }
 

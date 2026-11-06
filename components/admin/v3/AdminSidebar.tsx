@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Headphones, LogOut, Phone } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { BrandMark } from '@/components/reception/ReceptionSidebar'
 import { ADMIN_NAV_ITEMS, isAdminActivePath } from './navItems'
 
@@ -52,15 +52,10 @@ export function AdminSidebar({ clinicName, clinicPhone }: AdminSidebarProps) {
             )
           })}
 
-          <form action={logout}>
-            <button
-              type="submit"
-              className="flex h-[52px] w-full items-center gap-3 rounded-md pl-5 pr-4 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
-            >
-              <LogOut size={22} aria-hidden />
-              Sign Out
-            </button>
-          </form>
+          <SignOutConfirm buttonClassName="flex h-[52px] w-full items-center gap-3 rounded-md pl-5 pr-4 text-base text-muted transition-colors hover:bg-paper hover:text-ink">
+            <LogOut size={22} aria-hidden />
+            Sign Out
+          </SignOutConfirm>
         </nav>
       </div>
 

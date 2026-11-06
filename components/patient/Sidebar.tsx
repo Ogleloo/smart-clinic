@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LifeBuoy, LogOut, Phone } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { SIDEBAR_ITEMS, formatBadge, isActivePath } from './navItems'
 
 interface SidebarProps {
@@ -52,16 +52,15 @@ export function Sidebar({ unreadCount, clinicName, clinicPhone }: SidebarProps) 
         })}
       </nav>
 
-      {/* Same Server Action as every other sign-out in the app: signOut() then redirect to /login. */}
-      <form action={logout} className="px-4">
-        <button
-          type="submit"
-          className="flex min-h-12 w-full items-center gap-3 rounded-md border-l-4 border-transparent px-3 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
-        >
-          <LogOut size={20} aria-hidden />
-          Sign Out
-        </button>
-      </form>
+      {/* Same Server Action as every other sign-out in the app: signOut() then redirect to /login — now behind a
+          confirmation step. */}
+      <SignOutConfirm
+        formClassName="px-4"
+        buttonClassName="flex min-h-12 w-full items-center gap-3 rounded-md border-l-4 border-transparent px-3 text-base text-muted transition-colors hover:bg-paper hover:text-ink"
+      >
+        <LogOut size={20} aria-hidden />
+        Sign Out
+      </SignOutConfirm>
 
       <div className="m-4 flex flex-col gap-3 rounded-lg bg-card-mint p-4">
         <p className="flex items-center gap-2 text-base font-semibold text-ink">

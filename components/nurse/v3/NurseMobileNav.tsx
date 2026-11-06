@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogOut } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { NURSE_NAV_ITEMS, isNurseActivePath } from './navItems'
 
 /**
@@ -39,16 +39,14 @@ export function NurseMobileNav() {
         })}
       </div>
 
-      <form action={logout} className="shrink-0">
-        <button
-          type="submit"
-          aria-label="Sign Out"
-          className="flex min-h-9 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-muted transition-colors hover:bg-paper hover:text-ink"
-        >
-          <LogOut size={16} aria-hidden />
-          <span className="sr-only sm:not-sr-only">Sign Out</span>
-        </button>
-      </form>
+      <SignOutConfirm
+        formClassName="shrink-0"
+        ariaLabel="Sign Out"
+        buttonClassName="flex min-h-9 items-center gap-1.5 rounded-md px-3 py-2 text-sm font-semibold text-muted transition-colors hover:bg-paper hover:text-ink"
+      >
+        <LogOut size={16} aria-hidden />
+        <span className="sr-only sm:not-sr-only">Sign Out</span>
+      </SignOutConfirm>
     </nav>
   )
 }
