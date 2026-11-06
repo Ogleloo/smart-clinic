@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useId, useRef, useState } from 'react'
 import { ChevronDown, Info, KeyRound, LogOut } from 'lucide-react'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import type { ActionState } from '@/app/actions/profile'
 import type { StaffProfileState } from '@/app/actions/receptionProfile'
 import { Button } from '@/components/ui/Button'
@@ -401,13 +401,12 @@ function QuickActions({ passwordAction }: { passwordAction: PasswordAction }) {
           {open && <PasswordPanel action={passwordAction} />}
         </div>
 
-        {/* Same logout() Server Action the sidebar uses. No chevron: Figma's would promise a menu that doesn't exist. */}
-        <form action={logout}>
-          <button type="submit" className={row}>
-            <LogOut size={22} aria-hidden className="shrink-0" />
-            Sign Out
-          </button>
-        </form>
+        {/* Same logout() Server Action the sidebar uses, behind the same confirmation step. No chevron: Figma's
+            would promise a menu that doesn't exist. */}
+        <SignOutConfirm buttonClassName={row}>
+          <LogOut size={22} aria-hidden className="shrink-0" />
+          Sign Out
+        </SignOutConfirm>
       </div>
     </section>
   )

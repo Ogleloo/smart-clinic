@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { LogOut, Pencil } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { logout } from '@/app/actions/auth'
+import { SignOutConfirm } from '@/components/ui/SignOutConfirm'
 import { buttonClasses } from '@/components/ui/button-styles'
 import { LinkButton } from '@/components/ui/LinkButton'
 import { PAGE_CLASS, PageHeader } from '@/components/patient/PageHeader'
@@ -91,12 +91,10 @@ export default async function ProfilePage() {
         </LinkButton>
 
         {/* Mobile only — from md up the sidebar carries Sign Out. */}
-        <form action={logout} className="w-full md:hidden">
-          <button type="submit" className={buttonClasses('danger-outline', true)}>
-            <LogOut size={20} className="mr-2" aria-hidden />
-            Sign Out
-          </button>
-        </form>
+        <SignOutConfirm formClassName="w-full md:hidden" buttonClassName={buttonClasses('danger-outline', true)}>
+          <LogOut size={20} className="mr-2" aria-hidden />
+          Sign Out
+        </SignOutConfirm>
       </section>
     </main>
   )
